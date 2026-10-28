@@ -3,6 +3,168 @@ version: "2"
 sql:
   - engine: postgresql
     schema: db/migrations
+    queries: db/queries/activity
+    gen:
+      go:
+        package: activitydb
+        out: internal/store/activitydb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/assets
+    gen:
+      go:
+        package: assetsdb
+        out: internal/store/assetsdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/badges
+    gen:
+      go:
+        package: badgesdb
+        out: internal/store/badgesdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
     queries: db/queries/core
     gen:
       go:
@@ -57,11 +219,173 @@ sql:
             go_type: encoding/json.RawMessage
   - engine: postgresql
     schema: db/migrations
+    queries: db/queries/feedback
+    gen:
+      go:
+        package: feedbackdb
+        out: internal/store/feedbackdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
     queries: db/queries/marketdata
     gen:
       go:
         package: marketdatadb
         out: internal/store/marketdatadb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/notifications
+    gen:
+      go:
+        package: notificationsdb
+        out: internal/store/notificationsdb
+        sql_package: pgx/v5
+        emit_interface: true
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: pg_catalog.timestamp
+            go_type: time.Time
+          - db_type: pg_catalog.timestamp
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries/push
+    gen:
+      go:
+        package: pushdb
+        out: internal/store/pushdb
         sql_package: pgx/v5
         emit_interface: true
         emit_pointers_for_null_types: true

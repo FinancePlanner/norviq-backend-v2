@@ -107,3 +107,7 @@ func errUnreadable() error {
 func errDisabled() error {
 	return httpx.Abort(http.StatusServiceUnavailable, DisabledReason)
 }
+
+func httpBadGateway(reason string) error {
+	return httpx.Abort(http.StatusBadGateway, reason)
+}

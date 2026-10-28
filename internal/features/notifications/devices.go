@@ -58,8 +58,10 @@ func (r *registrationRequest) validate() error {
 		name string
 		v    *string
 	}{
-		{"deviceToken", r.DeviceToken}, {"platform", r.Platform},
-		{"apnsEnvironment", r.APNSEnvironment}, {"authorizationStatus", r.AuthorizationStatus},
+		{"deviceToken", r.DeviceToken},
+		{"platform", r.Platform},
+		{"apnsEnvironment", r.APNSEnvironment},
+		{"authorizationStatus", r.AuthorizationStatus},
 	} {
 		if err := required(f.name, f.v); err != nil {
 			return err

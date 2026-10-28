@@ -82,7 +82,7 @@ func (h *handlers) inbox(c *echo.Context) error {
 	params := notificationsdb.NotificationInboxPageParams{
 		UserID:     s.UserID,
 		UnreadOnly: unreadOnly,
-		PageLimit:  int32(limit + 1), //nolint:gosec // limit is clamped to 1...100
+		PageLimit:  int32(limit + 1),
 	}
 	if kind := httpx.QueryString(c, "kind"); kind != nil {
 		if !inbox.ValidKind(*kind) {

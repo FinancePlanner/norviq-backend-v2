@@ -50,7 +50,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 }
 
 type handler struct {
-	d      *server.Deps
+	d        *server.Deps
 	searcher SymbolSearch
 }
 

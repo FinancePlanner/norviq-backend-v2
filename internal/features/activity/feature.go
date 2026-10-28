@@ -59,7 +59,7 @@ func list(c *echo.Context, q activitydb.Querier) error {
 	}
 	limit := min(max(httpx.IntOr(httpx.QueryOptionalInt(c, "limit"), 20), 1), 100)
 	rows, err := q.ListUserActivities(c.Request().Context(), activitydb.ListUserActivitiesParams{
-		UserID: s.UserID, Limit: int32(limit), //nolint:gosec // clamped to 1...100
+		UserID: s.UserID, Limit: int32(limit),
 	})
 	if err != nil {
 		return err

@@ -51,10 +51,14 @@ func TestActivities(t *testing.T) {
 	}
 
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	record(t, app, activity.Record{UserID: user, Type: activity.TypeStockAdded, Title: "Stock Added", Subtitle: "AAPL - Apple Inc.",
-		Amount: f64(5000), IsGrowth: true, Symbol: "chart.line.uptrend.xyaxis"}, base)
-	record(t, app, activity.Record{UserID: user, Type: activity.TypeExpenseRecorded, Title: "Expense Added", Subtitle: "Groceries",
-		Amount: f64(150), Symbol: "house.fill"}, base.Add(time.Minute))
+	record(t, app, activity.Record{
+		UserID: user, Type: activity.TypeStockAdded, Title: "Stock Added", Subtitle: "AAPL - Apple Inc.",
+		Amount: f64(5000), IsGrowth: true, Symbol: "chart.line.uptrend.xyaxis",
+	}, base)
+	record(t, app, activity.Record{
+		UserID: user, Type: activity.TypeExpenseRecorded, Title: "Expense Added", Subtitle: "Groceries",
+		Amount: f64(150), Symbol: "house.fill",
+	}, base.Add(time.Minute))
 	record(t, app, activity.Record{UserID: other, Type: activity.TypeStockAdded, Title: "Stock Added", Subtitle: "MSFT", Symbol: "x"}, base)
 
 	// "Get activities returns user activities" (newest first, own only)
@@ -110,4 +114,3 @@ func TestRecorderDedupesReferenceKey(t *testing.T) {
 		t.Fatalf("recorded %d times", n)
 	}
 }
-

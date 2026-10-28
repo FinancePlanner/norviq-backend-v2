@@ -424,8 +424,10 @@ func TestOnlyAnthropicMarkerIsStripped(t *testing.T) {
 
 func TestAnthropicWireRequest(t *testing.T) {
 	stub := newStub(t, stubReply{200, anthropicReply(`[{"type":"text","text":"Hello"}]`, "")})
-	client := &AnthropicClient{APIKey: "sk-ant-test", Model: "claude-haiku-5-5", BaseURL: stub.srv.URL, MaxTokens: 4096,
-		Options: AnthropicOptions{Effort: "low", ThinkingEnabled: true}, Logger: quiet}
+	client := &AnthropicClient{
+		APIKey: "sk-ant-test", Model: "claude-haiku-5-5", BaseURL: stub.srv.URL, MaxTokens: 4096,
+		Options: AnthropicOptions{Effort: "low", ThinkingEnabled: true}, Logger: quiet,
+	}
 	msg, err := client.Chat(context.Background(), []Message{Text("system", "S"), Text("user", "Hi")}, nil, "")
 	if err != nil {
 		t.Fatal(err)
@@ -461,8 +463,10 @@ func TestAnthropicTruncationResumes(t *testing.T) {
 		stubReply{200, anthropicReply(`[{"type":"thinking","thinking":"","signature":"s"},{"type":"text","text":"Your biggest category"}]`, "max_tokens")},
 		stubReply{200, anthropicReply(`[{"type":"text","text":" was rent."}]`, "")},
 	)
-	client := &AnthropicClient{APIKey: "k", Model: "claude-haiku-5-5", BaseURL: stub.srv.URL, MaxTokens: 4096,
-		Options: thinkingOn, Logger: quiet}
+	client := &AnthropicClient{
+		APIKey: "k", Model: "claude-haiku-5-5", BaseURL: stub.srv.URL, MaxTokens: 4096,
+		Options: thinkingOn, Logger: quiet,
+	}
 	msg, err := client.Chat(context.Background(), []Message{Text("user", "Biggest category?")}, nil, "")
 	if err != nil {
 		t.Fatal(err)

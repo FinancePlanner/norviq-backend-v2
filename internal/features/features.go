@@ -10,7 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/activity"
+	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
+	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/server"
 )
 
@@ -19,6 +24,14 @@ import (
 func All() []server.Feature {
 	return []server.Feature{
 		billing.Feature{},
+		// Earnings preferences wait for billing's premium gate
+		// (notifications.Feature.Premium); assets search waits for market
+		// data (assets.Feature.Search). Both stay on Vapor until wired.
+		notifications.Feature{},
+		activity.Feature{},
+		badges.Feature{},
+		feedback.Feature{},
+		assets.Feature{},
 	}
 }
 

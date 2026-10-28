@@ -15,6 +15,8 @@ import (
 	"norviq-api/internal/auth"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
+
+	"github.com/labstack/echo/v5"
 )
 
 // RevenueCatBaseURL is the host Vapor called, hard-coded there too.
@@ -133,13 +135,15 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 
 	// routes.grouped(ScopedBearerAuthenticator(), SessionToken.guardMiddleware()),
 	// then ScopeRequirementMiddleware per route.
-	billing := r.V1.Group("/billing", d.Auth.Scoped(), auth.Guard())
-	read := auth.RequireScope(auth.ScopeBillingRead)
-	write := auth.RequireScope(auth.ScopeBillingWrite)
-	billing.GET("/me", h.me, read)
-	billing.POST("/restore", h.restore, write)
-	billing.POST("/management-url", h.managementURL, write)
-	billing.POST("/coupon/redeem", h.redeemCoupon, write)
+	// Per-route rather than group middleware: a group's Use registers
+	// catch-all not-found routes under /v1/billing.
+	billing := r.V1.Group("/billing")
+	read := []echo.MiddlewareFunc{d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopeBillingRead)}
+	write := []echo.MiddlewareFunc{d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopeBillingWrite)}
+	billing.GET("/me", h.me, read...)
+	billing.POST("/restore", h.restore, write...)
+	billing.POST("/management-url", h.managementURL, write...)
+	billing.POST("/coupon/redeem", h.redeemCoupon, write...)
 
 	r.Root.POST("/webhooks/revenuecat", h.revenueCatWebhook)
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -62,7 +63,17 @@ const resetSentMessage = "If the account exists, a reset code has been sent."
 
 // keyNotFound reproduces the reason Vapor gives for a missing required key.
 func keyNotFound(key string) *httpx.Error {
-	return httpx.BadRequest(fmt.Sprintf(`No such key '%s' at path ''. No value associated with key CodingKeys(stringValue: "%s", intValue: nil) ("%s").`, key, key, key))
+	return keyNotFoundDesc(key, fmt.Sprintf(`No value associated with key CodingKeys(stringValue: "%s", intValue: nil) ("%s")`, key, key))
+}
+
+// keyNotFoundDesc is keyNotFound for DTOs that throw their own description.
+func keyNotFoundDesc(key, description string) *httpx.Error {
+	return httpx.BadRequest(fmt.Sprintf("No such key '%s' at path ''. %s.", key, description))
+}
+
+// badDate is SharedDateDecoder's failure for a missing or unparseable date.
+func badDate(key string) *httpx.Error {
+	return httpx.BadRequest(fmt.Sprintf("Value was not of type 'Date' at path '%s'. Date must be an ISO8601 string or seconds since Apple reference date.", key))
 }
 
 // requireStrings returns the first missing key, in declaration order.
@@ -82,7 +93,7 @@ type registerRequest struct {
 	Password        *string       `json:"password"`
 	ConfirmPassword *string       `json:"confirmPassword"`
 	Email           *string       `json:"email"`
-	DateOfBirth     *apijson.Time `json:"dateOfBirth"`
+	DateOfBirth     json.RawMessage `json:"dateOfBirth"`
 	TrialDays       *int          `json:"trialDays"`
 	CouponCode      *string       `json:"couponCode"`
 }
@@ -98,13 +109,17 @@ func (s *service) register(c *echo.Context) error {
 		return err
 	}
 	if p.ConfirmPassword == nil {
-		return keyNotFound("confirmPassword")
+		return keyNotFoundDesc("confirmPassword", "Missing confirmPassword")
 	}
 	if err := requireStrings("email", p.Email); err != nil {
 		return err
 	}
-	if p.DateOfBirth == nil {
-		return keyNotFound("date_of_birth")
+	if len(p.DateOfBirth) == 0 {
+		return badDate("date_of_birth")
+	}
+	dob, err := apijson.ParseTimeJSON(p.DateOfBirth)
+	if err != nil {
+		return badDate("date_of_birth")
 	}
 	ctx := c.Request().Context()
 	username := strings.ToLower(strings.TrimSpace(*p.Username))
@@ -125,7 +140,7 @@ func (s *service) register(c *echo.Context) error {
 		return err
 	}
 	now := s.now()
-	if p.DateOfBirth.After(now) {
+	if dob.After(now) {
 		return httpx.BadRequest("Date of birth cannot be in the future")
 	}
 	if u, err := s.users.ByUsername(ctx, nil, username); err != nil || u != nil {
@@ -139,7 +154,7 @@ func (s *service) register(c *echo.Context) error {
 		return err
 	}
 	u, err := s.users.Create(ctx, nil, users.NewUser{
-		Username: username, Email: email, PasswordHash: hash, PasswordSetAt: &now, DateOfBirth: p.DateOfBirth.Time,
+		Username: username, Email: email, PasswordHash: hash, PasswordSetAt: &now, DateOfBirth: dob,
 	}, now)
 	if err != nil {
 		s.log.Error("auth.register create_user_failed", "error", err)

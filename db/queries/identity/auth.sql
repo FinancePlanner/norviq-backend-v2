@@ -90,3 +90,7 @@ DELETE FROM password_reset_tokens WHERE expires_at <= $1;
 
 -- name: DeleteRefreshTokensDeadBy :execrows
 DELETE FROM refresh_tokens WHERE expires_at <= $1 OR revoked_at IS NOT NULL;
+
+-- name: EntitlementLevelByUser :one
+-- DefaultEntitlementResolver's Entitlement.query(...).first(): no ORDER BY.
+SELECT level FROM entitlements WHERE user_id = $1 LIMIT 1;

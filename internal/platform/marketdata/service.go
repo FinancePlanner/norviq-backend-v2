@@ -37,7 +37,6 @@ type Service struct {
 	Now func() time.Time
 
 	basicFinancialsFlight singleflight.Group
-	overviewFlight        singleflight.Group
 }
 
 // NewFromSettings builds the service the way Vapor's configure.swift did:

@@ -1,0 +1,31 @@
+# RevenueCat webhook, legacy shared-secret auth. Needs a second Vapor and v2
+# both started with REVENUECAT_WEBHOOK_SECRET=parity-webhook-secret (and no
+# HMAC secret); the shared :8081 has none and answers 503. Accepted events
+# are idempotent by event id, so the second backend sees a duplicate: the
+# status/body match here, and DB side effects are compared separately with
+# distinct ids and users (see the billing port report).
+{"name":"wh-missing-auth","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-1","type":"TEST","app_user_id":"x"}}}
+{"name":"wh-wrong-auth","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-1","type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"nope"}}
+{"name":"wh-bearer-prefix-rejected","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-1","type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"Bearer parity-webhook-secret"}}
+{"name":"wh-blank-auth","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-1","type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"   "}}
+{"name":"wh-auth-before-decode","method":"POST","path":"/webhooks/revenuecat","body":[1],"headers":{"Authorization":"nope"}}
+{"name":"wh-missing-event","method":"POST","path":"/webhooks/revenuecat","body":{},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-event-null","method":"POST","path":"/webhooks/revenuecat","body":{"event":null},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-event-array","method":"POST","path":"/webhooks/revenuecat","body":{"event":[]},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-missing-id","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-missing-type","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-2","app_user_id":"x"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-missing-app-user","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-2","type":"TEST"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-id-number","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":5,"type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-expiration-string","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-2","type":"TEST","app_user_id":"x","expiration_at_ms":"soon"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-expiration-fraction","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-2","type":"TEST","app_user_id":"x","expiration_at_ms":1.5}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-store-number","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-2","type":"TEST","app_user_id":"x","store":1}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-no-content-type","method":"POST","path":"/webhooks/revenuecat","headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-text-plain","method":"POST","path":"/webhooks/revenuecat","body":{"event":{}},"headers":{"Authorization":"parity-webhook-secret","Content-Type":"text/plain"}}
+{"name":"wh-empty-json","method":"POST","path":"/webhooks/revenuecat","headers":{"Authorization":"parity-webhook-secret","Content-Type":"application/json"}}
+{"name":"wh-test-event-non-uuid-user","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-test-1","type":"TEST","app_user_id":"$RCAnonymousID:abc"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-auth-trimmed","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-test-2","type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"  parity-webhook-secret  "}}
+{"name":"wh-unknown-type","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-unknown-1","type":"SUBSCRIBER_ALIAS","app_user_id":"0B111000-0000-4000-8000-000000000001"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-initial-purchase","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-ip-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-000000000001","product_id":"pro_monthly","original_transaction_id":"pw-txn-1","expiration_at_ms":1924992000000,"store":"APP_STORE"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-duplicate-event","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-ip-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-000000000001","product_id":"pro_monthly"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"wh-unknown-uuid-user","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-fk-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-0000000000FF","product_id":"pro_monthly"}},"headers":{"Authorization":"parity-webhook-secret"}}
+{"name":"me-after-purchase","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000001"}

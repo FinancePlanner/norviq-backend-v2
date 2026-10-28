@@ -10,6 +10,7 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/platform/ai"
+	"norviq-api/internal/platform/discord"
 	"norviq-api/internal/server"
 )
 
@@ -24,7 +25,7 @@ var (
 	platforms = map[*server.Deps]*ai.Platform{}
 	// newPlatform builds the platform; tests replace it to inject stubs.
 	newPlatform = func(d *server.Deps) (*ai.Platform, error) {
-		return ai.New(ai.Options{
+		p, err := ai.New(ai.Options{
 			Env:        ai.OSEnv,
 			Logger:     d.Logger,
 			Production: d.Config.IsProduction(),
@@ -32,6 +33,13 @@ var (
 			Redis:      d.Redis,
 			HTTP:       &http.Client{},
 		})
+		if err != nil {
+			return nil, err
+		}
+		// Chain-exhausted and free-tier alerts go to the operator Discord
+		// webhook, as in Vapor; an unset DISCORD_WEBHOOK_URL skips them.
+		p.SetAlerter(discord.FromEnv(d.Logger))
+		return p, nil
 	}
 )
 
@@ -40,7 +48,7 @@ var (
 // alert throttle and one cap. Other domains plug in after building it:
 //
 //	p.Plans = <billing entitlement resolver>   // Pro vs free routing
-//	p.SetAlerter(<Discord sender>)            // chain-exhausted alerts
+//	p.SetAlerter(<Discord sender>)            // already wired to discord.FromEnv
 //	p.Cipher = <identity's credential cipher> // optional; the built-in one is compatible
 func Platform(d *server.Deps) (*ai.Platform, error) {
 	mu.Lock()

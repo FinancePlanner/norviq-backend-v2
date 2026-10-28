@@ -98,7 +98,7 @@ func (s *service) providerClient(provider, redirectURI string) (oauthProvider, e
 			return p, nil
 		}
 	}
-	if p, ok := s.login[provider]; ok {
+	if p, ok := s.native[provider]; ok {
 		return p, nil
 	}
 	return nil, httpx.Abort(http.StatusServiceUnavailable, fmt.Sprintf("OAuth provider '%s' is not configured", provider))

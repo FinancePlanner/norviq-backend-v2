@@ -48,7 +48,7 @@ type service struct {
 	http     *http.Client
 	now      func() time.Time
 	signer   *auth.Signer
-	login    map[string]oauthProvider // native (custom scheme) redirect clients
+	native   map[string]oauthProvider // native (custom scheme) redirect clients
 	web      map[string]oauthProvider // http(s) redirect clients
 	webauthn *webAuthnConfig
 }
@@ -96,7 +96,7 @@ func (f Feature) build(d *server.Deps) (*service, error) {
 	if f.Endpoints != nil {
 		endpoints = *f.Endpoints
 	}
-	s.login, s.web = buildProviders(cfg, endpoints, s.http, d.Logger)
+	s.native, s.web = buildProviders(cfg, endpoints, s.http, d.Logger)
 	s.webauthn = cfg.WebAuthn
 	if s.webauthn == nil {
 		d.Logger.Warn("WebAuthn is disabled. Configure WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS.")

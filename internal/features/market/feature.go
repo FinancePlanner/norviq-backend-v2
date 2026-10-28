@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"norviq-api/internal/auth"
@@ -57,11 +58,10 @@ func (Feature) Name() string { return "market" }
 func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	svc := f.Service
 	if svc == nil {
-		settings, err := config.Load[marketdata.Settings]()
-		if err != nil {
+		var err error
+		if svc, err = SharedService(d); err != nil {
 			return err
 		}
-		svc = marketdata.NewFromSettings(settings, marketdatadb.New(d.DB), d.Redis, &http.Client{}, d.Logger)
 	}
 	h := &handlers{svc: svc, premium: f.Premium}
 
@@ -121,6 +121,25 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g.GET("/price-chart/compare", h.priceChartComparison)
 	g.GET("/price-chart/:symbol", h.priceChart)
 	return nil
+}
+
+var shared sync.Map // *server.Deps -> *marketdata.Service
+
+// SharedService returns the environment-configured market data service for
+// d, building it once, so every feature on one server shares its in-flight
+// de-duplication. Other domains (news, brief, macro, assets search) should
+// take their market data from here.
+func SharedService(d *server.Deps) (*marketdata.Service, error) {
+	if v, ok := shared.Load(d); ok {
+		return v.(*marketdata.Service), nil
+	}
+	settings, err := config.Load[marketdata.Settings]()
+	if err != nil {
+		return nil, err
+	}
+	svc := marketdata.NewFromSettings(settings, marketdatadb.New(d.DB), d.Redis, &http.Client{}, d.Logger)
+	v, _ := shared.LoadOrStore(d, svc)
+	return v.(*marketdata.Service), nil
 }
 
 type handlers struct {

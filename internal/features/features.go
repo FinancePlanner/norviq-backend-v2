@@ -13,7 +13,9 @@ import (
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
+	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/server"
 )
@@ -30,6 +32,9 @@ func All() []server.Feature {
 		badges.Feature{},
 		feedback.Feature{},
 		assets.Feature{},
+		// Pro-gated market routes wait for billing (market.Feature.Premium).
+		market.Feature{},
+		earnings.Feature{},
 	}
 }
 

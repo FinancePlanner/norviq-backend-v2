@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"norviq-api/internal/features/activity"
+	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/feedback"
@@ -30,6 +31,7 @@ func All() []server.Feature {
 		badges.Feature{},
 		feedback.Feature{},
 		assets.Feature{},
+		aiplatform.Feature{},
 	}
 }
 

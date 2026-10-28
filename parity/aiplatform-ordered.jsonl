@@ -1,0 +1,8 @@
+# Order-dependent AI platform cases: the first backend to run creates or
+# deletes, so the second sees 200 / 404. Run twice, once per order, after
+# resetting user a1a1a1a1-...-002's rows (see the port report):
+#   DELETE FROM user_ai_provider_credentials WHERE user_id='a1a1a1a1-0000-4000-8000-000000000002';
+#   INSERT ... id 'c3c3c3c3-0000-4000-8000-000000000001' provider 'openai' for that user;
+# Expected: the first backend answers 201 / 204, the second 200 / 404.
+{"name":"creds-create-201","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"anthropic","label":"Mine","apiKey":"sk-ant-test-0001","baseURL":"https://api.anthropic.com/v1","defaultModel":"claude-x","verify":false}}
+{"name":"creds-delete-204","method":"DELETE","path":"/v1/ai/credentials/c3c3c3c3-0000-4000-8000-000000000001","as":"a1a1a1a1-0000-4000-8000-000000000002"}

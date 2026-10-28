@@ -1,0 +1,49 @@
+# AI platform: consent and bring-your-own-key credential routes.
+# Fixtures (scratch DB norviq): users a1a1a1a1-0000-4000-8000-00000000000{1,2,3};
+# credential rows b2b2b2b2-0000-4000-8000-00000000000{1,2,3} (blocked base URL,
+# plaintext key, unknown provider). See the port report for the seed SQL.
+# Run with -ignore requestId,updatedAt,createdAt,consentedAt-free cases as noted.
+{"name":"consent-get-never","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-000000000003"}
+{"name":"consent-get-unauth","path":"/v1/users/ai-consent"}
+{"name":"consent-get-unknown-user","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-0000000000ff"}
+{"name":"consent-get-bad-pat","path":"/v1/users/ai-consent","headers":{"Authorization":"Bearer nvq_pat_doesnotexist"}}
+{"name":"consent-grant","method":"POST","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"consent-get-granted","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"consent-grant-again-keeps-time","method":"POST","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"consent-withdraw","method":"DELETE","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-000000000002"}
+{"name":"consent-grant-pat-401","method":"POST","path":"/v1/users/ai-consent","headers":{"Authorization":"Bearer nvq_pat_doesnotexist"}}
+{"name":"consent-withdraw-unauth","method":"DELETE","path":"/v1/users/ai-consent"}
+{"name":"consent-grant-unknown-user","method":"POST","path":"/v1/users/ai-consent","as":"a1a1a1a1-0000-4000-8000-0000000000ff"}
+{"name":"creds-list","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"creds-list-fixtures","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000003"}
+{"name":"creds-list-unauth","path":"/v1/ai/credentials"}
+{"name":"creds-list-pat-401","path":"/v1/ai/credentials","headers":{"Authorization":"Bearer nvq_pat_doesnotexist"}}
+{"name":"creds-upsert-existing-200","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000001","body":{"provider":"OpenAI","label":"  My key  ","api_key":"sk-test-abcdefgh1234","verify":false}}
+{"name":"creds-create-unauth","method":"POST","path":"/v1/ai/credentials","body":{"provider":"openai","label":"x","apiKey":"k"}}
+{"name":"creds-create-missing-provider","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"label":"x","apiKey":"k"}}
+{"name":"creds-create-missing-apikey","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"x"}}
+{"name":"creds-create-null-provider","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":null,"label":"x","apiKey":"k"}}
+{"name":"creds-create-provider-number","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":1,"label":"x","apiKey":"k"}}
+{"name":"creds-create-verify-string","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"x","apiKey":"k","verify":"yes"}}
+{"name":"creds-create-array-body","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":[]}
+{"name":"creds-create-no-content-type","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002"}
+{"name":"creds-create-unknown-provider","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"Hermes","label":"x","apiKey":"k","verify":false}}
+{"name":"creds-create-empty-label","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"   ","apiKey":"k","verify":false}}
+{"name":"creds-create-empty-key","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"x","apiKey":"  ","verify":false}}
+{"name":"creds-create-key-whitespace","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"x","apiKey":"sk-test abcd","verify":false}}
+{"name":"creds-create-compatible-no-base","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"compatible","label":"x","apiKey":"k","verify":false}}
+{"name":"creds-create-compatible-http","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"compatible","label":"x","apiKey":"k","baseURL":"http://example.com/v1","defaultModel":"m","verify":false}}
+{"name":"creds-create-compatible-metadata","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"compatible","label":"x","apiKey":"k","base_url":"https://169.254.169.254/v1","default_model":"m","verify":false}}
+{"name":"creds-create-compatible-localhost","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"compatible","label":"x","apiKey":"k","baseURL":"http://localhost:11434/v1","defaultModel":"m","verify":false}}
+{"name":"creds-create-compatible-no-model","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"compatible","label":"x","apiKey":"k","baseURL":"https://example.com/v1","defaultModel":"  ","verify":false}}
+{"name":"creds-create-openai-blocked-base","method":"POST","path":"/v1/ai/credentials","as":"a1a1a1a1-0000-4000-8000-000000000002","body":{"provider":"openai","label":"x","apiKey":"k","baseURL":"https://box.local/v1","verify":false}}
+{"name":"verify-invalid-id","method":"POST","path":"/v1/ai/credentials/abc/verify","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"verify-not-found","method":"POST","path":"/v1/ai/credentials/A1A1A1A1-0000-4000-8000-000000000009/verify","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"verify-other-users-row","method":"POST","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000001/verify","as":"a1a1a1a1-0000-4000-8000-000000000002"}
+{"name":"verify-blocked-base","method":"POST","path":"/v1/ai/credentials/B2B2B2B2-0000-4000-8000-000000000001/verify","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"verify-plaintext-row","method":"POST","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000002/verify","as":"a1a1a1a1-0000-4000-8000-000000000003"}
+{"name":"verify-unknown-provider-row","method":"POST","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000003/verify","as":"a1a1a1a1-0000-4000-8000-000000000003"}
+{"name":"verify-unauth","method":"POST","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000003/verify"}
+{"name":"delete-invalid-id","method":"DELETE","path":"/v1/ai/credentials/not-a-uuid","as":"a1a1a1a1-0000-4000-8000-000000000001"}
+{"name":"delete-not-found","method":"DELETE","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000001","as":"a1a1a1a1-0000-4000-8000-000000000002"}
+{"name":"delete-unauth","method":"DELETE","path":"/v1/ai/credentials/b2b2b2b2-0000-4000-8000-000000000001"}

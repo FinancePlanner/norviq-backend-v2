@@ -1,0 +1,7 @@
+# Decode failures. Swift's DecodingError reason is Foundation text, so run with -ignore requestId,reason.
+{"name": "device-register-missing-status", "method": "PUT", "path": "/v1/notifications/apns/device", "as": "0e000000-0000-4000-8000-0000000000a1", "body": {"deviceToken": "t", "platform": "ios", "apnsEnvironment": "development"}}
+{"name": "device-register-bad-platform", "method": "PUT", "path": "/v1/notifications/apns/device", "as": "0e000000-0000-4000-8000-0000000000a1", "body": {"deviceToken": "t", "platform": "android", "apnsEnvironment": "development", "authorizationStatus": "authorized"}}
+{"name": "device-register-bad-environment", "method": "PUT", "path": "/v1/notifications/apns/device", "as": "0e000000-0000-4000-8000-0000000000a1", "body": {"deviceToken": "t", "platform": "ios", "apnsEnvironment": "sandbox", "authorizationStatus": "authorized"}}
+{"name": "device-deactivate-missing-token", "method": "POST", "path": "/v1/notifications/apns/device/deactivate", "as": "0e000000-0000-4000-8000-0000000000a1", "body": {}}
+{"name": "inbox-read-missing-flag", "method": "PUT", "path": "/v1/notifications/inbox/0e000000-0000-4000-8000-000000000e04/read", "as": "0e000000-0000-4000-8000-0000000000a1", "body": {}}
+{"name": "feedback-missing-message", "method": "POST", "path": "/v1/feedback", "as": "0e000000-0000-4000-8000-0000000000a4", "body": {"topic": "t"}}

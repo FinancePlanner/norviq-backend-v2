@@ -47,7 +47,8 @@ type Job interface {
 
 // AllJobs returns every ported background job.
 func AllJobs() []Job {
-	return []Job{}
+	return []Job{
+		market.HistoryIngestionJob{},}
 }
 
 // Jobs tracks running jobs for shutdown.

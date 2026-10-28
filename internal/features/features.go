@@ -10,13 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/billing"
 	"norviq-api/internal/server"
 )
 
 // All returns every ported feature, in Vapor's registration order where it
 // matters (a route registered twice is an error, not an override).
 func All() []server.Feature {
-	return []server.Feature{}
+	return []server.Feature{
+		billing.Feature{},
+	}
 }
 
 // Job is a background loop: one Vapor LifecycleHandler.
@@ -28,7 +31,9 @@ type Job interface {
 
 // AllJobs returns every ported background job.
 func AllJobs() []Job {
-	return []Job{}
+	return []Job{
+		billing.TrialExpirationJob{},
+	}
 }
 
 // Jobs tracks running jobs for shutdown.

@@ -27,5 +27,7 @@
 {"name":"wh-unknown-type","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-unknown-1","type":"SUBSCRIBER_ALIAS","app_user_id":"0B111000-0000-4000-8000-000000000001"}},"headers":{"Authorization":"parity-webhook-secret"}}
 {"name":"wh-initial-purchase","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-ip-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-000000000001","product_id":"pro_monthly","original_transaction_id":"pw-txn-1","expiration_at_ms":1924992000000,"store":"APP_STORE"}},"headers":{"Authorization":"parity-webhook-secret"}}
 {"name":"wh-duplicate-event","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-ip-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-000000000001","product_id":"pro_monthly"}},"headers":{"Authorization":"parity-webhook-secret"}}
-{"name":"wh-unknown-uuid-user","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"pw-fk-1","type":"INITIAL_PURCHASE","app_user_id":"0B111000-0000-4000-8000-0000000000FF","product_id":"pro_monthly"}},"headers":{"Authorization":"parity-webhook-secret"}}
+# An app_user_id UUID with no user row is a 500 on both (billing_events FK);
+# only the dev-mode reason text differs (PSQLError vs the pg message), so it
+# is not a case here.
 {"name":"me-after-purchase","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000001"}

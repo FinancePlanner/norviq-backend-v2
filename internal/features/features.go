@@ -10,13 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/server"
 )
 
 // All returns every ported feature, in Vapor's registration order where it
 // matters (a route registered twice is an error, not an override).
 func All() []server.Feature {
-	return []server.Feature{}
+	return []server.Feature{
+		aiplatform.Feature{},
+	}
 }
 
 // Job is a background loop: one Vapor LifecycleHandler.

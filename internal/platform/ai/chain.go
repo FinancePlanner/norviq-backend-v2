@@ -66,10 +66,10 @@ type Rung struct {
 // limit, an outage, a timeout or a 200 with no usable output demotes to the
 // next rung.
 type FallbackClient struct {
-	Rungs    []Rung
-	Logger   *slog.Logger
-	Alerts   *AlertThrottle
-	Alerter  Alerter
+	Rungs   []Rung
+	Logger  *slog.Logger
+	Alerts  *AlertThrottle
+	Alerter Alerter
 }
 
 // Chat walks the chain.

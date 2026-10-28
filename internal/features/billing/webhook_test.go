@@ -236,6 +236,7 @@ func TestWebhookDecodeErrors(t *testing.T) {
 		`{"event":{"type":"X","app_user_id":"u"}}`:                                    `No such key 'id' at path 'event'.`,
 		`{"event":{"id":"1","type":"X"}}`:                                             `No such key 'appUserId' at path 'event'.`,
 		`{"event":{"id":"1","type":"X","app_user_id":"u","expiration_at_ms":"soon"}}`: `Value was not of type 'Int64' at path 'event.expirationAtMs'.`,
+		`{"event":{"id":"1","type":"X","app_user_id":"u","expiration_at_ms":1.5}}`:    `Code=3840 \"Number 1.5 is not representable in Swift.\"`,
 	}
 	for body, want := range cases {
 		r := app.raw("/webhooks/revenuecat", h, body)

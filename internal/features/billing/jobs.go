@@ -9,6 +9,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/platform/joblock"
 	"norviq-api/internal/server"
 )
 
@@ -36,6 +37,11 @@ func IntervalFromEnv() time.Duration {
 	return time.Duration(max(1, minutes)) * time.Minute
 }
 
+// lockName is the advisory lock each sweep runs under, so only one v2
+// replica sweeps at a time. Vapor's job took no lock (it only had an
+// in-process NSLock), so this does not exclude Vapor's own copy.
+const lockName = "trial_expiration"
+
 // Run sweeps immediately, then once per interval, until ctx ends.
 func (j TrialExpirationJob) Run(ctx context.Context, d *server.Deps) {
 	interval := j.Interval
@@ -46,7 +52,9 @@ func (j TrialExpirationJob) Run(ctx context.Context, d *server.Deps) {
 	d.Logger.Info("trial_expiration_job starting")
 	defer d.Logger.Info("trial_expiration_job shutdown")
 	for {
-		RunTrialExpirationOnce(ctx, d, svc)
+		joblock.RunAsLeader(ctx, d.DB, d.Logger, lockName, func(ctx context.Context) {
+			RunTrialExpirationOnce(ctx, d, svc)
+		})
 		select {
 		case <-ctx.Done():
 			return

@@ -185,11 +185,13 @@ func (o object) optionalInt64(key string) (*int64, error) {
 	}
 	v, err := n.Int64()
 	if err != nil {
-		// Foundation accepts 12.0 but not 12.5 or out-of-range values.
+		// Foundation accepts 12.0 but not 12.5 or out-of-range values, and
+		// reports them as a whole-document corruption (Darwin wording).
 		f, ferr := n.Float64()
 		if ferr != nil || f != float64(int64(f)) {
+			msg := fmt.Sprintf("Number %s is not representable in Swift.", n.String())
 			return nil, httpx.BadRequest(fmt.Sprintf(
-				"Data corrupted at path '%s'. Parsed JSON number <%s> does not fit in Int64.", path, n.String()))
+				"Data corrupted at path ''. The given data was not valid JSON. Underlying error: Error Domain=NSCocoaErrorDomain Code=3840 %q UserInfo={NSDebugDescription=%s}.", msg, msg))
 		}
 		v = int64(f)
 	}

@@ -2,7 +2,7 @@
 // (password, MFA, refresh, OAuth sign-in with Apple/Google/X, passkeys),
 // PersonalAccessTokenController, TokenIntrospectionController, the OAuth 2.1
 // authorization server for MCP clients and its RFC 8414 metadata,
-// UserProfileController, AIConsentController and OnboardingController.
+// UserProfileController and OnboardingController.
 // AuthTokenCleanup runs as the "auth-token-cleanup" job.
 package identity
 
@@ -184,11 +184,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	u.PUT("/:id", s.updateProfileByID, firstParty...)
 	u.GET("", s.getProfile, append(scoped[:2:2], auth.RequireScope(auth.ScopeSettingsRead))...)
 
-	// AIConsentController. Registered here because GET /v1/users/:id would
-	// otherwise capture /v1/users/ai-consent.
-	u.GET("/ai-consent", s.aiConsentShow, append(scoped[:2:2], auth.RequireScope(auth.ScopeSettingsRead))...)
-	u.POST("/ai-consent", s.aiConsentGrant, firstParty...)
-	u.DELETE("/ai-consent", s.aiConsentWithdraw, firstParty...)
+	// AIConsentController (/v1/users/ai-consent) belongs to the aiplatform
+	// feature; echo prefers its static path over GET /v1/users/:id.
 
 	// OnboardingController.
 	ob := r.V1.Group("/onboarding")

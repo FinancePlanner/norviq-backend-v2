@@ -10,77 +10,9 @@ import (
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/onboarding"
 	"norviq-api/internal/store/onboardingdb"
-	"norviq-api/internal/store/usersdb"
 
 	"github.com/labstack/echo/v5"
 )
-
-// --- AI consent ---------------------------------------------------------------
-
-// aiConsentResponse always carries the key, null included.
-type aiConsentResponse struct {
-	ConsentedAt *string `json:"consentedAt"`
-}
-
-func consentBody(t *apijson.Time) aiConsentResponse {
-	if t == nil {
-		return aiConsentResponse{}
-	}
-	s := apijson.FormatTime(t.Time)
-	return aiConsentResponse{ConsentedAt: &s}
-}
-
-func (s *service) aiConsentShow(c *echo.Context) error {
-	sess, err := auth.Require(c)
-	if err != nil {
-		return err
-	}
-	u, err := s.requireUser(c.Request().Context(), sess.UserID, "User not found")
-	if err != nil {
-		return err
-	}
-	return httpx.OK(c, consentBody(apijson.TimePtr(u.AiDataConsentAt)))
-}
-
-// aiConsentGrant keeps the first timestamp: it records when the user first agreed.
-func (s *service) aiConsentGrant(c *echo.Context) error {
-	sess, err := auth.Require(c)
-	if err != nil {
-		return err
-	}
-	ctx := c.Request().Context()
-	u, err := s.requireUser(ctx, sess.UserID, "User not found")
-	if err != nil {
-		return err
-	}
-	if u.AiDataConsentAt == nil {
-		now := s.now()
-		if err := s.users.Q(nil).SetUserAIConsent(ctx, usersdb.SetUserAIConsentParams{ID: u.ID, AiDataConsentAt: &now, UpdatedAt: &now}); err != nil {
-			return err
-		}
-		u.AiDataConsentAt = &now
-	}
-	return httpx.OK(c, consentBody(apijson.TimePtr(u.AiDataConsentAt)))
-}
-
-func (s *service) aiConsentWithdraw(c *echo.Context) error {
-	sess, err := auth.Require(c)
-	if err != nil {
-		return err
-	}
-	ctx := c.Request().Context()
-	u, err := s.requireUser(ctx, sess.UserID, "User not found")
-	if err != nil {
-		return err
-	}
-	if u.AiDataConsentAt != nil {
-		now := s.now()
-		if err := s.users.Q(nil).SetUserAIConsent(ctx, usersdb.SetUserAIConsentParams{ID: u.ID, AiDataConsentAt: nil, UpdatedAt: &now}); err != nil {
-			return err
-		}
-	}
-	return httpx.OK(c, aiConsentResponse{})
-}
 
 // --- onboarding ---------------------------------------------------------------
 

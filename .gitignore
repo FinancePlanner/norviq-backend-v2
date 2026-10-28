@@ -4,7 +4,7 @@
 /norviq-api
 *.test
 *.out
-coverage.*
+/coverage.*
 
 # Environment
 .env

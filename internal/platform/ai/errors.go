@@ -91,7 +91,7 @@ func statusLabel(err error) string {
 		return fmt.Sprint(up.Status)
 	}
 	if errors.Is(err, context.Canceled) {
-		return "cancelled"
+		return "cancelled" //nolint:misspell // Vapor's log label
 	}
 	return "transport"
 }

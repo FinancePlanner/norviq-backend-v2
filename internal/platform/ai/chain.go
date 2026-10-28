@@ -26,7 +26,7 @@ type Tier struct {
 	BaseURL   string
 	Model     string
 	MaxTokens int
-	// SupportsResponseFormat: whether the model is trusted to honour
+	// SupportsResponseFormat: whether the model is trusted to honor
 	// response_format. JSON requests skip a rung that might return prose.
 	SupportsResponseFormat bool
 	Dialect                Dialect
@@ -82,7 +82,8 @@ func (f *FallbackClient) Chat(ctx context.Context, messages []Message, tools []T
 	failures := 0
 	var attempted []string
 
-	for _, rung := range f.Rungs {
+	for i := range f.Rungs {
+		rung := &f.Rungs[i]
 		if responseFormat != "" && !rung.Tier.SupportsResponseFormat {
 			logger.Debug("ai_fallback_skip", "tier", rung.Tier.Label, "model", rung.Tier.Model, "reason", "response_format_unsupported")
 			continue

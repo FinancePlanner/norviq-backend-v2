@@ -62,7 +62,7 @@ func decodeObject(c *echo.Context, fields []fieldSpec) (map[string]any, error) {
 			}
 			if !present {
 				return nil, httpx.BadRequest(fmt.Sprintf(
-					"No such key '%s' at path ''. No value associated with key CodingKeys(stringValue: \"%s\", intValue: nil) (\"%s\").",
+					"No such key '%s' at path ''. No value associated with key CodingKeys(stringValue: %q, intValue: nil) (%q).",
 					f.name, f.name, f.name))
 			}
 			return nil, httpx.BadRequest(fmt.Sprintf(

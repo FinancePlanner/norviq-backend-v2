@@ -151,8 +151,8 @@ func TestAnthropicSystemMessagesJoin(t *testing.T) {
 }
 
 func TestAnthropicJSONObjectAddsSystemLine(t *testing.T) {
-	body := build([]Message{Text("system", "Summarise."), Text("user", "Data")}, nil, ResponseFormatJSON, 4096, thinkingOn)
-	eq(t, *body.System, "Summarise.\n\n"+JSONInstruction)
+	body := build([]Message{Text("system", "Summarize."), Text("user", "Data")}, nil, ResponseFormatJSON, 4096, thinkingOn)
+	eq(t, *body.System, "Summarize.\n\n"+JSONInstruction)
 }
 
 func TestAnthropicNoSamplingParameters(t *testing.T) {

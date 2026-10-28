@@ -69,7 +69,7 @@ func Validate(raw string) (*url.URL, error) {
 	if host == "" {
 		return nil, &Failure{kind: "malformed"}
 	}
-	if strings.ToLower(u.Scheme) != "https" {
+	if !strings.EqualFold(u.Scheme, "https") {
 		return nil, &Failure{kind: "notHTTPS"}
 	}
 	if IsBlockedHost(host) {

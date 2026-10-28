@@ -126,7 +126,8 @@ func (v *HTTPVerifier) Verify(ctx context.Context, provider, apiKey string, base
 	result, err := v.verifyModels(ctx, provider, apiKey, base, defaultModel, started)
 	if err != nil {
 		v.logger().Warn("ai_credential_verify_unreachable provider=" + provider)
-		return VerifyResult{ErrorCode: VerifyUnreachable, Detail: "Could not reach the provider.", LatencyMs: elapsed()}, nil
+		// A transport failure is a verify result, not a route error.
+		return VerifyResult{ErrorCode: VerifyUnreachable, Detail: "Could not reach the provider.", LatencyMs: elapsed()}, nil //nolint:nilerr // see above
 	}
 	return result, nil
 }

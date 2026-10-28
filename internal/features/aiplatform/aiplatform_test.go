@@ -173,7 +173,7 @@ func TestConsentEnforcement(t *testing.T) {
 	h.expectError(h.Do(http.MethodGet, "/v1/test/ai", "", nil), 401, "SessionToken not authenticated.")
 
 	// A pre-consent iOS build (CFNetwork, no capability) is let through.
-	req, _ := http.NewRequest(http.MethodGet, h.Server.URL+"/v1/test/ai", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, h.Server.URL+"/v1/test/ai", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("User-Agent", "Norviq/77 CFNetwork/1568 Darwin/25.0.0")
 	resp, err := h.Server.Client().Do(req)
@@ -392,7 +392,7 @@ func TestVerifyRejectsPlaintextAndUnknownProvider(t *testing.T) {
 		return strings.ToUpper(id.String())
 	}
 	h.expectError(h.Do(http.MethodPost, "/v1/ai/credentials/"+insert("openai", "sk-plain")+"/verify", tok, nil), 500, "Stored credential is not encrypted.")
-	h.expectError(h.Do(http.MethodPost, "/v1/ai/credentials/"+insert("hermes", "x")+"/verify", tok, nil), 400, "Stored credential has an unrecognised provider.")
+	h.expectError(h.Do(http.MethodPost, "/v1/ai/credentials/"+insert("hermes", "x")+"/verify", tok, nil), 400, "Stored credential has an unrecognised provider.") //nolint:misspell // Vapor's wire text
 }
 
 // MARK: - platform against the database

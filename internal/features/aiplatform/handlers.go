@@ -321,7 +321,7 @@ func (h *handlers) verifyCredential(c *echo.Context) error {
 		return err
 	}
 	if !ai.IsUserProvider(row.Provider) {
-		return httpx.BadRequest("Stored credential has an unrecognised provider.")
+		return httpx.BadRequest("Stored credential has an unrecognised provider.") //nolint:misspell // Vapor's wire text
 	}
 	// For this table plaintext can only mean corruption or a bad write path.
 	if !h.p.Cipher.IsEncrypted(row.ApiKeyEncrypted) {

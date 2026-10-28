@@ -1,7 +1,9 @@
 package billing
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,9 +79,49 @@ type subscriberResponse struct {
 }
 
 // decodeLikeVapor decodes a RevenueCat body the way Vapor's client did:
-// snake_case keys are rewritten to camelCase first (see revenueCat).
-func decodeLikeVapor(body []byte, v any) error {
-	return apijson.Unmarshal(body, v)
+// every object key containing "_" is rewritten to camelCase (see
+// apijson.NormalizeSnakeCaseKey) except the keys of the objects named in
+// dictionaries, which Swift decoded as [String: T] and left alone.
+func decodeLikeVapor(body []byte, v any, dictionaries ...string) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return err
+	}
+	dict := map[string]bool{}
+	for _, d := range dictionaries {
+		dict[d] = true
+	}
+	normalized, err := json.Marshal(rewriteKeys(tree, false, dict))
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(normalized, v)
+}
+
+func rewriteKeys(node any, keepKeys bool, dict map[string]bool) any {
+	switch n := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(n))
+		for k, v := range n {
+			key := k
+			if !keepKeys && strings.Contains(k, "_") {
+				key = apijson.NormalizeSnakeCaseKey(k)
+			}
+			if _, exists := out[key]; exists && key != k {
+				continue
+			}
+			out[key] = rewriteKeys(v, !keepKeys && dict[key], dict)
+		}
+		return out
+	case []any:
+		for i := range n {
+			n[i] = rewriteKeys(n[i], false, dict)
+		}
+		return n
+	}
+	return node
 }
 
 // pathSegment percent-encodes like CharacterSet.urlPathAllowed minus "/".
@@ -168,7 +210,7 @@ func (rc *revenueCat) subscriber(ctx context.Context, userID, apiKey string) (*s
 		return nil, httpx.Abort(http.StatusBadGateway, fmt.Sprintf("RevenueCat subscriber lookup failed with status %d.", status))
 	}
 	var resp subscriberResponse
-	if err := decodeLikeVapor(body, &resp); err != nil || resp.Subscriber == nil ||
+	if err := decodeLikeVapor(body, &resp, "entitlements", "subscriptions"); err != nil || resp.Subscriber == nil ||
 		resp.Subscriber.Entitlements == nil || resp.Subscriber.Subscriptions == nil {
 		return nil, httpx.Abort(http.StatusBadGateway, "RevenueCat subscriber response was invalid.")
 	}

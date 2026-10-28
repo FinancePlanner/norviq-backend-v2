@@ -6,6 +6,7 @@ package billing
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -80,6 +81,22 @@ func (s Settings) missingSecrets() []string {
 	return missing
 }
 
+// validateBillingSecrets refuses to boot in production without the
+// RevenueCat secrets and warns elsewhere, as configure.swift did.
+func validateBillingSecrets(production bool, logger *slog.Logger, s Settings) error {
+	missing := s.missingSecrets()
+	if len(missing) == 0 {
+		return nil
+	}
+	list := strings.Join(missing, ", ")
+	if production {
+		logger.Error("Missing required billing secrets: " + list + ". Refusing to boot.")
+		return fmt.Errorf("missing required billing secrets: %s", list)
+	}
+	logger.Warn("Billing secrets not configured: " + list + ". RevenueCat webhooks and restore will not work.")
+	return nil
+}
+
 // Register implements server.Feature, mirroring BillingController.boot and
 // RevenueCatWebhookController.boot.
 func (f Feature) Register(d *server.Deps, r *server.Routes) error {
@@ -87,14 +104,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.Settings != nil {
 		settings = *f.Settings
 	}
-	// validateBillingSecrets: refuse to boot in production, warn elsewhere.
-	if missing := settings.missingSecrets(); len(missing) > 0 {
-		list := strings.Join(missing, ", ")
-		if d.Config.IsProduction() {
-			d.Logger.Error("Missing required billing secrets: " + list + ". Refusing to boot.")
-			return fmt.Errorf("missing required billing secrets: %s", list)
-		}
-		d.Logger.Warn("Billing secrets not configured: " + list + ". RevenueCat webhooks and restore will not work.")
+	if err := validateBillingSecrets(d.Config.IsProduction(), d.Logger, settings); err != nil {
+		return err
 	}
 
 	cfg := entitlements.LoadConfig()

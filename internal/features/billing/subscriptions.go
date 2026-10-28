@@ -196,7 +196,7 @@ func syncSubscriber(ctx context.Context, svc *entitlements.Service, sub *subscri
 	case isActive:
 		status, level = "active", "pro"
 		if isCancelled {
-			status = "cancelled"
+			status = entitlements.StatusCancelled
 		}
 	case hasBillingIssue && isInGrace:
 		status, level = "billing_issue", "pro"
@@ -227,7 +227,7 @@ func syncSubscriber(ctx context.Context, svc *entitlements.Service, sub *subscri
 		row.PeriodStartedAt = purchaseDate
 	}
 	row.PeriodEndsAt = periodEndsAt
-	if info != nil && info.PeriodType != nil && strings.ToUpper(*info.PeriodType) == "TRIAL" {
+	if info != nil && info.PeriodType != nil && strings.EqualFold(*info.PeriodType, "TRIAL") {
 		row.TrialEndsAt = periodEndsAt
 	}
 	row.GracePeriodEndsAt = graceEndsAt

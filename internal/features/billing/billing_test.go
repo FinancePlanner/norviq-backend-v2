@@ -233,7 +233,7 @@ func TestBillingContextCancelledButActive(t *testing.T) {
 	app.post(makePayload("CANCELLATION", uuid.NewString(), upperID(user), payloadOpts{expirationAtMs: exp}), testSecret)
 	_, c, body := app.billingContext(user)
 	s := c.Subscription
-	if !c.IsPremium || s.Status != "cancelled" || !s.IsCancelledButActive || *s.WillRenew || s.AccessEndsAt == nil || s.PeriodEndsAt == nil || s.CancelledAt == nil {
+	if !c.IsPremium || s.Status != entitlements.StatusCancelled || !s.IsCancelledButActive || *s.WillRenew || s.AccessEndsAt == nil || s.PeriodEndsAt == nil || s.CancelledAt == nil {
 		t.Fatal(body)
 	}
 }
@@ -271,14 +271,13 @@ func TestCouponsPluralRoutesAreNotServed(t *testing.T) {
 	}
 }
 
-func (a *testApp) coupon(code, grant string, trialDays int, maxUses *int, extra string) uuid.UUID {
+func (a *testApp) coupon(code, grant string, trialDays int, maxUses *int, extra string) {
 	id := uuid.New()
 	a.exec(`INSERT INTO coupons (id, code, grant_type, trial_days, max_uses, discount_percentage, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, 20, now(), now())`, id, code, grant, trialDays, maxUses)
 	if extra != "" {
 		a.exec(`UPDATE coupons SET `+extra+` WHERE id = $1`, id)
 	}
-	return id
 }
 
 func intp(v int) *int { return &v }
@@ -395,7 +394,7 @@ func TestRedeemCouponDecodeErrors(t *testing.T) {
 		if tc.ct != "" {
 			h["Content-Type"] = tc.ct
 		}
-		r := app.raw("POST", "/v1/billing/coupon/redeem", h, tc.body)
+		r := app.raw("/v1/billing/coupon/redeem", h, tc.body)
 		if r.Status != tc.status || !strings.Contains(r.Body, tc.reason) {
 			t.Errorf("%s %s: %d %s", tc.ct, tc.body, r.Status, r.Body)
 		}
@@ -556,7 +555,7 @@ func TestRestoreSyncStatuses(t *testing.T) {
 		status, level string
 	}{
 		{"active", rcSubscription{ExpiresDate: &future, PeriodType: strp("trial")}, "active", "pro"},
-		{"cancelled", rcSubscription{ExpiresDate: &future, UnsubscribeDetectedAt: &past}, "cancelled", "pro"},
+		{"unsubscribed", rcSubscription{ExpiresDate: &future, UnsubscribeDetectedAt: &past}, entitlements.StatusCancelled, "pro"},
 		{"grace", rcSubscription{ExpiresDate: &past, BillingIssuesDetectedAt: &past, GracePeriodExpiresDate: &future}, "billing_issue", "pro"},
 		{"billing-issue", rcSubscription{ExpiresDate: &past, BillingIssuesDetectedAt: &past}, "billing_issue", "free"},
 		{"expired", rcSubscription{ExpiresDate: &past}, "expired", "free"},

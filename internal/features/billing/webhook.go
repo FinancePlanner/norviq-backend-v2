@@ -275,7 +275,7 @@ func processEvent(ctx context.Context, svc *entitlements.Service, logger *slog.L
 	case "INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "PRODUCT_CHANGE":
 		status, level = "active", "pro"
 	case "CANCELLATION":
-		status, level = "cancelled", "pro"
+		status, level = entitlements.StatusCancelled, "pro"
 		cancelledAt = &now
 	case "EXPIRATION":
 		status, level = "expired", "free"

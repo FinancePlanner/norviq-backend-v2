@@ -128,7 +128,7 @@ func typeMismatch(typ, path, found string) error {
 
 func (o object) missing(key string) error {
 	return httpx.BadRequest(fmt.Sprintf(
-		"No such key '%s' at path '%s'. No value associated with key CodingKeys(stringValue: \"%s\", intValue: nil) (\"%s\").",
+		"No such key '%s' at path '%s'. No value associated with key CodingKeys(stringValue: %q, intValue: nil) (%q).",
 		key, o.path, key, key))
 }
 

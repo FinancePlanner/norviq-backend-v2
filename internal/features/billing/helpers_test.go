@@ -75,13 +75,13 @@ type rawResponse struct {
 	Body   string
 }
 
-func (a *testApp) raw(method, path string, headers map[string]string, body string) rawResponse {
+func (a *testApp) raw(path string, headers map[string]string, body string) rawResponse {
 	a.t.Helper()
 	var rd io.Reader
 	if body != "" {
 		rd = strings.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(a.ctx(), method, a.Server.URL+path, rd)
+	req, err := http.NewRequestWithContext(a.ctx(), http.MethodPost, a.Server.URL+path, rd)
 	if err != nil {
 		a.t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func (a *testApp) post(payload string, authorization string) int {
 	if authorization != "" {
 		h["Authorization"] = authorization
 	}
-	return a.raw("POST", "/webhooks/revenuecat", h, payload).Status
+	return a.raw("/webhooks/revenuecat", h, payload).Status
 }
 
 type payloadOpts struct {

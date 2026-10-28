@@ -16,7 +16,7 @@ import (
 
 func TestWebhookMissingAuthorizationIs401(t *testing.T) {
 	app := newApp(t)
-	r := app.raw("POST", "/webhooks/revenuecat", map[string]string{"Content-Type": "application/json"},
+	r := app.raw("/webhooks/revenuecat", map[string]string{"Content-Type": "application/json"},
 		makePayload("INITIAL_PURCHASE", uuid.NewString(), uuid.NewString(), payloadOpts{}))
 	if r.Status != 401 || !strings.Contains(r.Body, `"reason":"Missing Authorization header."`) {
 		t.Fatalf("got %d %s", r.Status, r.Body)
@@ -25,7 +25,7 @@ func TestWebhookMissingAuthorizationIs401(t *testing.T) {
 
 func TestWebhookWrongAuthorizationIs401(t *testing.T) {
 	app := newApp(t)
-	r := app.raw("POST", "/webhooks/revenuecat", map[string]string{"Content-Type": "application/json", "Authorization": "wrong-secret"},
+	r := app.raw("/webhooks/revenuecat", map[string]string{"Content-Type": "application/json", "Authorization": "wrong-secret"},
 		makePayload("INITIAL_PURCHASE", uuid.NewString(), uuid.NewString(), payloadOpts{}))
 	if r.Status != 401 || !strings.Contains(r.Body, `"reason":"Invalid webhook secret."`) {
 		t.Fatalf("got %d %s", r.Status, r.Body)
@@ -34,7 +34,7 @@ func TestWebhookWrongAuthorizationIs401(t *testing.T) {
 
 func TestWebhookUnconfiguredIs503(t *testing.T) {
 	app := newApp(t, func(f *Feature) { f.Settings = &Settings{} })
-	r := app.raw("POST", "/webhooks/revenuecat", map[string]string{"Content-Type": "application/json", "Authorization": "x"}, `{}`)
+	r := app.raw("/webhooks/revenuecat", map[string]string{"Content-Type": "application/json", "Authorization": "x"}, `{}`)
 	if r.Status != 503 || !strings.Contains(r.Body, "Neither REVENUECAT_HMAC_SECRET nor REVENUECAT_WEBHOOK_SECRET is configured.") {
 		t.Fatalf("got %d %s", r.Status, r.Body)
 	}
@@ -129,7 +129,7 @@ func TestWebhookStatusTransitions(t *testing.T) {
 		typ, status, level string
 		opts               payloadOpts
 	}{
-		{"CANCELLATION", "cancelled", "pro", payloadOpts{}},
+		{"CANCELLATION", entitlements.StatusCancelled, "pro", payloadOpts{}},
 		{"EXPIRATION", "expired", "free", payloadOpts{}},
 		{"REFUND", "refunded", "free", payloadOpts{}},
 		{"BILLING_ISSUE", "billing_issue", "pro", payloadOpts{gracePeriodMs: msFromNow(24 * time.Hour)}},
@@ -148,7 +148,7 @@ func TestWebhookStatusTransitions(t *testing.T) {
 				t.Fatalf("sub=%s ent=%s", sub.Status, ent.Level)
 			}
 			if tc.typ == "CANCELLATION" && sub.CancelledAt == nil {
-				t.Fatal("cancelled_at not set")
+				t.Fatal("cancellation time not set")
 			}
 		})
 	}
@@ -238,12 +238,12 @@ func TestWebhookDecodeErrors(t *testing.T) {
 		`{"event":{"id":"1","type":"X","app_user_id":"u","expiration_at_ms":"soon"}}`: `Value was not of type 'Int64' at path 'event.expirationAtMs'.`,
 	}
 	for body, want := range cases {
-		r := app.raw("POST", "/webhooks/revenuecat", h, body)
+		r := app.raw("/webhooks/revenuecat", h, body)
 		if r.Status != 400 || !strings.Contains(r.Body, want) {
 			t.Errorf("%s: %d %s", body, r.Status, r.Body)
 		}
 	}
-	if r := app.raw("POST", "/webhooks/revenuecat", map[string]string{"Authorization": testSecret}, `{}`); r.Status != 415 {
+	if r := app.raw("/webhooks/revenuecat", map[string]string{"Authorization": testSecret}, `{}`); r.Status != 415 {
 		t.Errorf("no content type: %d %s", r.Status, r.Body)
 	}
 }
@@ -286,7 +286,7 @@ func hmacApp(t *testing.T) *testApp {
 func TestWebhookHMACValidSignature(t *testing.T) {
 	app := hmacApp(t)
 	p := `{"event": {"id": "test_event", "type": "INITIAL_PURCHASE", "app_user_id": "test_user", "product_id": "pro_yearly"}}`
-	r := app.raw("POST", "/webhooks/revenuecat", map[string]string{
+	r := app.raw("/webhooks/revenuecat", map[string]string{
 		"Content-Type": "application/json", signatureHeader: signature(p, "test-hmac-secret-12345", time.Now().Unix()),
 	}, p)
 	if r.Status != 200 || r.Body != "" {
@@ -309,7 +309,7 @@ func TestWebhookHMACRejections(t *testing.T) {
 		if header != "" {
 			h[signatureHeader] = header
 		}
-		r := app.raw("POST", "/webhooks/revenuecat", h, p)
+		r := app.raw("/webhooks/revenuecat", h, p)
 		if r.Status != 401 || !strings.Contains(r.Body, reason) {
 			t.Errorf("%q: %d %s", header, r.Status, r.Body)
 		}
@@ -352,10 +352,19 @@ func TestParseSwiftUUID(t *testing.T) {
 // Ported from Tax/TaxPackEntitlementTests.swift (the billing half).
 
 func TestTaxPackProductIDs(t *testing.T) {
-	for in, want := range map[string]int{
-		"norviq_tax_pack_2025": 2025, " NORVIQ_TAX_PACK_2024 ": 2024, "norviq_tax_pack_2025_eur": 2025,
-		"pro_yearly": 0, "norviq_tax_pack_25": 0, "norviq_tax_pack_1999": 0, "norviq_tax_pack_20255": 0,
+	for _, tc := range []struct {
+		in   string
+		want int
+	}{
+		{"norviq_tax_pack_2025", 2025},
+		{" NORVIQ_TAX_PACK_2024 ", 2024},
+		{"norviq_tax_pack_2025_eur", 2025},
+		{"pro_yearly", 0},
+		{"norviq_tax_pack_25", 0},
+		{"norviq_tax_pack_1999", 0},
+		{"norviq_tax_pack_20255", 0},
 	} {
+		in, want := tc.in, tc.want
 		got, ok := entitlements.TaxYearFromProductID(strp(in))
 		if (want == 0 && ok) || (want != 0 && got != want) {
 			t.Errorf("%q: %d %v", in, got, ok)

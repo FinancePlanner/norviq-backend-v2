@@ -11,6 +11,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/entitlements"
 )
 
 // revenueCat is the REST client BillingController used through req.client.
@@ -189,14 +190,18 @@ func (rc *revenueCat) authenticatedManagementURL(ctx context.Context, projectID,
 	if err != nil {
 		return nil, err
 	}
+	return managementURLFrom(status, body), nil
+}
+
+func managementURLFrom(status int, body []byte) *string {
 	if status != http.StatusOK {
-		return nil, nil
+		return nil
 	}
 	var out authenticatedManagementURL
-	if err := decodeLikeVapor(body, &out); err != nil || out.ManagementURL == nil {
-		return nil, nil
+	if decodeLikeVapor(body, &out) != nil {
+		return nil
 	}
-	return out.ManagementURL, nil
+	return out.ManagementURL
 }
 
 // subscriber is fetchRevenueCatSubscriber.
@@ -228,7 +233,7 @@ func managementScore(s v2Subscription) int {
 	switch strings.ToLower(*s.Status) {
 	case "active", "trialing", "grace_period":
 		return 3
-	case "cancelled":
+	case entitlements.StatusCancelled:
 		return 2
 	case "billing_issue":
 		return 1

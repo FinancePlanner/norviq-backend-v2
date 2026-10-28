@@ -269,7 +269,7 @@ func subscriptionDTO(s billingdb.Subscription, now time.Time) *SubscriptionDTO {
 		IsTrial:                s.Status == "trialing" || after(s.TrialEndsAt, now),
 		IsInGracePeriod:        after(s.GracePeriodEndsAt, now),
 		HasBillingIssue:        s.Status == "billing_issue",
-		IsCancelledButActive:   s.Status == "cancelled" && after(s.PeriodEndsAt, now),
+		IsCancelledButActive:   s.Status == StatusCancelled && after(s.PeriodEndsAt, now),
 		RenewsOrExpiresAt:      apijson.TimePtr(s.PeriodEndsAt),
 		WillRenew:              &willRenew,
 		AccessEndsAt:           apijson.TimePtr(s.PeriodEndsAt),

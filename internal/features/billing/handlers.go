@@ -117,7 +117,7 @@ func (h *handlers) managementURL(c *echo.Context) error {
 		log.Info("billing.management_url source=revenuecat_management_url", "subscription_id", *sub.ID, "store", storeOr(sub.Store, "unknown"), "user_id", user)
 		return httpx.OK(c, managementURLResponse{ManagementURL: *sub.ManagementURL, Provider: storeOr(sub.Store, "revenuecat"), Source: "revenuecat_management_url"})
 	}
-	if sub.Store != nil && strings.ToLower(*sub.Store) == "app_store" {
+	if sub.Store != nil && strings.EqualFold(*sub.Store, "app_store") {
 		log.Info("billing.management_url source=apple_subscriptions", "subscription_id", *sub.ID, "store", "app_store", "user_id", user)
 		return httpx.OK(c, managementURLResponse{
 			ManagementURL: "https://apps.apple.com/account/subscriptions", Provider: "app_store", Source: "apple_subscriptions",

@@ -5,6 +5,10 @@ import (
 	"net/http"
 )
 
+// StatusCancelled is the subscriptions.status of a subscription that will
+// not renew but runs to the end of its period: Vapor's (and RevenueCat's) spelling.
+const StatusCancelled = "cancelled" //nolint:misspell // wire and database value
+
 // Feature is BillingFeature: the key a gate reports and the billing
 // context lists.
 type Feature string

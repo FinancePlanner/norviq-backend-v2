@@ -14,6 +14,7 @@ import (
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/server"
 )
@@ -30,6 +31,10 @@ func All() []server.Feature {
 		badges.Feature{},
 		feedback.Feature{},
 		assets.Feature{},
+		// Identity: auth, tokens, OAuth server, profile, AI consent and
+		// onboarding. Premium checks use identity.Entitlements until billing
+		// exposes its resolver.
+		identity.Feature{},
 	}
 }
 
@@ -42,7 +47,9 @@ type Job interface {
 
 // AllJobs returns every ported background job.
 func AllJobs() []Job {
-	return []Job{}
+	return []Job{
+		identity.CleanupJob{},
+	}
 }
 
 // Jobs tracks running jobs for shutdown.

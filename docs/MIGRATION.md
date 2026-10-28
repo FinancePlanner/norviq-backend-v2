@@ -28,10 +28,14 @@ client release. Then archive the Vapor repo.
 - Background jobs move one at a time: on in v2 (`V2_JOBS`), off in Vapor, in
   the same infra change. Most Vapor jobs have **no disable flag** (e.g.
   TargetAlertPoller, EarningsNotificationPoller are always registered); they
-  run under `JobLock.runAsLeader(name)`. Preferred path: port `JobLock` with
-  the same lock names and backing store, so a job enabled in both processes
-  still has exactly one leader, then remove Vapor's copy at cutover. Fallback:
-  add a disable flag to Vapor (a fix-only change).
+  run under `JobLock.runAsLeader(name)`, a Postgres advisory lock on
+  `hashtext(name)` held for **one tick**. `internal/platform/joblock` takes the
+  same lock, so the two copies never run a tick concurrently, but each still
+  runs one tick per interval, so a non-idempotent job (tips, digests, pushes)
+  would fire twice. Plan: **every job stays on Vapor until the final cutover**,
+  when Vapor scales to zero and `V2_JOBS=all` lands in the same change
+  (rehearsed on staging first). Ported jobs must wrap each tick in
+  `joblock.RunAsLeader` with the Swift job's lock name.
 
 ## Schema ownership
 

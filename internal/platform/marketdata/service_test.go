@@ -386,7 +386,7 @@ func TestPressureFromStubs(t *testing.T) {
 	if _, err := fx.svc.Pressure(ctx, "AAPL"); Status(err) != 404 && Status(err) != 502 {
 		t.Fatalf("no quote %v", err)
 	}
-	fx.stub.on("/stable/quote", 200, []map[string]any{{"symbol": "AAPL", "name": "Apple", "price": 100, "changePercentage": 2, "change": 2, "volume": 300}})
+	fx.stub.on("/stable/quote", 200, []map[string]any{{"symbol": "AAPL", "name": "Apple", "price": 100, "changePercentage": 2, "change": 2, "volume": 300, "timestamp": 1730000000}})
 	fx.stub.on("/stable/historical-price-eod/light", 200, []map[string]any{
 		{"symbol": "AAPL", "date": "2024-01-02", "price": 99, "volume": 100},
 		{"symbol": "AAPL", "date": "2024-01-03", "price": 100, "volume": 100},

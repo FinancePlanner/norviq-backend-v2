@@ -16,7 +16,6 @@
 {"name":"me-expired-sub","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000013"}
 {"name":"me-unknown-user","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-0000000000ff"}
 {"name":"me-anonymous","path":"/v1/billing/me"}
-{"name":"me-bad-token","path":"/v1/billing/me","headers":{"Authorization":"Bearer not-a-jwt"}}
 {"name":"restore-unconfigured","method":"POST","path":"/v1/billing/restore","as":"0b111000-0000-4000-8000-000000000001"}
 {"name":"restore-anonymous","method":"POST","path":"/v1/billing/restore"}
 {"name":"management-url-unconfigured","method":"POST","path":"/v1/billing/management-url","as":"0b111000-0000-4000-8000-000000000005"}

@@ -26,7 +26,12 @@ client release. Then archive the Vapor repo.
   both processes. The Vapor-compatible cache format is in
   `internal/middleware/ratelimit.go`.
 - Background jobs move one at a time: on in v2 (`V2_JOBS`), off in Vapor, in
-  the same infra change.
+  the same infra change. Most Vapor jobs have **no disable flag** (e.g.
+  TargetAlertPoller, EarningsNotificationPoller are always registered); they
+  run under `JobLock.runAsLeader(name)`. Preferred path: port `JobLock` with
+  the same lock names and backing store, so a job enabled in both processes
+  still has exactly one leader, then remove Vapor's copy at cutover. Fallback:
+  add a disable flag to Vapor (a fix-only change).
 
 ## Schema ownership
 

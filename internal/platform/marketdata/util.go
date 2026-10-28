@@ -109,3 +109,7 @@ func addMonths(t time.Time, months int) time.Time {
 
 // addYears is Calendar.date(byAdding: .year) with the same clamping.
 func addYears(t time.Time, years int) time.Time { return addMonths(t, 12*years) }
+
+// SwiftDoubleString formats f the way Swift's `"\(double)"` did (always a
+// fractional part: 1.0, not 1). Vapor built ETags from it.
+func SwiftDoubleString(f float64) string { return swiftDoubleString(f) }

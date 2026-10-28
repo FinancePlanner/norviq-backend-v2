@@ -10,6 +10,7 @@ require (
 	github.com/labstack/echo/v5 v5.4.2
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/redis/go-redis/v9 v9.23.0
+	golang.org/x/crypto v0.58.0
 )
 
 require (

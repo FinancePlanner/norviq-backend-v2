@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"norviq-api/internal/auth"
+	"norviq-api/internal/config"
 	"norviq-api/internal/platform/crypto"
+	"norviq-api/internal/platform/discord"
 	"norviq-api/internal/platform/mailer"
 	"norviq-api/internal/platform/users"
 	"norviq-api/internal/server"
@@ -56,7 +58,7 @@ type service struct {
 func (f Feature) build(d *server.Deps) (*service, error) {
 	cfg := f.Settings
 	if cfg == nil {
-		loaded := LoadSettings(d.Config.IsProduction(), d.Config.Environment == "testing")
+		loaded := LoadSettings(d.Config.IsProduction(), d.Config.Environment == config.Testing)
 		cfg = &loaded
 	}
 	pii, err := crypto.PIIFromEnv(d.Config.IsProduction(), d.Logger)
@@ -90,7 +92,7 @@ func (f Feature) build(d *server.Deps) (*service, error) {
 		s.ent = dbEntitlements{db: d.DB, bypass: cfg.BypassBilling, premiumEmails: cfg.PremiumEmails, now: s.now}
 	}
 	if s.alert == nil {
-		s.alert = discordAlerter{url: cfg.DiscordWebhookURL, client: s.http, log: d.Logger}
+		s.alert = discordAlerter{sender: discord.FromEnv(d.Logger), log: d.Logger}
 	}
 	endpoints := defaultEndpoints()
 	if f.Endpoints != nil {

@@ -175,6 +175,25 @@ func (s *Service) RequirePremium(ctx context.Context, feature Feature, userID uu
 	return nil
 }
 
+// IsPro is entitlementResolver.resolve(userId:).isPro. It satisfies
+// ai.PlanResolver.
+func (s *Service) IsPro(ctx context.Context, userID uuid.UUID) (bool, error) {
+	snap, err := s.Resolve(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return snap.IsPro(), nil
+}
+
+// NamedGate is RequirePremium for callers that name the feature with a plain
+// string (notifications.PremiumGate).
+type NamedGate struct{ *Service }
+
+// RequirePremium is Service.RequirePremium with a string feature.
+func (g NamedGate) RequirePremium(ctx context.Context, feature string, userID uuid.UUID) error {
+	return g.Service.RequirePremium(ctx, Feature(feature), userID)
+}
+
 // LimitsFor is usageCounterService.limits(for:).
 func LimitsFor(s Snapshot) Limits {
 	if s.IsPro() {

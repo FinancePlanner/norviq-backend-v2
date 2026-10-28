@@ -151,10 +151,13 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	a.POST("/webauthn/register/verify", s.webAuthnRegisterVerify, append(session[:2:2], webAuthnRegister)...)
 
 	// PersonalAccessTokenController: never scopeable.
-	t := r.V1.Group("/tokens", firstParty...)
-	t.POST("", s.createPAT)
-	t.GET("", s.listPATs)
-	t.DELETE("/:tokenId", s.revokePAT)
+	// Middleware goes on each route, not the group: echo answers 404 for
+	// any unmatched path under a group that carries middleware, which would
+	// stop the strangler from proxying sibling routes to Vapor.
+	t := r.V1.Group("/tokens")
+	t.POST("", s.createPAT, firstParty...)
+	t.GET("", s.listPATs, firstParty...)
+	t.DELETE("/:tokenId", s.revokePAT, firstParty...)
 
 	// TokenIntrospectionController and OAuthServerController.
 	o := r.V1.Group("/oauth")
@@ -188,9 +191,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	u.DELETE("/ai-consent", s.aiConsentWithdraw, firstParty...)
 
 	// OnboardingController.
-	ob := r.V1.Group("/onboarding", scoped...)
-	ob.GET("", s.onboardingGet, auth.RequireScope(auth.ScopeSettingsRead))
-	ob.PATCH("", s.onboardingPatch, auth.RequireScope(auth.ScopeSettingsWrite))
+	ob := r.V1.Group("/onboarding")
+	ob.GET("", s.onboardingGet, append(scoped[:2:2], auth.RequireScope(auth.ScopeSettingsRead))...)
+	ob.PATCH("", s.onboardingPatch, append(scoped[:2:2], auth.RequireScope(auth.ScopeSettingsWrite))...)
 	return nil
 }
 

@@ -89,13 +89,13 @@ func requireStrings(fields ...any) *httpx.Error {
 // --- register ---------------------------------------------------------------
 
 type registerRequest struct {
-	Username        *string       `json:"username"`
-	Password        *string       `json:"password"`
-	ConfirmPassword *string       `json:"confirmPassword"`
-	Email           *string       `json:"email"`
+	Username        *string         `json:"username"`
+	Password        *string         `json:"password"`
+	ConfirmPassword *string         `json:"confirmPassword"`
+	Email           *string         `json:"email"`
 	DateOfBirth     json.RawMessage `json:"dateOfBirth"`
-	TrialDays       *int          `json:"trialDays"`
-	CouponCode      *string       `json:"couponCode"`
+	TrialDays       *int            `json:"trialDays"`
+	CouponCode      *string         `json:"couponCode"`
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]{4,30}$`)

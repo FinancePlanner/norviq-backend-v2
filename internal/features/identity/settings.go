@@ -63,8 +63,8 @@ type Settings struct {
 	IssuerURL           string // OAUTH_ISSUER_URL
 	ConsentURL          string // OAUTH_CONSENT_URL
 
-	BypassBilling     bool            // BYPASS_BILLING
-	PremiumEmails     map[string]bool // BILLING_PREMIUM_EMAILS
+	BypassBilling bool            // BYPASS_BILLING
+	PremiumEmails map[string]bool // BILLING_PREMIUM_EMAILS
 }
 
 func envInt(key string, def int) int {

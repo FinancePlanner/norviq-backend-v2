@@ -1,0 +1,8 @@
+# Foundation: health, root routes, error envelope, strangler passthrough.
+{"name":"health","path":"/health"}
+{"name":"health-live","path":"/health/live"}
+{"name":"v1-root","path":"/v1"}
+{"name":"v1-hello","path":"/v1/hello"}
+{"name":"unknown-route-404","path":"/v1/definitely-not-a-route"}
+{"name":"unauth-guarded","path":"/v1/users/me"}
+{"name":"bad-jwt","path":"/v1/users/me","headers":{"Authorization":"Bearer not.a.jwt"}}

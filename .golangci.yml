@@ -1,0 +1,82 @@
+version: '2'
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - dogsled
+    - errcheck
+    - errorlint
+    - gocheckcompilerdirectives
+    - gocritic
+    - goprintffuncname
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - whitespace
+    # staticcheck and unused stay off under Go 1.27: honnef.co/go/tools' IR
+    # builder panics on Go 1.27 syntax, which aborts the whole run without
+    # reporting anything (same reason as norviq-web). Re-enable once a
+    # staticcheck release supports 1.27.
+  settings:
+    errorlint:
+      asserts: false
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam
+    gosec:
+      excludes:
+        - G101 # credential-looking constants (env var names, token prefixes)
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct layout churn for no measurable gain here
+        - shadow # `err` re-declaration is idiomatic; too noisy on ported code
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: unexported-return
+          disabled: true
+        - name: unused-parameter
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+    paths:
+      - internal/store/.*\.go$ # sqlc output
+formatters:
+  enable:
+    # gofumpt is a strict superset of gofmt and is what the pre-commit hook
+    # applies; list it here so the linter and the hook agree on one formatter.
+    - gofumpt
+  settings:
+    gofumpt:
+      # The module path has no dot, so gofumpt would take it for the standard
+      # library unless told otherwise.
+      module-path: norviq-api
+  exclusions:
+    generated: lax
+    paths:
+      - internal/store/.*\.go$

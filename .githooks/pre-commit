@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Pre-commit: format with gofumpt, then lint, before anything lands in git.
+# golangci-lint version must stay in lockstep with CI (.github/workflows/ci.yml).
+# Install once per clone with `make hooks`.
+set -euo pipefail
+
+# Run at a pinned version via `go run` so the binary is always built with the
+# local toolchain; a stale gofumpt on PATH misses newer gofmt rules.
+GOFUMPT_VERSION="v0.11.0"
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# Fail closed if the linter is missing: a skipped lint is not a pass.
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "pre-commit: golangci-lint not on PATH. Install v2.15.0 to match CI:" >&2
+  echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0" >&2
+  exit 1
+fi
+
+# Remember what was staged so only those files are re-added after formatting.
+staged_go="$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)"
+
+if [[ -n "${staged_go}" ]]; then
+  echo "pre-commit: gofumpt -w (staged files)"
+  # Only staged files: formatting the whole tree would sweep unrelated
+  # changes into this commit.
+  # shellcheck disable=SC2086
+  go run "mvdan.cc/gofumpt@${GOFUMPT_VERSION}" -w ${staged_go}
+  while IFS= read -r f; do
+    [[ -z "${f}" || ! -f "${f}" ]] && continue
+    git add -- "${f}"
+  done <<< "${staged_go}"
+fi
+
+echo "pre-commit: golangci-lint run"
+# --allow-parallel-runners: another checkout or agent session linting at the
+# same time would otherwise abort this commit on golangci-lint's global lock.
+golangci-lint run --allow-parallel-runners
+
+echo "pre-commit: ok"

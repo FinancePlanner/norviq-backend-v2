@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/tmp/
+/norviq-api
+*.test
+*.out
+coverage.*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Go
+go.work
+go.work.sum
+vendor/
+
+# Local parity captures can hold real user data; never commit them.
+/parity-captures/

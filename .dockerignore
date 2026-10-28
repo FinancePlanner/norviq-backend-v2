@@ -1,0 +1,26 @@
+# Only go.mod, go.sum, cmd/, internal/ and db/ are needed to build the image.
+.git/
+.github/
+.githooks/
+.idea/
+.vscode/
+.DS_Store
+
+bin/
+tmp/
+parity-captures/
+docs/
+scripts/
+**/*_test.go
+**/testdata/
+
+.env
+.env.*
+*.md
+Dockerfile
+.dockerignore
+.gitignore
+.golangci.yml
+Makefile
+sqlc.yaml
+docker-compose*.yml

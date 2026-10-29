@@ -104,18 +104,6 @@ func (q *Queries) DeleteUserWebAuthnCredentials(ctx context.Context, userID uuid
 	return err
 }
 
-const entitlementLevelByUser = `-- name: EntitlementLevelByUser :one
-SELECT level FROM entitlements WHERE user_id = $1 LIMIT 1
-`
-
-// DefaultEntitlementResolver's Entitlement.query(...).first(): no ORDER BY.
-func (q *Queries) EntitlementLevelByUser(ctx context.Context, userID uuid.UUID) (string, error) {
-	row := q.db.QueryRow(ctx, entitlementLevelByUser, userID)
-	var level string
-	err := row.Scan(&level)
-	return level, err
-}
-
 const insertMFAChallenge = `-- name: InsertMFAChallenge :exec
 INSERT INTO mfa_challenges (
     id, user_id, purpose, channel, destination, code_hash, expires_at,

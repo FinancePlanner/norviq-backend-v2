@@ -11,6 +11,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/store/identitydb"
 
 	"github.com/google/uuid"
@@ -75,8 +76,8 @@ func (s *service) createPAT(c *echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	if err := s.requirePremium(ctx, featureMCPAccess, sess.UserID); err != nil {
-		return writeUpgradeRequired(c, err)
+	if err := s.requirePremium(ctx, sess.UserID); err != nil {
+		return err
 	}
 	var p patCreateRequest
 	if err := httpx.Decode(c, &p); err != nil {
@@ -216,8 +217,8 @@ func (s *service) introspect(c *echo.Context) error {
 	now := s.now()
 	active := func(userID uuid.UUID, scopes []string, kind auth.TokenKind, exp time.Time) error {
 		entitled := true
-		if err := s.requirePremium(ctx, featureMCPAccess, userID); err != nil {
-			var up *UpgradeRequiredError
+		if err := s.requirePremium(ctx, userID); err != nil {
+			var up *entitlements.UpgradeRequiredError
 			if !errors.As(err, &up) {
 				return err
 			}

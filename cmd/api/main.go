@@ -214,7 +214,9 @@ func runMigrate(ctx context.Context, cfg config.Base, logger *slog.Logger, args 
 	return migrate.Up(ctx, conn, logger)
 }
 
-func printRoutes(cfg config.Base, logger *slog.Logger) error {
+func printRoutes(cfg config.Base, _ *slog.Logger) error {
+	// stdout is the route list: keep features' boot logs out of it.
+	logger := slog.New(slog.DiscardHandler)
 	d, _, err := buildDeps(context.Background(), cfg, logger, false)
 	if err != nil {
 		return err

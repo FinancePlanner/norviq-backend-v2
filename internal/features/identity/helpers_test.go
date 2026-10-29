@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"norviq-api/internal/platform/crypto"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/mailer"
 	"norviq-api/internal/platform/users"
 	"norviq-api/internal/server"
@@ -64,10 +65,15 @@ type fakeAlerter struct{ got chan string }
 
 func (a fakeAlerter) Notify(m string) { a.got <- m }
 
-// fixedEntitlements answers one level for everyone.
+// fixedEntitlements answers one plan level for everyone.
 type fixedEntitlements struct{ level string }
 
-func (e fixedEntitlements) Level(context.Context, uuid.UUID) (string, error) { return e.level, nil }
+func (e fixedEntitlements) RequirePremium(_ context.Context, f entitlements.Feature, _ uuid.UUID) error {
+	if e.level == "pro" || e.level == "temporary" {
+		return nil
+	}
+	return entitlements.UpgradeRequired(f, e.level)
+}
 
 // providerStub plays Google, Apple and X: token endpoints mint id_tokens
 // signed with a key its JWKS endpoint publishes.
@@ -199,7 +205,7 @@ func testSettings() *Settings {
 			ResendCooldownSeconds: 30, MaxResends: 3, BypassEmails: map[string]bool{},
 		},
 		ResetReturnCode: true, AllowedRedirectURIs: map[string]bool{}, AppCallbackScheme: "norviqa",
-		XScopes: "tweet.read users.read offline.access", PremiumEmails: map[string]bool{},
+		XScopes: "tweet.read users.read offline.access",
 	}
 }
 

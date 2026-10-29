@@ -63,8 +63,6 @@ type Settings struct {
 	IssuerURL           string // OAUTH_ISSUER_URL
 	ConsentURL          string // OAUTH_CONSENT_URL
 
-	BypassBilling bool            // BYPASS_BILLING
-	PremiumEmails map[string]bool // BILLING_PREMIUM_EMAILS
 }
 
 func envInt(key string, def int) int {
@@ -136,8 +134,6 @@ func LoadSettings(production, testing bool) Settings {
 		IntrospectionSecret: envTrimmed("MCP_INTROSPECTION_SECRET"),
 		IssuerURL:           envTrimmed("OAUTH_ISSUER_URL"),
 		ConsentURL:          envTrimmed("OAUTH_CONSENT_URL"),
-		BypassBilling:       os.Getenv("BYPASS_BILLING") == "true",
-		PremiumEmails:       envSet("BILLING_PREMIUM_EMAILS", true),
 	}
 	if s.AppCallbackScheme == "" {
 		s.AppCallbackScheme = "norviqa"

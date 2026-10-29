@@ -211,8 +211,8 @@ func (s *service) approveFlow(c *echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	if err := s.requirePremium(ctx, featureMCPAccess, sess.UserID); err != nil {
-		return writeUpgradeRequired(c, err)
+	if err := s.requirePremium(ctx, sess.UserID); err != nil {
+		return err
 	}
 	flow, err := s.loadPendingFlow(c)
 	if err != nil {

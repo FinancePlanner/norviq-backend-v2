@@ -98,12 +98,31 @@ func CodeForStatus(status int) string {
 	return "request_failed"
 }
 
+// BodyError is an error that renders its own JSON body instead of the
+// envelope: what a Vapor middleware installed inside APIErrorMiddleware did
+// for one error type (BillingErrorMiddleware and BillingUpgradeRequiredError).
+type BodyError interface {
+	error
+	ResponseBody() (status int, body any)
+}
+
 // ErrorHandler renders every error as the Vapor envelope. production hides
 // the message of non-Abort 5xx errors, as Vapor did in the production
 // environment.
 func ErrorHandler(logger *slog.Logger, production bool) echo.HTTPErrorHandler {
 	return func(c *echo.Context, err error) {
 		if r, _ := echo.UnwrapResponse(c.Response()); r != nil && r.Committed {
+			return
+		}
+
+		var bodyErr BodyError
+		if errors.As(err, &bodyErr) {
+			status, v := bodyErr.ResponseBody()
+			if c.Request().Method == http.MethodHead {
+				_ = c.NoContent(status)
+				return
+			}
+			_ = JSON(c, status, v)
 			return
 		}
 

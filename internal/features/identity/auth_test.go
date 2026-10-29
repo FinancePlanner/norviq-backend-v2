@@ -325,7 +325,10 @@ func TestCleanupDeletesDeadTokens(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { CleanupJob{Interval: time.Millisecond, InitialDelay: time.Millisecond}.Run(ctx, h.Deps); close(done) }()
+	go func() {
+		CleanupJob{Interval: time.Millisecond, InitialDelay: time.Millisecond}.Run(ctx, h.Deps)
+		close(done)
+	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done

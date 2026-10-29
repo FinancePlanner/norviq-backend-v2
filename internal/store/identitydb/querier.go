@@ -28,8 +28,6 @@ type Querier interface {
 	DeleteWebAuthnLoginChallenge(ctx context.Context, id uuid.UUID) error
 	DeleteWebAuthnRegisterChallenge(ctx context.Context, id uuid.UUID) error
 	DenyOAuthAuthorizationFlow(ctx context.Context, id uuid.UUID) error
-	// DefaultEntitlementResolver's Entitlement.query(...).first(): no ORDER BY.
-	EntitlementLevelByUser(ctx context.Context, userID uuid.UUID) (string, error)
 	InsertMFAChallenge(ctx context.Context, arg InsertMFAChallengeParams) error
 	InsertOAuthAuthorizationFlow(ctx context.Context, arg InsertOAuthAuthorizationFlowParams) error
 	InsertOAuthClient(ctx context.Context, arg InsertOAuthClientParams) error

@@ -16,6 +16,7 @@ import (
 	"norviq-api/internal/config"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/discord"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/mailer"
 	"norviq-api/internal/platform/users"
 	"norviq-api/internal/server"
@@ -28,7 +29,7 @@ import (
 type Feature struct {
 	Settings     *Settings
 	Mailer       mailer.Mailer
-	Entitlements Entitlements
+	Entitlements Premium
 	Alerter      Alerter
 	HTTPClient   *http.Client
 	Now          func() time.Time
@@ -45,7 +46,7 @@ type service struct {
 	cfg      *Settings
 	users    *users.Store
 	mail     mailer.Mailer
-	ent      Entitlements
+	ent      Premium
 	alert    Alerter
 	http     *http.Client
 	now      func() time.Time
@@ -89,7 +90,7 @@ func (f Feature) build(d *server.Deps) (*service, error) {
 		s.mail = mailer.New(ms, d.Logger)
 	}
 	if s.ent == nil {
-		s.ent = dbEntitlements{db: d.DB, bypass: cfg.BypassBilling, premiumEmails: cfg.PremiumEmails, now: s.now}
+		s.ent = entitlements.NewFromEnv(d.DB)
 	}
 	if s.alert == nil {
 		s.alert = discordAlerter{sender: discord.FromEnv(d.Logger), log: d.Logger}

@@ -22,7 +22,7 @@ type PremiumGate interface {
 }
 
 // BillingFeatureTargetAlerts is BillingFeature.targetAlerts.
-const BillingFeatureTargetAlerts = "targetAlerts"
+const BillingFeatureTargetAlerts = "target_alerts"
 
 // Feature mounts /v1/notifications/*.
 type Feature struct {

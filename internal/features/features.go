@@ -14,9 +14,11 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
+	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
 )
 
@@ -24,18 +26,19 @@ import (
 // matters (a route registered twice is an error, not an override).
 func All() []server.Feature {
 	return []server.Feature{
-		// Earnings preferences wait for billing's premium gate
-		// (notifications.Feature.Premium); assets search waits for market
-		// data (assets.Feature.Search). Both stay on Vapor until wired.
-		notifications.Feature{},
+		billing.Feature{},
+		notifications.Feature{Premium: func(d *server.Deps) notifications.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
+		// Assets search waits for market data (assets.Feature.Search) and
+		// stays on Vapor until wired.
 		activity.Feature{},
 		badges.Feature{},
 		feedback.Feature{},
 		assets.Feature{},
 		aiplatform.Feature{},
 		// Identity: auth, tokens, OAuth server, profile, AI consent and
-		// onboarding. Premium checks use identity.Entitlements until billing
-		// exposes its resolver.
+		// onboarding.
 		identity.Feature{},
 	}
 }
@@ -51,6 +54,7 @@ type Job interface {
 func AllJobs() []Job {
 	return []Job{
 		identity.CleanupJob{},
+		billing.TrialExpirationJob{},
 	}
 }
 

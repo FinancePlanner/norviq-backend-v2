@@ -1,3 +1,7 @@
+# Fluent migrations each goose version mirrors, in Vapor's order. A
+# "# goose N" line starts version N; adoption stamps every version whose
+# names Vapor has all applied (see migrate.go).
+# goose 1 00001_baseline.sql (norviq-backend e6e35df)
 StockPlanBackend.CreateUser
 StockPlanBackend.AddAccountLockoutAndVerificationFields
 StockPlanBackend.AddUserProfileFields
@@ -157,3 +161,8 @@ StockPlanBackend.CascadeUserOwnedRowsOnDelete
 StockPlanBackend.CreateRecaps
 StockPlanBackend.AddDailyBoardPosts
 StockPlanBackend.AddBankAccountIdentificationHash
+# goose 2 00002_vapor_37128c4.sql (norviq-backend 37128c4)
+StockPlanBackend.CreateGroupsTables
+StockPlanBackend.CreateAchievementTables
+StockPlanBackend.CreateDigestTables
+StockPlanBackend.CreateSocialActivityTables

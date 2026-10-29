@@ -2,10 +2,13 @@
 // backend already migrated.
 //
 // Migration 00001 is a baseline: exactly the schema Vapor's Fluent
-// migrations produce. On a fresh database goose runs it. On a database that
-// has `_fluent_migrations` and no goose table, every Fluent migration the
-// baseline captured must already be applied; then the baseline is stamped as
-// applied without running, and goose owns the schema from there.
+// migrations produce at one commit. Each later migration that ports Fluent
+// migrations Vapor gained afterwards lists them in fluent_migrations.txt. On
+// a fresh database goose runs everything. On a database that has
+// `_fluent_migrations` and no goose table, the baseline's Fluent migrations
+// must all be applied; then every version whose Fluent migrations are all
+// applied is stamped without running, goose runs the rest, and owns the
+// schema from there.
 package migrate
 
 import (
@@ -28,6 +31,12 @@ var fluentMigrationsRaw string
 
 // BaselineVersion is the goose version of 00001_baseline.sql.
 const BaselineVersion = 1
+
+// FluentVersion is one goose version and the Fluent migrations it mirrors.
+type FluentVersion struct {
+	Version int64
+	Names   []string
+}
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	sub, err := fs.Sub(db.Migrations, "migrations")
@@ -101,20 +110,16 @@ func adoptVapor(ctx context.Context, conn *sql.DB, logger *slog.Logger) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	var missing []string
-	for _, name := range ExpectedFluentMigrations() {
-		if !applied[name] {
-			missing = append(missing, name)
-		}
+	versions, err := FluentVersions()
+	if err != nil {
+		return err
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("database is a Vapor database missing %d Fluent migrations the baseline assumes (first: %s); run the Vapor migrate job first", len(missing), missing[0])
-	}
-	if extra := len(applied) - len(ExpectedFluentMigrations()); extra > 0 {
-		return errors.New("database has Fluent migrations newer than the baseline; port them to goose migrations before adopting")
+	stamp, err := versionsToStamp(versions, applied)
+	if err != nil {
+		return err
 	}
 
-	logger.Info("adopting Vapor-migrated database: stamping goose baseline", "version", BaselineVersion)
+	logger.Info("adopting Vapor-migrated database: stamping goose versions", "versions", stamp)
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -128,7 +133,9 @@ func adoptVapor(ctx context.Context, conn *sql.DB, logger *slog.Logger) error {
 			tstamp timestamp NOT NULL DEFAULT now()
 		)`,
 		`INSERT INTO goose_db_version (version_id, is_applied) VALUES (0, true)`,
-		fmt.Sprintf(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (%d, true)`, BaselineVersion),
+	}
+	for _, v := range stamp {
+		stmts = append(stmts, fmt.Sprintf(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (%d, true)`, v))
 	}
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s); err != nil {
@@ -138,13 +145,64 @@ func adoptVapor(ctx context.Context, conn *sql.DB, logger *slog.Logger) error {
 	return tx.Commit()
 }
 
-// ExpectedFluentMigrations lists the Fluent migrations the baseline captures.
-func ExpectedFluentMigrations() []string {
-	var out []string
-	for _, line := range strings.Split(fluentMigrationsRaw, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			out = append(out, line)
+// versionsToStamp returns the goose versions an adopted Vapor database
+// already has: the baseline and each following version whose Fluent
+// migrations are all applied. A version applied only in part, or a Fluent
+// migration no version mirrors, is an error.
+func versionsToStamp(versions []FluentVersion, applied map[string]bool) ([]int64, error) {
+	if len(versions) == 0 || versions[0].Version != BaselineVersion {
+		return nil, errors.New("fluent_migrations.txt must start with the baseline")
+	}
+	covered := map[string]bool{}
+	var stamp []int64
+	for i, v := range versions {
+		var missing []string
+		for _, name := range v.Names {
+			if !applied[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) == len(v.Names) && i > 0 {
+			break // Vapor has not reached this version; goose runs it.
+		}
+		if len(missing) > 0 {
+			if i == 0 {
+				return nil, fmt.Errorf("database is a Vapor database missing %d Fluent migrations the baseline assumes (first: %s); run the Vapor migrate job first", len(missing), missing[0])
+			}
+			return nil, fmt.Errorf("database has goose version %d only in part (missing Fluent %s); run the Vapor migrate job first", v.Version, missing[0])
+		}
+		for _, name := range v.Names {
+			covered[name] = true
+		}
+		stamp = append(stamp, v.Version)
+	}
+	for name := range applied {
+		if !covered[name] {
+			return nil, fmt.Errorf("database has Fluent migration %s that no goose migration mirrors; port it before adopting", name)
 		}
 	}
-	return out
+	return stamp, nil
+}
+
+// FluentVersions parses fluent_migrations.txt.
+func FluentVersions() ([]FluentVersion, error) {
+	var out []FluentVersion
+	for _, line := range strings.Split(fluentMigrationsRaw, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "# goose "):
+			var v int64
+			if _, err := fmt.Sscanf(line, "# goose %d", &v); err != nil {
+				return nil, fmt.Errorf("fluent_migrations.txt: %q: %w", line, err)
+			}
+			out = append(out, FluentVersion{Version: v})
+		case strings.HasPrefix(line, "#"):
+		case len(out) == 0:
+			return nil, fmt.Errorf("fluent_migrations.txt: %q before the first goose line", line)
+		default:
+			out[len(out)-1].Names = append(out[len(out)-1].Names, line)
+		}
+	}
+	return out, nil
 }

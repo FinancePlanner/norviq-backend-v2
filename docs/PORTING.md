@@ -28,7 +28,7 @@ processes share one Postgres and one Redis. So:
 
 | What | Where |
 |---|---|
-| Every route, as Vapor mounts it | `docs/vapor-routes.txt` (646 routes) |
+| Every route, as Vapor mounts it | `docs/vapor-routes.txt` (693 routes, every feature flag on) |
 | Vapor sources (snapshot this port targets) | `/Users/fernandocorreiachill/Work/production/apps/norviq/.norviq-backend-snapshot/Sources/StockPlanBackend` |
 | Vapor tests | `.../.norviq-backend-snapshot/Tests/StockPlanBackendTests` |
 | Route registration and middleware per group | `.../StockPlanBackend/routes.swift` and each controller's `boot(routes:)` |

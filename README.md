@@ -13,7 +13,7 @@ cp .env.example .env             # then: set -a; . ./.env; set +a
 go run ./cmd/api serve           # serves ported routes, proxies the rest to LEGACY_UPSTREAM_URL
 go run ./cmd/api migrate         # goose up (adopts a Vapor-migrated DB first)
 go run ./cmd/api routes          # every route v2 serves
-scripts/coverage.sh              # ported vs Vapor's 646 routes
+scripts/coverage.sh              # ported vs Vapor's 693 routes
 ```
 
 Tests need a disposable Postgres:

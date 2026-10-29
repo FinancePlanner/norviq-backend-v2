@@ -1,7 +1,7 @@
 # Vapor → Go migration plan
 
-Goal: replace `norviq-backend` (Swift 6 / Vapor 4, ~120k lines, 646 routes,
-159 Fluent migrations, ~30 background jobs) with this Go service, serving the
+Goal: replace `norviq-backend` (Swift 6 / Vapor 4, ~128k lines, 693 routes,
+163 Fluent migrations, ~30 background jobs) with this Go service, serving the
 same endpoints to iOS, the Go web app, web-v2 and norviq-mcp, without any
 client release. Then archive the Vapor repo.
 
@@ -41,24 +41,30 @@ client release. Then archive the Vapor repo.
 
 - Until cutover, **Vapor's migrate job owns the schema**. v2's chart runs no
   migrate job.
-- `db/migrations/00001_baseline.sql` is the schema Vapor's 159 migrations
-  produce, verified by migrating a scratch DB both ways and diffing
-  `pg_dump`s (zero lines of difference).
-- At cutover `norviq-api migrate` adopts the production DB: when it finds
-  `_fluent_migrations` but no goose table, it checks every Fluent migration the
-  baseline captured is applied, then stamps the baseline without running it.
-  It refuses if Vapor has migrations newer than the baseline.
-- **Feature freeze risk:** anything merged into Vapor after the snapshot
-  (`.norviq-backend-snapshot`, commit in the baseline header) must be ported
-  too: new routes, new migrations (as goose migrations). Keep Vapor changes to
-  fixes during the migration.
+- `db/migrations/00001_baseline.sql` is the schema Vapor's first 159
+  migrations produce (norviq-backend e6e35df). `00002_vapor_37128c4.sql` adds
+  the 4 Vapor gained by 37128c4 (groups, achievements, digests, social
+  activity). Both were verified by migrating scratch DBs both ways and
+  diffing `pg_dump`s (zero lines of difference).
+- `internal/migrate/fluent_migrations.txt` maps each goose version to the
+  Fluent migrations it mirrors. At cutover `norviq-api migrate` adopts the
+  production DB: when it finds `_fluent_migrations` but no goose table, it
+  stamps every version whose Fluent migrations are all applied, without
+  running them, then runs the rest. It refuses a version applied only in
+  part, and any Fluent migration no goose version mirrors.
+- **Vapor keeps moving:** anything merged into Vapor after the snapshot
+  (`.norviq-backend-snapshot`, now 37128c4) must be ported too. To catch up:
+  move the snapshot, rebuild, migrate a scratch DB with Vapor, generate the
+  next goose migration from the `pg_dump` diff, add its `# goose N` section,
+  verify a zero-line diff, and regenerate `docs/vapor-routes.txt` with every
+  `*_ENABLED` flag on.
 
 ## Order
 
 | Wave | Domains | Why first |
 |---|---|---|
 | 0 | Foundation: wire format, errors, auth, rate limit, idempotency, client IP, health, strangler, parity tool, test DB | everything depends on it (**done**) |
-| 1 | identity (auth, users, OAuth server, PATs, crypto, mailer), billing/entitlements, market data platform, notifications/push, AI provider platform | shared services the other domains call |
+| 1 | identity (auth, users, OAuth server, PATs, crypto, mailer), billing/entitlements, market data platform, notifications/push, AI provider platform | shared services the other domains call (**done**) |
 | 2 | portfolio, expenses/budget/receipts, tax, social/community, banking/brokers, AI features, news/macro/crypto/brief | the bulk of the routes |
 | 3 | planning, scenarios, goals, retirement, rebalancing, automation, financing, statistics, reporting, recap, pilots, terminal positions, export, sharing, messaging, internal metrics | the remaining routes |
 | 4 | jobs flip, full parity sweep on staging, cutover, archive Vapor | |
@@ -75,7 +81,7 @@ Progress: `scripts/coverage.sh`.
 - Staging first: point the staging ingress (port-forward only today) at v2,
   run the parity suites against both, then production.
 - Cutover: Traefik `api.norviq.org` → `norviq-backend-v2`; Vapor stays
-  deployed (no ingress) as the proxy target until coverage hits 646/646 and
+  deployed (no ingress) as the proxy target until coverage hits 693/693 and
   all jobs run in v2. Then remove `LEGACY_UPSTREAM_URL`, enable v2's migrate
   job, scale Vapor to zero, and archive the repo.
 

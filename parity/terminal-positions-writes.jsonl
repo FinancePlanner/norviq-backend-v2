@@ -1,0 +1,17 @@
+# Terminal position writes. Run once against a freshly seeded pair of DB copies
+# (parity/terminal-positions-setup.sql), in file order, after nothing else has
+# written to them; ignore id,createdAt,updatedAt (new rows and real updates).
+#   go run ./cmd/parity -a http://127.0.0.1:18128 -b http://127.0.0.1:18118 -jwt-secret parity-secret \
+#     -cases parity/terminal-positions-writes.jsonl -ignore requestId,id,createdAt,updatedAt
+{"name": "create", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000002", "body": {"ticker": " sofi ", "sharesOutstanding": 1100000000.0, "terminalShareCount": 1750000000.0, "terminalMarketCap": 150000000000.0, "valueWanted": 250000, "sharesOwned": 1000, "currentSharePrice": 9.5, "notes": "  bull  "}}
+{"name": "create snake_case minimal", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000002", "body": {"ticker": "x.y-z", "terminal_share_count": 0, "terminal_market_cap": 5, "value_wanted": 0}}
+{"name": "patch values", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c11", "as": "7e000000-0000-4000-8000-000000000002", "body": {"valueWanted": 2000000, "ticker": "amzn", "notes": "   "}}
+{"name": "patch clear", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c11", "as": "7e000000-0000-4000-8000-000000000002", "body": {"clear": ["currentSharePrice", "sharesOutstanding"], "currentSharePrice": 5}}
+{"name": "patch market cap zero (scenarioError)", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c12", "as": "7e000000-0000-4000-8000-000000000002", "body": {"terminalMarketCap": 0}}
+{"name": "duplicate", "method": "POST", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c11/duplicate", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "delete", "method": "DELETE", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c13", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "delete again 404", "method": "DELETE", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c13", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "list after writes", "method": "GET", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "summary after writes", "method": "GET", "path": "/v1/terminal-positions/summary", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "reorder reversed", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000006", "body": {"ids": ["7e000000-0000-4000-8000-000000000c22", "7e000000-0000-4000-8000-000000000c21"]}}
+{"name": "order same order (repeatable)", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000006", "body": {"ids": ["7e000000-0000-4000-8000-000000000c21", "7e000000-0000-4000-8000-000000000c22"]}}

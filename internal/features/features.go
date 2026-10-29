@@ -194,6 +194,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// Planning: rebalancing drift alerts.
+		rebalancing.AlertJob{},
 	}
 }
 

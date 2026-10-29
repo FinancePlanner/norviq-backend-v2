@@ -1,14 +1,12 @@
-// Package retirement ports RetirementController's portfolio routes
+// Package retirement ports RetirementController
 // (Retirement/RetirementController.swift), RetirementProjectionEngine and
 // RetirementRuleRegistry.
-//
-// GET /v1/retirement/rules/:jurisdiction belongs to another porter; it only
-// needs ParseJurisdiction + RulePackFor from this package.
 package retirement
 
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"norviq-api/internal/apijson"
@@ -23,7 +21,8 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-// Feature mounts /v1/portfolios/:portfolioId/retirement*.
+// Feature mounts /v1/retirement/rules/:jurisdiction and
+// /v1/portfolios/:portfolioId/retirement*.
 type Feature struct {
 	// Now overrides the clock (tests).
 	Now func() time.Time
@@ -42,11 +41,25 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	}
 	read := []echo.MiddlewareFunc{d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopePlanningRead)}
 	write := []echo.MiddlewareFunc{d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopePlanningWrite)}
+	r.V1.GET("/retirement/rules/:jurisdiction", h.rules, read...)
 	r.V1.GET("/portfolios/:portfolioId/retirement", h.getPlan, read...)
 	r.V1.PUT("/portfolios/:portfolioId/retirement", h.upsertPlan, write...)
 	r.V1.POST("/portfolios/:portfolioId/retirement/refresh-rules", h.refreshRules, write...)
 	r.V1.POST("/portfolios/:portfolioId/retirement/projection", h.projection, write...)
 	return nil
+}
+
+// rules is GET /v1/retirement/rules/:jurisdiction.
+func (h *handler) rules(c *echo.Context) error {
+	j, ok := ParseJurisdiction(strings.ToUpper(c.Param("jurisdiction")))
+	if !ok {
+		return httpx.BadRequest("Unsupported tax jurisdiction.")
+	}
+	pack := RulePackFor(j, httpx.QueryString(c, "version"))
+	if pack == nil {
+		return httpx.NotFound("Retirement rule version not found.")
+	}
+	return httpx.OK(c, pack)
 }
 
 type handler struct {

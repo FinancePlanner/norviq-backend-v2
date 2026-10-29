@@ -23,6 +23,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/pilots"
 	"norviq-api/internal/features/social"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
@@ -73,6 +74,8 @@ func All() []server.Feature {
 		achievements.Feature{},
 		// User-published articles; behind ARTICLES_ENABLED.
 		articles.Feature{},
+		// Pilot follows (PILOTS_ENABLED, checked per request).
+		pilots.Feature{},
 	}
 }
 
@@ -106,6 +109,8 @@ func AllJobs() []Job {
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
 		achievements.SweepJob{},
+		pilots.IngestionJob{},
+		pilots.MirrorJob{},
 	}
 }
 

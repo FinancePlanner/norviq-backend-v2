@@ -1,0 +1,30 @@
+# /v1/financial-goals and /v1/goals (planning-goals). Seed first: psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/planning-goals-setup.sql
+# Run: go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18168 -jwt-secret parity-secret -cases parity/planning-goals.jsonl -ignore requestId,calculatedAt
+{"name":"fg list main","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg list pro","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg list empty","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000003"}
+{"name":"fg list unauth","method":"GET","path":"/v1/financial-goals"}
+{"name":"fg templates","method":"GET","path":"/v1/financial-goals/templates","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg overview free","method":"GET","path":"/v1/financial-goals/overview","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg overview pro","method":"GET","path":"/v1/financial-goals/overview","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg overview empty","method":"GET","path":"/v1/financial-goals/overview","as":"e0a10000-0000-4000-8000-000000000003"}
+{"name":"fg get","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg get lowercase id","method":"GET","path":"/v1/financial-goals/E0A10000-0000-4000-8000-000000000302","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg get other owner","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg get bad id","method":"GET","path":"/v1/financial-goals/nope","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg progress behind","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301/progress","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg progress ahead","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000302/progress","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg progress paused","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000303/progress","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg progress 404","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000999/progress","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg contributions","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301/contributions","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg contributions empty","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000302/contributions","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg suggestions existing","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301/suggestions","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg suggestions generated","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000302/suggestions","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg suggestions none","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000303/suggestions","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg drafts","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000301/adjustment-drafts","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"fg drafts empty","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000303/adjustment-drafts","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"fg drafts 404","method":"GET","path":"/v1/financial-goals/e0a10000-0000-4000-8000-000000000303/adjustment-drafts","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"goals get","method":"GET","path":"/v1/goals/e0a10000-0000-4000-8000-000000000802","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"goals get odd","method":"GET","path":"/v1/goals/e0a10000-0000-4000-8000-000000000803","as":"e0a10000-0000-4000-8000-000000000001"}
+{"name":"goals get 404","method":"GET","path":"/v1/goals/e0a10000-0000-4000-8000-000000000802","as":"e0a10000-0000-4000-8000-000000000002"}
+{"name":"goals get bad id","method":"GET","path":"/v1/goals/xyz","as":"e0a10000-0000-4000-8000-000000000001"}

@@ -1,0 +1,9 @@
+# Research writes: run once against a freshly seeded pair of DB copies, in order,
+#   -cases parity/research-writes.jsonl -ignore requestId,id
+{"name": "create", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000008", "body": {"symbol": " tsla ", "title": "  ", "thesis": " Robotaxi ", "risks": "", "catalysts": "Q3", "reference_links": [" https://a.example/1 ", ""]}}
+{"name": "create minimal", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000008", "body": {"symbol": "amd", "thesis": "MI400"}}
+{"name": "update", "method": "PUT", "path": "/v1/research/7e000000-0000-4000-8000-000000000f11", "as": "7e000000-0000-4000-8000-000000000008", "body": {"symbol": "nvda", "title": "Blackwell", "thesis": "Data center", "referenceLinks": ["https://n.example/a?b=c&d"]}}
+{"name": "update clears links", "method": "PUT", "path": "/v1/research/7e000000-0000-4000-8000-000000000f11", "as": "7e000000-0000-4000-8000-000000000008", "body": {"symbol": "nvda", "thesis": "Data center", "referenceLinks": []}}
+{"name": "delete", "method": "DELETE", "path": "/v1/research/7e000000-0000-4000-8000-000000000f12", "as": "7e000000-0000-4000-8000-000000000008"}
+{"name": "delete again", "method": "DELETE", "path": "/v1/research/7e000000-0000-4000-8000-000000000f12", "as": "7e000000-0000-4000-8000-000000000008"}
+{"name": "list after writes", "method": "GET", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000008"}

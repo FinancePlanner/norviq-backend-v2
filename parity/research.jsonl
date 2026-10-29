@@ -1,0 +1,30 @@
+# Research note read and error cases; same DB copies and backends as
+# parity/terminal-positions.jsonl (seeded by parity/terminal-positions-setup.sql).
+#   go run ./cmd/parity -a http://127.0.0.1:18128 -b http://127.0.0.1:18118 -jwt-secret parity-secret -cases parity/research.jsonl
+{"name": "list", "method": "GET", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list symbol filter", "method": "GET", "path": "/v1/research?symbol=%20aapl", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list blank symbol", "method": "GET", "path": "/v1/research?symbol=", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list limit 1", "method": "GET", "path": "/v1/research?limit=1", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list limit 0 clamps to 1", "method": "GET", "path": "/v1/research?limit=0", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list malformed limit", "method": "GET", "path": "/v1/research?limit=abc", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list empty user", "method": "GET", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000005"}
+{"name": "get with links", "method": "GET", "path": "/v1/research/7e000000-0000-4000-8000-000000000f01", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "get lowercase id", "method": "GET", "path": "/v1/research/7e000000-0000-4000-8000-000000000f02", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "get unreadable links", "method": "GET", "path": "/v1/research/7e000000-0000-4000-8000-000000000f03", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "get other user's note", "method": "GET", "path": "/v1/research/7e000000-0000-4000-8000-000000000f01", "as": "7e000000-0000-4000-8000-000000000009"}
+{"name": "get bad id", "method": "GET", "path": "/v1/research/nope", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "get unknown", "method": "GET", "path": "/v1/research/7e000000-0000-4000-8000-0000000000ff", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "list via research:read PAT", "method": "GET", "path": "/v1/research", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab02"}}
+{"name": "create via research:read PAT is 403", "method": "POST", "path": "/v1/research", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab02"}, "body": {"symbol": "x", "thesis": "y"}}
+{"name": "list via planning:read PAT is 403", "method": "GET", "path": "/v1/research", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab01"}}
+{"name": "list no token", "method": "GET", "path": "/v1/research"}
+{"name": "create blank symbol", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": " ", "thesis": "x"}}
+{"name": "create blank thesis", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "x", "thesis": "  "}}
+{"name": "create missing thesis", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "x"}}
+{"name": "create links not strings", "method": "POST", "path": "/v1/research", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "x", "thesis": "y", "referenceLinks": [1]}}
+{"name": "update bad id", "method": "PUT", "path": "/v1/research/nope", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "x", "thesis": "y"}}
+{"name": "update other user's note", "method": "PUT", "path": "/v1/research/7e000000-0000-4000-8000-000000000f01", "as": "7e000000-0000-4000-8000-000000000009", "body": {"symbol": "x", "thesis": "y"}}
+{"name": "update bad body before lookup", "method": "PUT", "path": "/v1/research/7e000000-0000-4000-8000-0000000000ff", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "x"}}
+{"name": "update blank symbol", "method": "PUT", "path": "/v1/research/7e000000-0000-4000-8000-000000000f01", "as": "7e000000-0000-4000-8000-000000000007", "body": {"symbol": "", "thesis": "y"}}
+{"name": "delete bad id", "method": "DELETE", "path": "/v1/research/nope", "as": "7e000000-0000-4000-8000-000000000007"}
+{"name": "delete other user's note", "method": "DELETE", "path": "/v1/research/7e000000-0000-4000-8000-000000000f01", "as": "7e000000-0000-4000-8000-000000000009"}

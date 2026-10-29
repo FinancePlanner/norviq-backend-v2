@@ -1,0 +1,9 @@
+# AI consent gating (AI_CONSENT_ENFORCED=true AI_CONSENT_LEGACY_IOS_GRACE=true on BOTH
+# backends, no AI keys; same DB copies as parity/terminal-positions.jsonl).
+#   go run ./cmd/parity -a http://127.0.0.1:18128 -b http://127.0.0.1:18118 -jwt-secret parity-secret -cases parity/terminal-positions-consent.jsonl
+{"name": "share-facts pro without consent is 403", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "amzn"}}
+{"name": "scenario pro without consent is 403", "method": "POST", "path": "/v1/terminal-positions/ai/scenario", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "amzn"}}
+{"name": "legacy iOS build is let through (then 503: no client)", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "amzn"}, "headers": {"User-Agent": "Norviq/96 CFNetwork/1568.100.1 Darwin/24.0.0"}}
+{"name": "current iOS build with the capability is 403", "method": "POST", "path": "/v1/terminal-positions/ai/scenario", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "amzn"}, "headers": {"User-Agent": "Norviq/97 CFNetwork/1568.100.1 Darwin/24.0.0", "X-StockPlan-Client-Capabilities": "mfa-auth-v1, ai-consent-v1"}}
+{"name": "free user: premium is checked before consent", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000003", "body": {"ticker": "amzn"}}
+{"name": "bad body: consent is checked before decode", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000004", "body": {"x": 1}}

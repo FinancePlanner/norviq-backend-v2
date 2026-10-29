@@ -11,6 +11,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/swiftjson"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -93,7 +94,8 @@ func decodeBody(c *echo.Context, fields []field) (decoded, error) {
 				"Value was not of type 'Dictionary<String, Any>' at path ''. Expected to decode Dictionary<String, Any> but found %s instead.",
 				jsonKind(trimmed)))
 		}
-		return nil, httpx.BadRequest("Data corrupted at path ''. The given data was not valid JSON.")
+		var probe json.RawMessage
+		return nil, swiftjson.Corrupted(json.Unmarshal(trimmed, &probe))
 	}
 	out := decoded{}
 	for _, f := range fields {
@@ -193,8 +195,10 @@ func decodeInt(v json.RawMessage, f field) (int64, error) {
 		fl >= -9.223372036854775808e18 && fl < 9.223372036854775808e18 {
 		return int64(fl), nil
 	}
+	// Darwin Foundation rejects the whole document (swiftjson.checkInteger).
+	msg := fmt.Sprintf("Number %s is not representable in Swift.", string(trimmed))
 	return 0, httpx.BadRequest(fmt.Sprintf(
-		"Data corrupted at path '%s'. Parsed JSON number <%s> does not fit in %s.", f.name, string(trimmed), t))
+		"Data corrupted at path ''. The given data was not valid JSON. Underlying error: Error Domain=NSCocoaErrorDomain Code=3840 %q UserInfo={NSDebugDescription=%s}.", msg, msg))
 }
 
 func swiftType(k fieldKind) string {

@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	AccountByUserPortfolioBroker(ctx context.Context, arg AccountByUserPortfolioBrokerParams) ([]Account, error)
+	AccountIDsForPortfolioBroker(ctx context.Context, arg AccountIDsForPortfolioBrokerParams) ([]uuid.UUID, error)
 	AccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	AccountIDsForUserPortfolio(ctx context.Context, arg AccountIDsForUserPortfolioParams) ([]uuid.UUID, error)
 	ActiveMembershipRole(ctx context.Context, arg ActiveMembershipRoleParams) ([]string, error)
@@ -20,6 +21,10 @@ type Querier interface {
 	CountAccountsByBrokerExternalID(ctx context.Context, arg CountAccountsByBrokerExternalIDParams) (int64, error)
 	CountPilotFollowsForPortfolioList(ctx context.Context, portfolioListID *uuid.UUID) (int64, error)
 	DefaultPortfolioList(ctx context.Context, userID uuid.UUID) ([]PortfolioList, error)
+	DeleteAccountByID(ctx context.Context, id uuid.UUID) error
+	DeleteCashBalancesForAccountID(ctx context.Context, accountID uuid.UUID) error
+	DeleteStocksInListBySource(ctx context.Context, arg DeleteStocksInListBySourceParams) error
+	DeleteTransactionsForAccountID(ctx context.Context, accountID uuid.UUID) error
 	FollowedPortfolioListIDs(ctx context.Context, userID uuid.UUID) ([]*uuid.UUID, error)
 	GetOwnedPortfolioList(ctx context.Context, arg GetOwnedPortfolioListParams) (PortfolioList, error)
 	// Shared portfolio plumbing (internal/platform/portfolios): access checks,

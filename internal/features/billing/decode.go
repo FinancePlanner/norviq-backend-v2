@@ -112,7 +112,7 @@ func parseObject(body []byte) (object, error) {
 		return object{}, httpx.Abort(http.StatusUnprocessableEntity, "")
 	}
 	var root json.RawMessage
-	if err := apijson.Unmarshal(body, &root); err != nil {
+	if err := apijson.UnmarshalKeyed(body, &root); err != nil {
 		return object{}, corrupted(err)
 	}
 	return asObject(root, "")

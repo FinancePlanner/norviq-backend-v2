@@ -88,7 +88,11 @@ the right Go types.
 - **Request bodies** may arrive in snake_case or camelCase. `httpx.Decode`
   normalizes, so just tag Go structs with the camelCase Swift names.
   `URL`, `URI` and `Id` suffixes normalize as `avatar_url` -> `avatarURL`,
-  `user_id` -> `userId`.
+  `user_id` -> `userId`. Swift `[String: T]` is a Go `map[string]T`: its
+  keys arrive untouched, only the structs inside it are normalized (the
+  rewrite follows the target type). A hand-written decoder that walks raw
+  JSON as keyed containers (`map[string]json.RawMessage`) uses
+  `apijson.UnmarshalKeyed`, which rewrites every key.
 - A Swift `Codable` decode failure was a **400**. A missing required field was
   a 400 too, so validate required fields explicitly where Swift had them
   non-optional.

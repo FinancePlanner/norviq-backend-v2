@@ -32,6 +32,7 @@ import (
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/features/recaps"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
 	"norviq-api/internal/features/retirement"
@@ -134,6 +135,8 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// RecapController (/v1/recaps); 404 unless RECAP_ENABLED=true.
+		recaps.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 	}
 }
 

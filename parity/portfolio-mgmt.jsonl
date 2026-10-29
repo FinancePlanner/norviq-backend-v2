@@ -1,0 +1,40 @@
+# Portfolio management (PortfolioManagementController). Load
+# parity/portfolio-mgmt-setup.sql first, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18193 -jwt-secret parity-secret \
+#     -cases parity/portfolio-mgmt.jsonl -ignore requestId,generatedAt
+# Read routes and their errors. The write routes (volatile ids and timestamps
+# ignored) are in parity/portfolio-mgmt-writes.jsonl.
+{"name": "list-free", "path": "/v1/portfolios", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "list-pro", "path": "/v1/portfolios", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "list-editor-shared", "path": "/v1/portfolios", "as": "6d676d74-0000-4000-8000-000000000003"}
+{"name": "list-stranger", "path": "/v1/portfolios", "as": "6d676d74-0000-4000-8000-000000000005"}
+{"name": "list-anonymous", "path": "/v1/portfolios"}
+{"name": "get-own", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001a1", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "get-pro-hypothetical", "path": "/v1/portfolios/6D676D74-0000-4000-8000-0000000001B2", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "get-archived", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b3", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "get-as-editor", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000003"}
+{"name": "get-stranger-404", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000005"}
+{"name": "get-bad-id", "path": "/v1/portfolios/not-a-uuid", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "get-braced-id", "path": "/v1/portfolios/{6d676d74-0000-4000-8000-0000000001a1}", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "members-owner", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/members", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "members-editor", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/members", "as": "6d676d74-0000-4000-8000-000000000003"}
+{"name": "members-solo", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001a1/members", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "members-404", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/members", "as": "6d676d74-0000-4000-8000-000000000005"}
+{"name": "invitations-owner", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/invitations", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "invitations-empty", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001a1/invitations", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "invitations-editor-403", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/invitations", "as": "6d676d74-0000-4000-8000-000000000003"}
+{"name": "cash-list", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b2/cash", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "cash-list-empty", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/cash", "as": "6d676d74-0000-4000-8000-000000000003"}
+{"name": "cash-list-404", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b2/cash", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "accounts-list", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b1/accounts", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "accounts-list-pilot", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001b5/accounts", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "accounts-list-empty", "path": "/v1/portfolios/6d676d74-0000-4000-8000-0000000001a1/accounts", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "compare", "path": "/v1/portfolios/compare?left=6d676d74-0000-4000-8000-0000000001b1&right=6d676d74-0000-4000-8000-0000000001b2", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-same", "path": "/v1/portfolios/compare?left=6d676d74-0000-4000-8000-0000000001a1&right=6d676d74-0000-4000-8000-0000000001a1", "as": "6d676d74-0000-4000-8000-000000000001"}
+{"name": "compare-empty-vs-holdings", "path": "/v1/portfolios/compare?left=6d676d74-0000-4000-8000-0000000001b4&right=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-missing-left", "path": "/v1/portfolios/compare?right=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-missing-right", "path": "/v1/portfolios/compare?left=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-flag-left", "path": "/v1/portfolios/compare?left&right=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-bad-ids", "path": "/v1/portfolios/compare?left=x&right=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-empty-value", "path": "/v1/portfolios/compare?left=&right=", "as": "6d676d74-0000-4000-8000-000000000002"}
+{"name": "compare-404", "path": "/v1/portfolios/compare?left=6d676d74-0000-4000-8000-0000000001a1&right=6d676d74-0000-4000-8000-0000000001b1", "as": "6d676d74-0000-4000-8000-000000000001"}

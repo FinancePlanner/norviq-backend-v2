@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
@@ -20,6 +21,13 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/portfolio"
+	"norviq-api/internal/features/portfoliomgmt"
+	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/features/retirement"
+	"norviq-api/internal/features/scenarios"
+	"norviq-api/internal/features/simulations"
+	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -51,6 +59,25 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// PortfolioController, PortfolioShareController (authenticated
+		// routes).
+		portfolio.Feature{},
+		// Portfolio management: /v1/portfolios CRUD, members,
+		// invitations, cash positions, account assignment.
+		portfoliomgmt.Feature{},
+		// Portfolio rebalancing (portfolio-scoped routes) and simulations.
+		// TODO(merge): set ScheduleAchievementCheck to achievementhooks.Schedule.
+		rebalancing.Feature{},
+		simulations.Feature{},
+		// Holdings, manual transactions and the stock share page.
+		stocks.Feature{},
+		// RetirementController portfolio routes.
+		// TODO(merge): set ScheduleAchievementCheck to achievementhooks.Schedule.
+		retirement.Feature{},
+		// ScenarioController portfolio snapshot routes.
+		scenarios.Feature{},
+		// WealthAutomationController rebalancing-policy routes.
+		automation.Feature{},
 	}
 }
 
@@ -83,6 +110,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		portfolio.SnapshotJob{},
 	}
 }
 

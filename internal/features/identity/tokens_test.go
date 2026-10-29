@@ -62,7 +62,7 @@ func TestPATLifecycle(t *testing.T) {
 	if got := intro("garbage"); got != `{"active":false}` {
 		t.Fatal(got)
 	}
-	expect(t, h.Do("GET", "/v1/tokens", created.Token, nil), 403, "")
+	expect(t, h.Do("GET", "/v1/tokens", created.Token, nil), 401, "") // not a JWT: the session authenticator rejects it
 
 	expect(t, h.Do("DELETE", "/v1/tokens/nope", a.Token, nil), 400, "Invalid token id.")
 	expect(t, h.Do("DELETE", "/v1/tokens/6F9619FF-8B86-D011-B42D-00CF4FC964FF", a.Token, nil), 404, "Token not found.")

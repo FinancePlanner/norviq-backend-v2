@@ -65,8 +65,8 @@ func TestConfigFlags(t *testing.T) {
 func TestRequestAndAccept(t *testing.T) {
 	e := setup(t, social.Feature{})
 	a, b := e.user("soc_req1"), e.user("soc_req2")
-	e.exec(`INSERT INTO push_devices (id, user_id, device_token, platform, apns_environment, authorization_status, is_active, last_seen_at, created_at, updated_at, capabilities)
-		VALUES ($1, $2, 'tok-b', 'ios', 'sandbox', 'authorized', true, now(), now(), now(), '')`, uuid.New(), b)
+	e.exec(`INSERT INTO push_devices (id, user_id, device_token, platform, apns_environment, authorization_status, is_active, last_seen_at, created_at, updated_at)
+		VALUES ($1, $2, 'tok-b', 'ios', 'sandbox', 'authorized', true, now(), now(), now())`, uuid.New(), b)
 
 	for range 2 { // sending again is a no-op, not a second request
 		if r := e.call(http.MethodPost, "/v1/social/friend-requests", a, map[string]any{"userId": up(b)}); r.Status != http.StatusOK {
@@ -527,8 +527,8 @@ func TestProfileShowcase(t *testing.T) {
 func TestPushNotificationKinds(t *testing.T) {
 	e := setup(t, social.Feature{})
 	a, b := e.user("soc_psh1"), e.user("soc_psh2")
-	e.exec(`INSERT INTO push_devices (id, user_id, device_token, platform, apns_environment, authorization_status, is_active, last_seen_at, created_at, updated_at, capabilities)
-		VALUES ($1, $2, 'tok-a', 'ios', 'sandbox', 'authorized', true, now(), now(), now(), '')`, uuid.New(), a)
+	e.exec(`INSERT INTO push_devices (id, user_id, device_token, platform, apns_environment, authorization_status, is_active, last_seen_at, created_at, updated_at)
+		VALUES ($1, $2, 'tok-a', 'ios', 'sandbox', 'authorized', true, now(), now(), now())`, uuid.New(), a)
 	e.call(http.MethodPost, "/v1/social/friend-requests", a, map[string]any{"userId": up(b)})
 	e.call(http.MethodPost, "/v1/social/friend-requests", b, map[string]any{"userId": up(a)})
 	if len(e.push.sent) != 1 {

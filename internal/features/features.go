@@ -153,6 +153,10 @@ func AllJobs() []Job {
 		pilots.MirrorJob{},
 		watchlist.TargetAlertJob{},
 		watchlist.EarningsReminderJob{},
+		// Tax: report queue, report expiry, daily projections.
+		tax.ReportGenerationJob{},
+		tax.ReportCleanupJob{},
+		tax.ProjectionJob{},
 	}
 }
 

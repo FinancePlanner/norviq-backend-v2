@@ -6,6 +6,7 @@ package taxdb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -29,6 +30,7 @@ type Querier interface {
 	ActiveGoalsByIDs(ctx context.Context, arg ActiveGoalsByIDsParams) ([]FinancialGoal, error)
 	AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) ([]AdjustedClosesRow, error)
 	BuysBetween(ctx context.Context, arg BuysBetweenParams) ([]Transaction, error)
+	CachedFXRates(ctx context.Context, arg CachedFXRatesParams) ([]CachedFXRatesRow, error)
 	CarryforwardApplicationsBefore(ctx context.Context, arg CarryforwardApplicationsBeforeParams) ([]TaxLossCarryforwardApplication, error)
 	CarryforwardApplicationsFor(ctx context.Context, arg CarryforwardApplicationsForParams) ([]TaxLossCarryforwardApplication, error)
 	CarryforwardApplicationsOf(ctx context.Context, carryforwardID uuid.UUID) ([]TaxLossCarryforwardApplication, error)
@@ -39,6 +41,8 @@ type Querier interface {
 	// GermanyStockLossLedger, GermanyGeneralLossLedger) and German fund advance
 	// lump sums (GermanyFundAnnualInputService, GermanyFundAdvanceAllocationService).
 	CarryforwardsAsOf(ctx context.Context, arg CarryforwardsAsOfParams) ([]TaxLossCarryforward, error)
+	CompleteTaxProfiles(ctx context.Context) ([]TaxProfile, error)
+	CountActiveTaxReports(ctx context.Context, userID uuid.UUID) (int64, error)
 	DecisionFor(ctx context.Context, arg DecisionForParams) (TaxOpportunityDecision, error)
 	DecisionsForYear(ctx context.Context, arg DecisionsForYearParams) ([]TaxOpportunityDecision, error)
 	DeleteCarryforwardApplication(ctx context.Context, id uuid.UUID) error
@@ -51,11 +55,14 @@ type Querier interface {
 	DisposalsByTransactionIDs(ctx context.Context, transactionIds []uuid.UUID) ([]LotDisposal, error)
 	DisposalsForLots(ctx context.Context, lotIds []uuid.UUID) ([]LotDisposal, error)
 	DividendsPaidInRange(ctx context.Context, arg DividendsPaidInRangeParams) ([]Dividend, error)
+	DueProjectionJobs(ctx context.Context, now time.Time) ([]TaxProjectionJob, error)
 	EligibleCarryforwards(ctx context.Context, arg EligibleCarryforwardsParams) ([]TaxLossCarryforward, error)
+	ExpiredTaxReports(ctx context.Context, now time.Time) ([]TaxReport, error)
 	FirstAccountByIDs(ctx context.Context, ids []uuid.UUID) (Account, error)
 	FundAdvanceAllocationsForHoldings(ctx context.Context, ids []uuid.UUID) ([]GermanyFundAdvanceAllocation, error)
 	FundAnnualHoldings(ctx context.Context, arg FundAnnualHoldingsParams) ([]GermanyFundAnnualHolding, error)
 	FundAnnualHoldingsForLots(ctx context.Context, lotIds []uuid.UUID) ([]GermanyFundAnnualHolding, error)
+	FundAnnualHoldingsForYear(ctx context.Context, arg FundAnnualHoldingsForYearParams) ([]GermanyFundAnnualHolding, error)
 	GeneralLossApplications(ctx context.Context, ids []uuid.UUID) ([]GermanyGeneralLossApplication, error)
 	GeneralLossApplicationsSorted(ctx context.Context, ids []uuid.UUID) ([]GermanyGeneralLossApplication, error)
 	GeneralLossYearFor(ctx context.Context, arg GeneralLossYearForParams) (GermanyGeneralLossYear, error)
@@ -68,22 +75,30 @@ type Querier interface {
 	InsertCarryforward(ctx context.Context, arg InsertCarryforwardParams) error
 	InsertCarryforwardApplication(ctx context.Context, arg InsertCarryforwardApplicationParams) error
 	InsertDecision(ctx context.Context, arg InsertDecisionParams) error
+	InsertFXRate(ctx context.Context, arg InsertFXRateParams) error
 	InsertFundAdvanceAllocation(ctx context.Context, arg InsertFundAdvanceAllocationParams) error
 	InsertFundAnnualHolding(ctx context.Context, arg InsertFundAnnualHoldingParams) error
 	InsertGeneralLossApplication(ctx context.Context, arg InsertGeneralLossApplicationParams) error
 	InsertGeneralLossYear(ctx context.Context, arg InsertGeneralLossYearParams) error
 	InsertNotificationPreference(ctx context.Context, arg InsertNotificationPreferenceParams) error
 	InsertProfile(ctx context.Context, arg InsertProfileParams) error
+	InsertProjectionJob(ctx context.Context, arg InsertProjectionJobParams) error
 	InsertProjectionSnapshot(ctx context.Context, arg InsertProjectionSnapshotParams) error
 	InsertRebalancePlanDraft(ctx context.Context, arg InsertRebalancePlanDraftParams) error
 	InsertRebalancingLink(ctx context.Context, arg InsertRebalancingLinkParams) error
 	InsertRestrictionWindow(ctx context.Context, arg InsertRestrictionWindowParams) error
 	InsertScenario(ctx context.Context, arg InsertScenarioParams) error
 	InsertStockLossYear(ctx context.Context, arg InsertStockLossYearParams) error
+	InsertTaxNotificationDelivery(ctx context.Context, arg InsertTaxNotificationDeliveryParams) error
+	// Tax reports, filing pack inputs and the tax jobs (TaxController report
+	// routes, TaxReportGenerator, TaxReportGenerationPoller,
+	// TaxReportCleanupJob, TaxProjectionPoller, TaxNotificationEvaluator).
+	InsertTaxReport(ctx context.Context, arg InsertTaxReportParams) (TaxReport, error)
 	InstrumentByID(ctx context.Context, id uuid.UUID) (Instrument, error)
 	InstrumentIDsByTaxIdentityGroup(ctx context.Context, taxIdentityGroup *string) ([]uuid.UUID, error)
 	InstrumentsByIDs(ctx context.Context, ids []uuid.UUID) ([]Instrument, error)
 	InstrumentsBySymbols(ctx context.Context, symbols []string) ([]Instrument, error)
+	LatestTaxNotificationDelivery(ctx context.Context, arg LatestTaxNotificationDeliveryParams) (TaxNotificationDelivery, error)
 	LotAdjustmentsForLots(ctx context.Context, lotIds []uuid.UUID) ([]LotAdjustment, error)
 	LotExistsForAccountsInstrument(ctx context.Context, arg LotExistsForAccountsInstrumentParams) (bool, error)
 	LotsByIDs(ctx context.Context, ids []uuid.UUID) ([]Lot, error)
@@ -91,12 +106,15 @@ type Querier interface {
 	LotsForAccountInstrumentByOpenDate(ctx context.Context, arg LotsForAccountInstrumentByOpenDateParams) ([]Lot, error)
 	LotsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]Lot, error)
 	MarkRestrictionWindowViolated(ctx context.Context, arg MarkRestrictionWindowViolatedParams) error
+	MarkTaxReportExpired(ctx context.Context, arg MarkTaxReportExpiredParams) error
 	NotificationPreferenceForUser(ctx context.Context, userID uuid.UUID) (TaxNotificationPreference, error)
 	OpenLotsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]Lot, error)
+	OpeningBalanceCount(ctx context.Context, accountIds []uuid.UUID) (int64, error)
 	PositionsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]Position, error)
 	ProfileByID(ctx context.Context, id uuid.UUID) (TaxProfile, error)
 	// Tax optimization tables (TaxModels.swift, TaxService.swift).
 	ProfileFor(ctx context.Context, arg ProfileForParams) (TaxProfile, error)
+	ProjectionJobExists(ctx context.Context, idempotencyKey string) (bool, error)
 	RebalancingLinksForPlan(ctx context.Context, actionPlanID uuid.UUID) ([]TaxActionRebalancingPlan, error)
 	RecentBuys(ctx context.Context, arg RecentBuysParams) ([]Transaction, error)
 	RestrictionWindowExistsForLeg(ctx context.Context, actionLegID uuid.UUID) (bool, error)
@@ -109,6 +127,13 @@ type Querier interface {
 	StockLossYears(ctx context.Context, userID uuid.UUID) ([]GermanyStockLossYear, error)
 	StockLossYearsAsOf(ctx context.Context, arg StockLossYearsAsOfParams) ([]GermanyStockLossYear, error)
 	TaxPackEntitlementCount(ctx context.Context, arg TaxPackEntitlementCountParams) (int64, error)
+	// Fluent's `.first()` with no sort: whichever row Postgres returns first.
+	TaxProfileForYear(ctx context.Context, arg TaxProfileForYearParams) (TaxProfile, error)
+	TaxReportByID(ctx context.Context, id uuid.UUID) (TaxReport, error)
+	TaxReportCandidates(ctx context.Context) ([]TaxReport, error)
+	TaxReportForUser(ctx context.Context, arg TaxReportForUserParams) (TaxReport, error)
+	TaxReportsForUser(ctx context.Context, userID uuid.UUID) ([]TaxReport, error)
+	TaxableAccountIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	TransactionExistsForAccountInstrument(ctx context.Context, arg TransactionExistsForAccountInstrumentParams) (bool, error)
 	TransactionExistsForAccountsInstrument(ctx context.Context, arg TransactionExistsForAccountsInstrumentParams) (bool, error)
 	TransactionInstrumentIDsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]uuid.UUID, error)
@@ -130,9 +155,13 @@ type Querier interface {
 	UpdateInstrumentMarketAdmission(ctx context.Context, arg UpdateInstrumentMarketAdmissionParams) error
 	UpdateNotificationPreference(ctx context.Context, arg UpdateNotificationPreferenceParams) error
 	UpdateProfile(ctx context.Context, arg UpdateProfileParams) error
+	UpdateProjectionJob(ctx context.Context, arg UpdateProjectionJobParams) error
 	UpdateStockLossApplication(ctx context.Context, arg UpdateStockLossApplicationParams) error
 	UpdateStockLossYearInput(ctx context.Context, arg UpdateStockLossYearInputParams) error
 	UpdateStockLossYearResult(ctx context.Context, arg UpdateStockLossYearResultParams) error
+	UpdateTaxReportAttempt(ctx context.Context, arg UpdateTaxReportAttemptParams) error
+	UpdateTaxReportFailed(ctx context.Context, arg UpdateTaxReportFailedParams) error
+	UpdateTaxReportReady(ctx context.Context, arg UpdateTaxReportReadyParams) error
 	UpsertStockLossApplicationInsert(ctx context.Context, arg UpsertStockLossApplicationInsertParams) error
 }
 

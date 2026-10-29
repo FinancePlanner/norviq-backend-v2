@@ -323,6 +323,16 @@ type TaxLossCarryforwardApplication struct {
 	UpdatedAt      *time.Time
 }
 
+type TaxNotificationDelivery struct {
+	ID               uuid.UUID
+	UserID           uuid.UUID
+	OpportunityID    string
+	InstrumentID     uuid.UUID
+	EstimatedBenefit float64
+	Currency         string
+	DeliveredAt      time.Time
+}
+
 type TaxNotificationPreference struct {
 	ID             uuid.UUID
 	UserID         uuid.UUID
@@ -355,6 +365,36 @@ type TaxProfile struct {
 	IsComplete        bool
 	CreatedAt         time.Time
 	UpdatedAt         *time.Time
+}
+
+type TaxProjectionJob struct {
+	ID             uuid.UUID
+	UserID         uuid.UUID
+	TaxYear        int64
+	Reason         string
+	IdempotencyKey string
+	Status         string
+	AttemptCount   int64
+	NextAttemptAt  time.Time
+	LastError      *string
+	CreatedAt      time.Time
+	UpdatedAt      *time.Time
+}
+
+type TaxReport struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	TaxYear       int64
+	Kind          string
+	Format        string
+	Status        string
+	FilePath      *string
+	ExpiresAt     *time.Time
+	ErrorMessage  *string
+	CreatedAt     time.Time
+	UpdatedAt     *time.Time
+	AttemptCount  *int64
+	NextAttemptAt *time.Time
 }
 
 type TaxScenario struct {

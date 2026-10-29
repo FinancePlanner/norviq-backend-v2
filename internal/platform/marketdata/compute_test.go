@@ -18,9 +18,10 @@ func candles(closes []float64) []PriceBarResponse {
 	return out
 }
 
-func seq(from, to int) []float64 {
+// seq is 1...to.
+func seq(to int) []float64 {
 	out := []float64{}
-	for i := from; i <= to; i++ {
+	for i := 1; i <= to; i++ {
 		out = append(out, float64(i))
 	}
 	return out
@@ -73,14 +74,14 @@ func mustCompute(t *testing.T, closes []float64) TechnicalSignalsResponse {
 func near(a, b, eps float64) bool { return math.Abs(a-b) < eps }
 
 func TestTechnicalsMovingAveragesAndTrend(t *testing.T) {
-	s := mustCompute(t, seq(1, 300))
+	s := mustCompute(t, seq(300))
 	if s.Symbol != "AAPL" || s.Close != 300 || s.AsOf != "2024-10-26" {
 		t.Fatalf("header %+v", s)
 	}
 	if *s.SMA50 != 275.5 || *s.SMA200 != 200.5 || s.Trend != "aboveBoth" || s.Cross != "none" {
 		t.Fatalf("averages %v %v %s %s", *s.SMA50, *s.SMA200, s.Trend, s.Cross)
 	}
-	rev := seq(1, 300)
+	rev := seq(300)
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
@@ -113,7 +114,7 @@ func TestTechnicalsRSI(t *testing.T) {
 	if r := mustCompute(t, ext).RSI14; r == nil || !near(*r, 37.7877, 0.0005) {
 		t.Fatalf("smoothed rsi %v", r)
 	}
-	if r := mustCompute(t, seq(1, 20)).RSI14; r == nil || *r != 100 {
+	if r := mustCompute(t, seq(20)).RSI14; r == nil || *r != 100 {
 		t.Fatalf("all gains rsi %v", r)
 	}
 }
@@ -134,14 +135,14 @@ func TestTechnicalsMACD(t *testing.T) {
 }
 
 func TestTechnicalsFiftyTwoWeekAndThinData(t *testing.T) {
-	s := mustCompute(t, seq(1, 300))
+	s := mustCompute(t, seq(300))
 	if s.FiftyTwoWeek.High != 300 || s.FiftyTwoWeek.Low != 49 || s.FiftyTwoWeek.PositionPct != 100 {
 		t.Fatalf("52w %+v", s.FiftyTwoWeek)
 	}
 	if s := mustCompute(t, []float64{10, 30, 20}); s.FiftyTwoWeek.PositionPct != 50 {
 		t.Fatalf("mid %+v", s.FiftyTwoWeek)
 	}
-	thin := mustCompute(t, seq(1, 30))
+	thin := mustCompute(t, seq(30))
 	if thin.SMA50 != nil || thin.SMA200 != nil || thin.MACD != nil || thin.RSI14 == nil || thin.Trend != "mixed" {
 		t.Fatalf("thin %+v", thin)
 	}
@@ -153,7 +154,7 @@ func TestTechnicalsFiftyTwoWeekAndThinData(t *testing.T) {
 		t.Fatal("empty should be nil")
 	}
 	// Newest-first input is ordered before computing.
-	bars := candles(seq(1, 300))
+	bars := candles(seq(300))
 	for i, j := 0, len(bars)-1; i < j; i, j = i+1, j-1 {
 		bars[i], bars[j] = bars[j], bars[i]
 	}
@@ -161,13 +162,13 @@ func TestTechnicalsFiftyTwoWeekAndThinData(t *testing.T) {
 		t.Fatalf("unsorted close %v", s.Close)
 	}
 	// Only the last 300 sessions count.
-	withPrehistory := append(make([]float64, 0, 400), seq(1, 300)...)
+	withPrehistory := append(make([]float64, 0, 400), seq(300)...)
 	pre := make([]float64, 100)
 	for i := range pre {
 		pre[i] = 5000
 	}
 	full := mustCompute(t, append(pre, withPrehistory...))
-	capped := mustCompute(t, seq(1, 300))
+	capped := mustCompute(t, seq(300))
 	if *full.SMA200 != *capped.SMA200 || full.FiftyTwoWeek != capped.FiftyTwoWeek {
 		t.Fatal("prehistory leaked into the window")
 	}

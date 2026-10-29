@@ -249,9 +249,9 @@ func (s *Service) fmpFallbackQuote(ctx context.Context, symbol string) *Quote {
 		return nil
 	}
 	match := quotes[0]
-	for _, q := range quotes {
-		if strings.EqualFold(q.Symbol, symbol) {
-			match = q
+	for i := range quotes {
+		if strings.EqualFold(quotes[i].Symbol, symbol) {
+			match = quotes[i]
 			break
 		}
 	}

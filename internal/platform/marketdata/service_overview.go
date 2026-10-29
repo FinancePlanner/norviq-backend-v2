@@ -26,8 +26,8 @@ var overviewIndices = []struct{ index, proxy, label string }{
 
 func quotesBySymbol(quotes []CryptoQuoteResponse) map[string]CryptoQuoteResponse {
 	out := make(map[string]CryptoQuoteResponse, len(quotes))
-	for _, q := range quotes {
-		out[strings.ToUpper(q.Symbol)] = q
+	for i := range quotes {
+		out[strings.ToUpper(quotes[i].Symbol)] = quotes[i]
 	}
 	return out
 }

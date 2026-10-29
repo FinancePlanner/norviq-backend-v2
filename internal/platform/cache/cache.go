@@ -91,7 +91,7 @@ func (r *Redis) Set(ctx context.Context, key string, v any, ttlSeconds int) {
 }
 
 // Memory is InMemoryAIResponseCache: an in-process cache for tests and a dev
-// box without Redis. It honours keys but not TTLs.
+// box without Redis. It honors keys but not TTLs.
 type Memory struct {
 	mu   sync.Mutex
 	data map[string][]byte

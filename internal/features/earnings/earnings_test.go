@@ -16,7 +16,8 @@ import (
 func newApp(t *testing.T) (*testutil.App, string) {
 	t.Helper()
 	app := testutil.NewApp(t, []server.Feature{earnings.Feature{}})
-	return app, app.Token(app.CreateUser(uuid.NewString() + "@example.com"))
+	token := app.Token(app.CreateUser(uuid.NewString() + "@example.com"))
+	return app, token
 }
 
 func reason(t *testing.T, r *testutil.Response) string {

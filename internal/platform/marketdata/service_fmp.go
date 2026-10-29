@@ -251,7 +251,7 @@ func (s *Service) AnalystEstimates(ctx context.Context, rawSymbol, rawPeriod str
 			if err := s.ValidateFMPSymbolAccess(symbol, "analyst-estimates"); err != nil {
 				return err
 			}
-			if s.Tier != TierPremium && strings.ToLower(period) != "annual" {
+			if s.Tier != TierPremium && !strings.EqualFold(period, "annual") {
 				return paymentRequired("FMP free-tier for analyst-estimates is limited to annual reports.")
 			}
 			return nil

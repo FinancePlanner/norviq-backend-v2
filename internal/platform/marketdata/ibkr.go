@@ -39,7 +39,7 @@ func (p *IBKR) Quote(ctx context.Context, rawSymbol string) (Quote, error) {
 	}
 	var row ibkrRow
 	for _, r := range rows {
-		if s := r.str("55"); s != nil && strings.ToUpper(*s) == symbol {
+		if s := r.str("55"); s != nil && strings.EqualFold(*s, symbol) {
 			row = r
 			break
 		}
@@ -428,11 +428,11 @@ func swiftDoubleString(f float64) string {
 		if abs < 0 {
 			abs = -abs
 		}
-		if abs >= 1e-4 && abs < 1e16 {
-			s = strconv.FormatFloat(f, 'f', -1, 64)
-		} else {
-			return strings.Replace(s, "e+", "e+", 1)
+		if abs < 1e-4 || abs >= 1e16 {
+			// Go's exponent spelling ("1e+16", "1e-05") is Swift's.
+			return s
 		}
+		s = strconv.FormatFloat(f, 'f', -1, 64)
 	}
 	if !strings.ContainsAny(s, ".eEn") {
 		s += ".0"

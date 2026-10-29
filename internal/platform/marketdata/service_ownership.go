@@ -149,16 +149,16 @@ func clusterBuy(trades []InsiderTrade) *ClusterBuySignal {
 	for anchor := len(buys) - 1; anchor >= 0; anchor-- {
 		start := buys[anchor].day.AddDate(0, 0, -insiderClusterWindowDays)
 		var window []dated
-		for _, b := range buys[:anchor+1] {
-			if !b.day.Before(start) {
-				window = append(window, b)
+		for i := range buys[:anchor+1] {
+			if !buys[i].day.Before(start) {
+				window = append(window, buys[i])
 			}
 		}
 		reporters := map[string]bool{}
 		total := 0.0
-		for _, w := range window {
-			reporters[strings.ToUpper(strings.TrimSpace(w.trade.ReporterName))] = true
-			total += orDefault(w.trade.Value, 0)
+		for i := range window {
+			reporters[strings.ToUpper(strings.TrimSpace(window[i].trade.ReporterName))] = true
+			total += orDefault(window[i].trade.Value, 0)
 		}
 		if len(reporters) < insiderClusterMinimum || len(window) == 0 {
 			continue
@@ -397,7 +397,7 @@ type congressFetch struct {
 	err      error
 }
 
-func (s *Service) loadCongress(ctx context.Context, chamber string, fetch func() ([]FMPCongressTrade, error)) congressFetch {
+func (s *Service) loadCongress(chamber string, fetch func() ([]FMPCongressTrade, error)) congressFetch {
 	wire, err := fetch()
 	if err != nil {
 		if isMissingData(err) {
@@ -407,20 +407,20 @@ func (s *Service) loadCongress(ctx context.Context, chamber string, fetch func()
 		return congressFetch{err: err}
 	}
 	rows := []CongressTrade{}
-	for _, w := range wire {
-		if t := congressTradeFromWire(w, chamber); t != nil {
+	for i := range wire {
+		if t := congressTradeFromWire(wire[i], chamber); t != nil {
 			rows = append(rows, *t)
 		}
 	}
 	return congressFetch{rows: rows}
 }
 
-func (s *Service) congressBoth(ctx context.Context, senate, house func() ([]FMPCongressTrade, error)) (congressFetch, congressFetch) {
+func (s *Service) congressBoth(senate, house func() ([]FMPCongressTrade, error)) (congressFetch, congressFetch) {
 	var sen, hou congressFetch
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); sen = s.loadCongress(ctx, "senate", senate) }()
-	go func() { defer wg.Done(); hou = s.loadCongress(ctx, "house", house) }()
+	go func() { defer wg.Done(); sen = s.loadCongress("senate", senate) }()
+	go func() { defer wg.Done(); hou = s.loadCongress("house", house) }()
 	wg.Wait()
 	return sen, hou
 }
@@ -439,7 +439,7 @@ func (s *Service) CongressTrades(ctx context.Context, rawSymbol string) (Congres
 	if s.FMP == nil {
 		return resp, unavailable("Congressional trades require the FMP provider.")
 	}
-	sen, hou := s.congressBoth(ctx,
+	sen, hou := s.congressBoth(
 		func() ([]FMPCongressTrade, error) { return s.FMP.SenateTrades(ctx, symbol) },
 		func() ([]FMPCongressTrade, error) { return s.FMP.HouseTrades(ctx, symbol) })
 	if sen.err != nil {
@@ -466,7 +466,7 @@ func (s *Service) RecentCongressTrades(ctx context.Context, limit int) (Congress
 	if s.FMP == nil {
 		return resp, unavailable("Congressional trades require the FMP provider.")
 	}
-	sen, hou := s.congressBoth(ctx,
+	sen, hou := s.congressBoth(
 		func() ([]FMPCongressTrade, error) { return s.FMP.LatestSenateTrades(ctx, limit) },
 		func() ([]FMPCongressTrade, error) { return s.FMP.LatestHouseTrades(ctx, limit) })
 	if sen.err != nil {
@@ -488,7 +488,7 @@ func (s *Service) RecentCongressTrades(ctx context.Context, limit int) (Congress
 
 // ---- Institutional ownership --------------------------------------------------
 
-// MarketQuarter is a calendar quarter, labelled "2025Q3".
+// MarketQuarter is a calendar quarter, labeled "2025Q3".
 type MarketQuarter struct{ Year, Quarter int }
 
 // Label is "YYYYQn".

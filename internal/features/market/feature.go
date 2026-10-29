@@ -210,9 +210,9 @@ func queryDouble(c *echo.Context, name string) *float64 {
 	return &v
 }
 
-// param is `req.parameters.get(_:)`, percent-decoded.
-func param(c *echo.Context, name string) string {
-	raw := c.Param(name)
+// pathSymbol is `req.parameters.get("symbol")`, percent-decoded.
+func pathSymbol(c *echo.Context) string {
+	raw := c.Param("symbol")
 	if v, err := url.PathUnescape(raw); err == nil {
 		return v
 	}
@@ -220,7 +220,7 @@ func param(c *echo.Context, name string) string {
 }
 
 func requirePathSymbol(c *echo.Context) (string, error) {
-	raw := strings.TrimSpace(param(c, "symbol"))
+	raw := strings.TrimSpace(pathSymbol(c))
 	if raw == "" {
 		return "", httpx.BadRequest("Missing symbol.")
 	}
@@ -259,7 +259,7 @@ func (h *handlers) overview(c *echo.Context) error {
 }
 
 func (h *handlers) pressure(c *echo.Context) error {
-	resp, err := h.svc.Pressure(ctx(c), param(c, "symbol"))
+	resp, err := h.svc.Pressure(ctx(c), pathSymbol(c))
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func (h *handlers) pressure(c *echo.Context) error {
 }
 
 func (h *handlers) periodReturns(c *echo.Context) error {
-	symbol := param(c, "symbol")
+	symbol := pathSymbol(c)
 	if symbol == "" {
 		return httpx.BadRequest("Missing symbol.")
 	}
@@ -442,7 +442,7 @@ func unixFloat(ts float64) time.Time {
 }
 
 func (h *handlers) quote(c *echo.Context) error {
-	symbol := param(c, "symbol")
+	symbol := pathSymbol(c)
 	q, err := h.svc.Quote(ctx(c), symbol)
 	if err != nil {
 		return err
@@ -490,7 +490,7 @@ func profileHash(p marketdata.CompanyProfileResponse) int64 {
 }
 
 func (h *handlers) profile(c *echo.Context) error {
-	symbol := param(c, "symbol")
+	symbol := pathSymbol(c)
 	p, err := h.svc.Profile(ctx(c), symbol)
 	if err != nil {
 		return err
@@ -506,7 +506,7 @@ func (h *handlers) profile(c *echo.Context) error {
 }
 
 func (h *handlers) history(c *echo.Context) error {
-	symbol := param(c, "symbol")
+	symbol := pathSymbol(c)
 	resp, err := h.svc.History(ctx(c), symbol, query(c, "from"), query(c, "to"))
 	if err != nil {
 		return err
@@ -538,7 +538,7 @@ func (h *handlers) history(c *echo.Context) error {
 }
 
 func (h *handlers) basicFinancials(c *echo.Context) error {
-	resp, err := h.svc.BasicFinancials(ctx(c), param(c, "symbol"))
+	resp, err := h.svc.BasicFinancials(ctx(c), pathSymbol(c))
 	if err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func analysisParams(c *echo.Context) marketdata.AnalysisParams {
 }
 
 func (h *handlers) analysis(c *echo.Context) error {
-	resp, err := h.svc.Analysis(ctx(c), param(c, "symbol"), analysisParams(c))
+	resp, err := h.svc.Analysis(ctx(c), pathSymbol(c), analysisParams(c))
 	if err != nil {
 		return err
 	}
@@ -578,7 +578,7 @@ func (h *handlers) compare(c *echo.Context) error {
 }
 
 func (h *handlers) cashFlowStatement(c *echo.Context) error {
-	resp, err := h.svc.CashFlowStatement(ctx(c), param(c, "symbol"), queryInt(c, "limit"), query(c, "period"))
+	resp, err := h.svc.CashFlowStatement(ctx(c), pathSymbol(c), queryInt(c, "limit"), query(c, "period"))
 	if err != nil {
 		return err
 	}
@@ -586,7 +586,7 @@ func (h *handlers) cashFlowStatement(c *echo.Context) error {
 }
 
 func (h *handlers) incomeStatement(c *echo.Context) error {
-	resp, err := h.svc.IncomeStatement(ctx(c), param(c, "symbol"), queryInt(c, "limit"), query(c, "period"))
+	resp, err := h.svc.IncomeStatement(ctx(c), pathSymbol(c), queryInt(c, "limit"), query(c, "period"))
 	if err != nil {
 		return err
 	}
@@ -594,7 +594,7 @@ func (h *handlers) incomeStatement(c *echo.Context) error {
 }
 
 func (h *handlers) balanceSheetStatement(c *echo.Context) error {
-	resp, err := h.svc.BalanceSheetStatement(ctx(c), param(c, "symbol"), queryInt(c, "limit"), query(c, "period"))
+	resp, err := h.svc.BalanceSheetStatement(ctx(c), pathSymbol(c), queryInt(c, "limit"), query(c, "period"))
 	if err != nil {
 		return err
 	}
@@ -602,7 +602,7 @@ func (h *handlers) balanceSheetStatement(c *echo.Context) error {
 }
 
 func (h *handlers) ratiosTTM(c *echo.Context) error {
-	resp, err := h.svc.RatiosTTM(ctx(c), param(c, "symbol"))
+	resp, err := h.svc.RatiosTTM(ctx(c), pathSymbol(c))
 	if err != nil {
 		return err
 	}
@@ -610,7 +610,7 @@ func (h *handlers) ratiosTTM(c *echo.Context) error {
 }
 
 func (h *handlers) gradesConsensus(c *echo.Context) error {
-	resp, err := h.svc.GradesConsensus(ctx(c), param(c, "symbol"))
+	resp, err := h.svc.GradesConsensus(ctx(c), pathSymbol(c))
 	if err != nil {
 		return err
 	}
@@ -618,7 +618,7 @@ func (h *handlers) gradesConsensus(c *echo.Context) error {
 }
 
 func (h *handlers) financialGrowth(c *echo.Context) error {
-	resp, err := h.svc.FinancialGrowth(ctx(c), param(c, "symbol"), queryInt(c, "limit"), query(c, "period"))
+	resp, err := h.svc.FinancialGrowth(ctx(c), pathSymbol(c), queryInt(c, "limit"), query(c, "period"))
 	if err != nil {
 		return err
 	}
@@ -626,7 +626,7 @@ func (h *handlers) financialGrowth(c *echo.Context) error {
 }
 
 func (h *handlers) earnings(c *echo.Context) error {
-	resp, err := h.svc.Earnings(ctx(c), param(c, "symbol"), queryInt(c, "limit"))
+	resp, err := h.svc.Earnings(ctx(c), pathSymbol(c), queryInt(c, "limit"))
 	if err != nil {
 		return err
 	}
@@ -634,7 +634,7 @@ func (h *handlers) earnings(c *echo.Context) error {
 }
 
 func (h *handlers) recentEarnings(c *echo.Context) error {
-	resp, err := h.svc.RecentEarnings(ctx(c), param(c, "symbol"))
+	resp, err := h.svc.RecentEarnings(ctx(c), pathSymbol(c))
 	if err != nil {
 		return err
 	}
@@ -650,7 +650,7 @@ func (h *handlers) earningsCalendar(c *echo.Context) error {
 }
 
 func (h *handlers) earningsTranscript(c *echo.Context) error {
-	resp, err := h.svc.EarningsTranscript(ctx(c), param(c, "symbol"), query(c, "date"), queryInt(c, "year"), queryInt(c, "quarter"))
+	resp, err := h.svc.EarningsTranscript(ctx(c), pathSymbol(c), query(c, "date"), queryInt(c, "year"), queryInt(c, "quarter"))
 	if err != nil {
 		return err
 	}
@@ -662,7 +662,7 @@ func (h *handlers) analystEstimates(c *echo.Context) error {
 	if p := query(c, "period"); p != nil {
 		period = *p
 	}
-	resp, err := h.svc.AnalystEstimates(ctx(c), param(c, "symbol"), period, queryInt(c, "page"), queryInt(c, "limit"))
+	resp, err := h.svc.AnalystEstimates(ctx(c), pathSymbol(c), period, queryInt(c, "page"), queryInt(c, "limit"))
 	if err != nil {
 		return err
 	}
@@ -670,7 +670,7 @@ func (h *handlers) analystEstimates(c *echo.Context) error {
 }
 
 func (h *handlers) ratios(c *echo.Context) error {
-	resp, err := h.svc.Ratios(ctx(c), param(c, "symbol"), queryInt(c, "limit"), query(c, "period"))
+	resp, err := h.svc.Ratios(ctx(c), pathSymbol(c), queryInt(c, "limit"), query(c, "period"))
 	if err != nil {
 		return err
 	}
@@ -791,7 +791,7 @@ func chartRange(c *echo.Context) string {
 }
 
 func (h *handlers) priceChart(c *echo.Context) error {
-	resp, err := h.svc.PriceChart(ctx(c), param(c, "symbol"), chartRange(c))
+	resp, err := h.svc.PriceChart(ctx(c), pathSymbol(c), chartRange(c))
 	if err != nil {
 		return err
 	}

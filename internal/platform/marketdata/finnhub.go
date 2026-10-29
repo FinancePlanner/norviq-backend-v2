@@ -204,7 +204,7 @@ func (f *Finnhub) logger() *slog.Logger {
 
 func (f *Finnhub) mapHistory(symbol string, p *finnhubCandlePayload, currency string) History {
 	cur := fallbackValue(&currency, f.DefaultCurrency)
-	if p.Status != nil && strings.ToLower(*p.Status) == "no_data" {
+	if p.Status != nil && strings.EqualFold(*p.Status, "no_data") {
 		return History{Symbol: symbol, Currency: cur, Bars: []PriceBar{}}
 	}
 	count := min(len(p.Open), len(p.High), len(p.Low), len(p.Close), len(p.Timestamps))

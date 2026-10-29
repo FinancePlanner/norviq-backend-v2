@@ -72,7 +72,7 @@ type Server struct {
 
 // New builds the server and mounts features.
 func New(d *Deps, features []Feature) (*Server, error) {
-	st, err := newStrangler(d.Config.LegacyUpstreamURL, d.Config.ExtraDisabledRoutes, d.Logger)
+	st, err := newStrangler(d.Config.LegacyUpstreamURL, d.Config.ExtraDisabledRoutes, d.Config.NativePrefixes, d.Logger)
 	if err != nil {
 		return nil, err
 	}

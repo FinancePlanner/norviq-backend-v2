@@ -18,19 +18,26 @@ import (
 // compression, and running both would duplicate headers and gzip twice.
 //
 // Ported routes can be sent back to Vapor without a deploy by listing them in
-// V2_DISABLED_ROUTES as "METHOD /path/with/:params".
+// V2_DISABLED_ROUTES as "METHOD /path/with/:params". V2_NATIVE_PREFIXES, when
+// set, narrows v2 to the ported routes under those path prefixes.
 type strangler struct {
 	app      http.Handler
 	legacy   http.Handler // nil once Vapor is gone: v2 answers everything
 	probe    *echo.DefaultRouter
 	probeMu  sync.RWMutex
 	disabled map[string]struct{}
+	prefixes []string // empty: every ported route is native
 }
 
 var errMiss = errors.New("no v2 route")
 
-func newStrangler(legacyURL string, disabled []string, logger *slog.Logger) (*strangler, error) {
+func newStrangler(legacyURL string, disabled, prefixes []string, logger *slog.Logger) (*strangler, error) {
 	s := &strangler{disabled: map[string]struct{}{}}
+	for _, p := range prefixes {
+		if p = strings.TrimRight(strings.TrimSpace(p), "/"); p != "" {
+			s.prefixes = append(s.prefixes, p)
+		}
+	}
 	miss := func(*echo.Context) error { return errMiss }
 	s.probe = echo.NewRouter(echo.RouterConfig{
 		NotFoundHandler:         miss,
@@ -120,7 +127,22 @@ func (s *strangler) served(r *http.Request) bool {
 			return false
 		}
 	}
-	return true
+	return s.native(c.Path())
+}
+
+// native reports whether route sits under one of the native prefixes, at a
+// path segment boundary ("/v1/auth" covers "/v1/auth/login", not
+// "/v1/authors").
+func (s *strangler) native(route string) bool {
+	if len(s.prefixes) == 0 {
+		return true
+	}
+	for _, p := range s.prefixes {
+		if route == p || strings.HasPrefix(route, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *strangler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

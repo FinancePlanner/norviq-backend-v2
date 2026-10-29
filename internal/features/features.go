@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/autobuys"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
@@ -137,6 +138,8 @@ func All() []server.Feature {
 		financing.Feature{},
 		// RecapController (/v1/recaps); 404 unless RECAP_ENABLED=true.
 		recaps.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		// TerminalPositionsController's /v1/autobuys routes.
+		autobuys.Feature{},
 	}
 }
 

@@ -160,19 +160,27 @@ func (t transactionHandlers) list(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	q := stocksdb.New(t.h.db)
-	ids, err := q.NonPilotAccountIDs(ctx, s.UserID)
+	out, err := t.listFor(c.Request().Context(), s.UserID)
 	if err != nil {
 		return err
+	}
+	return httpx.OK(c, out)
+}
+
+// listFor is TransactionService.list.
+func (t transactionHandlers) listFor(ctx context.Context, userID uuid.UUID) ([]TransactionResponse, error) {
+	q := stocksdb.New(t.h.db)
+	ids, err := q.NonPilotAccountIDs(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 	out := []TransactionResponse{}
 	if len(ids) == 0 {
-		return httpx.OK(c, out)
+		return out, nil
 	}
 	rows, err := q.TransactionsForAccounts(ctx, ids)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	seen := map[uuid.UUID]bool{}
 	var instrumentIDs []uuid.UUID
@@ -186,7 +194,7 @@ func (t transactionHandlers) list(c *echo.Context) error {
 	if len(instrumentIDs) > 0 {
 		instruments, err := q.InstrumentsByIDs(ctx, instrumentIDs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for i := range instruments {
 			symbolByID[instruments[i].ID] = instruments[i].Symbol
@@ -199,7 +207,7 @@ func (t transactionHandlers) list(c *echo.Context) error {
 		}
 		out = append(out, transactionResponse(rows[i], sym))
 	}
-	return httpx.OK(c, out)
+	return out, nil
 }
 
 // POST /v1/transactions
@@ -212,54 +220,63 @@ func (t transactionHandlers) create(c *echo.Context) error {
 	if err := decodeBody(c, createTransactionSpec, &p); err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	typ, err := parseTransactionType(p.Type)
+	out, err := t.createFor(c.Request().Context(), s.UserID, p)
 	if err != nil {
 		return err
+	}
+	return httpx.Created(c, out)
+}
+
+// createFor is TransactionService.create.
+func (t transactionHandlers) createFor(ctx context.Context, userID uuid.UUID, p createTransactionRequest) (TransactionResponse, error) {
+	var zero TransactionResponse
+	typ, err := parseTransactionType(p.Type)
+	if err != nil {
+		return zero, err
 	}
 	symbol := normalizeSymbol(p.Symbol)
 	if symbol == "" {
-		return httpx.BadRequest("symbol is required.")
+		return zero, httpx.BadRequest("symbol is required.")
 	}
 	if !(p.Quantity > 0) {
-		return httpx.BadRequest("quantity must be greater than 0.")
+		return zero, httpx.BadRequest("quantity must be greater than 0.")
 	}
 	if !(p.Price > 0) {
-		return httpx.BadRequest("price must be greater than 0.")
+		return zero, httpx.BadRequest("price must be greater than 0.")
 	}
 	if p.Fees != nil && *p.Fees < 0 {
-		return httpx.BadRequest("fees cannot be negative.")
+		return zero, httpx.BadRequest("fees cannot be negative.")
 	}
 	tradeDate, err := parseRequiredDate(p.TradeDate, "tradeDate")
 	if err != nil {
-		return err
+		return zero, err
 	}
 	var settleDate *time.Time
 	if p.SettleDate != nil {
 		sd, err := parseRequiredDate(*p.SettleDate, "settleDate")
 		if err != nil {
-			return err
+			return zero, err
 		}
 		settleDate = &sd
 	}
 	if settleDate != nil && settleDate.Before(tradeDate) {
-		return httpx.BadRequest("settleDate cannot be before tradeDate.")
+		return zero, httpx.BadRequest("settleDate cannot be before tradeDate.")
 	}
 
-	listID, err := portfolios.ResolvePortfolioListID(ctx, t.h.db, p.PortfolioListID, s.UserID, true)
+	listID, err := portfolios.ResolvePortfolioListID(ctx, t.h.db, p.PortfolioListID, userID, true)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	if err := portfolios.EnsureNotFollowed(ctx, t.h.db, *listID); err != nil {
-		return err
+		return zero, err
 	}
-	account, err := portfolios.AccountForManualEdit(ctx, t.h.db, s.UserID, *listID)
+	account, err := portfolios.AccountForManualEdit(ctx, t.h.db, userID, *listID)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	instrument, err := ResolveImportInstrument(ctx, t.h.db, t.h.search(), symbol)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	currency := instrument.Currency
 	if p.Currency != nil {
@@ -273,9 +290,9 @@ func (t transactionHandlers) create(c *echo.Context) error {
 		TradeDate: tradeDate, SettleDate: settleDate, Fees: p.Fees, Now: portfolios.Now(),
 	})
 	if err != nil {
-		return err
+		return zero, err
 	}
-	return httpx.Created(c, transactionResponse(row, instrument.Symbol))
+	return transactionResponse(row, instrument.Symbol), nil
 }
 
 // requireTransactionID is the controller's "Invalid transaction id.".
@@ -406,13 +423,17 @@ func (t transactionHandlers) delete(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	m, err := t.requireManualTransaction(ctx, id, s.UserID)
-	if err != nil {
-		return err
-	}
-	if err := stocksdb.New(t.h.db).DeleteTransaction(ctx, m.ID); err != nil {
+	if err := t.deleteFor(c.Request().Context(), id, s.UserID); err != nil {
 		return err
 	}
 	return httpx.NoContent(c)
+}
+
+// deleteFor is TransactionService.delete.
+func (t transactionHandlers) deleteFor(ctx context.Context, id, userID uuid.UUID) error {
+	m, err := t.requireManualTransaction(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	return stocksdb.New(t.h.db).DeleteTransaction(ctx, m.ID)
 }

@@ -44,6 +44,9 @@ type Settings struct {
 	YTDFillBudget         string `env:"CRYPTO_MARKETS_YTD_FILL_BUDGET"`
 	CoinGeckoAPIKey       string `env:"COINGECKO_API_KEY"`
 	CoinGeckoAPIPlan      string `env:"COINGECKO_API_PLAN"`
+	// CoinGeckoBaseURL is v2-only, for tests and parity stubs: unset means
+	// the plan's real host, as Vapor hard-coded it.
+	CoinGeckoBaseURL string `env:"COINGECKO_BASE_URL"`
 }
 
 // intOr is `Environment.get(name).flatMap(Int.init) ?? def`.
@@ -117,6 +120,7 @@ func SharedMarkets(d *server.Deps) (*MarketsService, error) {
 		plan = &s.CoinGeckoAPIPlan
 	}
 	cg := NewCoinGecko(key, ParseCoinGeckoPlan(plan))
+	cg.BaseURL = strings.TrimSpace(s.CoinGeckoBaseURL)
 	cg.Client = &http.Client{}
 	cg.Logger = d.Logger
 	def := DefaultMarketsFilter()

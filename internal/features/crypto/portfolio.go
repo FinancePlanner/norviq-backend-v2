@@ -172,6 +172,9 @@ func decodePortfolioRequest(c *echo.Context) (PortfolioItemRequest, error) {
 	missing := func(name, typ string) error {
 		return httpx.BadRequest(fmt.Sprintf("No value found (expected type '%s') at path '%s'. No %s was found at '%s'.", typ, name, typ, name))
 	}
+	badNumber := func(name string) error {
+		return httpx.BadRequest(fmt.Sprintf("Value was not of type 'Double' at path '%s'. Data found at '%s' was not Double.", name, name))
+	}
 	var values url.Values
 	if mt == "multipart/form-data" {
 		if params["boundary"] == "" {
@@ -180,6 +183,9 @@ func decodePortfolioRequest(c *echo.Context) (PortfolioItemRequest, error) {
 		values = multipartValues(body, params["boundary"])
 		missing = func(name, _ string) error {
 			return httpx.BadRequest(fmt.Sprintf("No such key '%s' at path ''. No value associated with key %q.", name, name))
+		}
+		badNumber = func(name string) error {
+			return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Could not convert value at %q to type Double from multipart part.", name, name))
 		}
 	} else if values, err = url.ParseQuery(string(body)); err != nil {
 		return p, httpx.BadRequest(err.Error())
@@ -198,7 +204,7 @@ func decodePortfolioRequest(c *echo.Context) (PortfolioItemRequest, error) {
 		}
 		n, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
-			return 0, httpx.BadRequest(fmt.Sprintf("Value was not of type 'Double' at path '%s'. Data found at '%s' was not Double.", name, name))
+			return 0, badNumber(name)
 		}
 		return n, nil
 	}

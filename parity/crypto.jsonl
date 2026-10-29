@@ -42,3 +42,6 @@
 {"name": "portfolio-delete-bad-id", "method": "DELETE", "path": "/v1/crypto/portfolio/123", "as": "c7d00000-0000-4000-8000-000000000001"}
 {"name": "portfolio-delete-free", "method": "DELETE", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c04", "as": "c7d00000-0000-4000-8000-000000000002"}
 {"name": "portfolio-list-after", "path": "/v1/crypto/portfolio", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-multipart-bad-number", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "multipart/form-data; boundary=XX"}, "raw": "--XX\r\nContent-Disposition: form-data; name=\"symbol\"\r\n\r\nada\r\n--XX\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nCardano\r\n--XX\r\nContent-Disposition: form-data; name=\"quantity\"\r\n\r\nabc\r\n--XX--\r\n", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-multipart-missing", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "multipart/form-data; boundary=XX"}, "raw": "--XX\r\nContent-Disposition: form-data; name=\"symbol\"\r\n\r\nada\r\n--XX--\r\n", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-text", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "text/plain"}, "raw": "hi", "as": "c7d00000-0000-4000-8000-000000000001"}

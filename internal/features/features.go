@@ -20,6 +20,7 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/digest"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
@@ -139,6 +140,9 @@ func All() []server.Feature {
 		// realtime stream; behind SOCIAL_ENABLED and GROUPS_ENABLED, read
 		// per request.
 		groups.Feature{},
+		// DigestController: /v1/digests and /v1/digest-preferences behind
+		// DIGEST_ENABLED (read once at boot); /v1/digest/unsubscribe always.
+		digest.Feature{},
 	}
 }
 
@@ -199,6 +203,10 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// WeeklyDigestJob (lock weekly_digest_job); runs only with
+		// DIGEST_ENABLED on, and Vapor's copy is off once Vapor has
+		// DIGEST_ENABLED=false.
+		digest.Job{},
 	}
 }
 

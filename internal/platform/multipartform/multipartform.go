@@ -1,16 +1,21 @@
 // Package multipartform parses multipart/form-data bodies the way Vapor's
 // upload endpoints read them: MultipartFormParser (repeated image parts kept,
-// `file[]` collapsed to `file`) and the first-part-by-name lookup
-// FormDataDecoder did for `File?` fields.
+// `file[]` collapsed to `file`) and the by-name lookup FormDataDecoder did
+// for `File?` fields.
 package multipartform
 
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/textproto"
 	"strings"
+
+	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/swiftjson"
 )
 
 // Part is one form part.
@@ -29,12 +34,15 @@ var ImageFieldNames = map[string]bool{"file": true, "image": true, "files": true
 // ErrUnreadable is a body the multipart parser rejected.
 var ErrUnreadable = errors.New("multipart: unreadable form")
 
+// ErrEmptyBoundary is a boundary that is empty once trimmed.
+var ErrEmptyBoundary = errors.New("multipart: empty boundary")
+
 // Parse reads every part of body. boundary is the Content-Type parameter,
 // trimmed of quotes and whitespace as Vapor did.
 func Parse(body []byte, boundary string) ([]Part, error) {
 	boundary = strings.Trim(boundary, "\" \t\r\n")
 	if boundary == "" {
-		return nil, ErrUnreadable
+		return nil, ErrEmptyBoundary
 	}
 	r := multipart.NewReader(bytes.NewReader(body), boundary)
 	var parts []Part
@@ -90,15 +98,69 @@ func ImageFiles(parts []Part) []Part {
 	return out
 }
 
-// Named returns the first part named name (FormDataDecoder's lookup for a
-// `File?` field), or nil.
+// Named returns the part named name, the last one when repeated
+// (FormDataDecoder's keyed lookup, where a later part replaces an earlier
+// one), or nil.
 func Named(parts []Part, name string) *Part {
-	for i := range parts {
+	for i := len(parts) - 1; i >= 0; i-- {
 		if parts[i].Name == name {
 			return &parts[i]
 		}
 	}
 	return nil
+}
+
+// FileField is decoding a `File?` field with FormDataDecoder: nil when no
+// part has that name, a DecodingError when the part has no filename.
+func FileField(parts []Part, name string) (*Part, error) {
+	p := Named(parts, name)
+	if p == nil {
+		return nil, nil
+	}
+	if p.Filename == nil {
+		return nil, swiftjson.DataCorrupted([]string{name},
+			fmt.Sprintf(`Could not convert value at "%s" to type File from multipart part.`, name))
+	}
+	return p, nil
+}
+
+// DecodeForm is the part of `req.content.decode` for multipart/form-data
+// that precedes field decoding: a missing boundary is 415, the empty form
+// Vapor special-cases is 422, and a body the parser rejects is returned
+// as ErrUnreadable (Vapor surfaced MultipartError as a 500).
+func DecodeForm(contentType string, body []byte) ([]Part, error) {
+	boundary, _, ok := Boundary(contentType)
+	if !ok {
+		return nil, httpx.Abort(http.StatusUnsupportedMediaType, "")
+	}
+	if bytes.Equal(body, []byte("--"+boundary+"\r\n--"+boundary+"--\r")) {
+		return nil, httpx.Abort(http.StatusUnprocessableEntity, "")
+	}
+	parts, err := Parse(body, boundary)
+	if err != nil {
+		return nil, err
+	}
+	return parts, nil
+}
+
+// ReadBody reads the request body up to limit bytes; a longer body is 413,
+// as Vapor's body.collect(max:) was.
+func ReadBody(r *http.Request, limit int64) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		var sc interface{ StatusCode() int }
+		if errors.As(err, &sc) && sc.StatusCode() == http.StatusRequestEntityTooLarge {
+			return nil, httpx.Abort(http.StatusRequestEntityTooLarge, "Payload Too Large")
+		}
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, httpx.Abort(http.StatusRequestEntityTooLarge, "Payload Too Large")
+	}
+	return data, nil
 }
 
 // DispositionParameters is the Accumulator's parameter reader:

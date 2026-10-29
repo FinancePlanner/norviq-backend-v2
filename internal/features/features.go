@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
+	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
@@ -70,6 +71,8 @@ func All() []server.Feature {
 		// Achievements and the friends' activity feed; installs the
 		// achievementhooks evaluator.
 		achievements.Feature{},
+		// User-published articles; behind ARTICLES_ENABLED.
+		articles.Feature{},
 	}
 }
 

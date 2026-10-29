@@ -1,0 +1,19 @@
+# The web's public token path: ARTICLES_VIEWER_CREDENTIAL_IDS lists the
+# parity-web PAT (a2710000-...-e1). Seed parity/articles-setup.sql first, then run a
+# Vapor on 18146 and v2 on 18145, both with the brief's flags plus
+#   ARTICLES_VIEWER_CREDENTIAL_IDS=A2710000-0000-4000-8000-0000000000E1
+# go run ./cmd/parity -a http://127.0.0.1:18146 -b http://127.0.0.1:18145 -jwt-secret parity-secret \
+#   -cases parity/articles-viewer.jsonl -headers Content-Type,X-Content-Type-Options,Cache-Control
+{"name": "web-view-alice", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "0123456789abcdef0123456789abcdef"}}
+{"name": "web-view-alice-again", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "0123456789abcdef0123456789abcdef"}}
+{"name": "web-view-bob-upper", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "FEDCBA9876543210FEDCBA9876543210"}}
+{"name": "web-view-fullwidth", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "０１２３４５６７８９ＡＢＣＤＥＦ"}}
+{"name": "web-view-too-short", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "0123456789abcde"}}
+{"name": "web-view-not-hex", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "0123456789abcdefg"}}
+{"name": "web-view-too-long", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+{"name": "web-view-no-header", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001"}}
+{"name": "other-view", "method": "POST", "path": "/v1/articles/pzbbbbbb/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesother0000000001", "X-Norviq-Viewer": "11111111111111111111111111111111"}}
+{"name": "web-view-hidden", "method": "POST", "path": "/v1/articles/pzhhhhhh/view", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001", "X-Norviq-Viewer": "0123456789abcdef0123456789abcdef"}}
+{"name": "count-after", "method": "GET", "path": "/v1/articles/pzbbbbbb", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001"}}
+{"name": "web-list", "method": "GET", "path": "/v1/articles?author=parity_art_reader", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001"}}
+{"name": "web-image", "method": "GET", "path": "/v1/articles/images/A2710000-0000-4000-8000-000000000201", "headers": {"Authorization": "Bearer nvq_pat_parityarticlesweb000000000001"}}

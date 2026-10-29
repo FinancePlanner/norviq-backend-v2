@@ -119,7 +119,7 @@ func All() []server.Feature {
 		stocks.Feature{},
 		// RetirementController portfolio routes.
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
-		// ScenarioController portfolio snapshot routes.
+		// ScenarioController: snapshot, scenario and scenario-run routes.
 		scenarios.Feature{},
 		// WealthAutomationController rebalancing-policy routes.
 		automation.Feature{},
@@ -205,6 +205,10 @@ func AllJobs() []Job {
 		tax.ProjectionJob{},
 		// Planning: rebalancing drift alerts.
 		rebalancing.AlertJob{},
+		// Scenario planning: run queue (claim + lease, no JobLock) and
+		// retention; both no-ops unless SCENARIO_PLANNING_ENABLED.
+		scenarios.RunWorkerJob{},
+		scenarios.RetentionJob{},
 	}
 }
 

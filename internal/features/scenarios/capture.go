@@ -164,7 +164,7 @@ func Capture(ctx context.Context, q scenariosdb.Querier, market MarketData, now 
 		if hasProfile && profile.ManualValue != nil {
 			value = *profile.ManualValue
 		}
-		value *= fxRate
+		value = float64(value * fxRate) // no FMA: Swift rounds each step
 		total += value
 		item := map[string]any{
 			"id": holdingID, "instrument_key": SwiftUppercased(holding.Symbol),
@@ -236,7 +236,7 @@ func appendCash(ctx context.Context, q scenariosdb.Querier, market MarketData, u
 		}
 		id := apijson.FormatUUID(b.ID)
 		fxRate := conversionRate(ctx, market, currency, baseCurrency, id, warnings)
-		value := b.Balance * fxRate
+		value := float64(b.Balance * fxRate) // no FMA
 		*total += value
 		*items = append(*items, map[string]any{
 			"id": id, "instrument_key": "CASH:" + currency,
@@ -274,7 +274,7 @@ func appendCrypto(ctx context.Context, q scenariosdb.Querier, market MarketData,
 		}
 		const quoteCurrency = "USD"
 		fxRate := conversionRate(ctx, market, quoteCurrency, baseCurrency, id, warnings)
-		value := h.Quantity * price * fxRate
+		value := float64(h.Quantity * price * fxRate) // no FMA
 		*total += value
 		*items = append(*items, map[string]any{
 			"id": id, "instrument_key": "CRYPTO:" + SwiftUppercased(h.Symbol),

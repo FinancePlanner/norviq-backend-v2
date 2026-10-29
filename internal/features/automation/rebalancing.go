@@ -266,7 +266,7 @@ func Preview(policy RebalancingPolicy, valuations []RebalanceValuation, currency
 			currentValue = valuation.Value
 		}
 		currentWeight := currentValue / total
-		delta := t.TargetWeight*total - currentValue
+		delta := float64(t.TargetWeight*total) - currentValue // float64() forbids FMA fusion
 		maximumDrift = swiftMax(maximumDrift, math.Abs(currentWeight-t.TargetWeight))
 		trades = append(trades, RebalanceTradeDraft{
 			ID: t.ID, Kind: t.Kind, Symbol: t.Symbol, Action: tradeAction(delta),

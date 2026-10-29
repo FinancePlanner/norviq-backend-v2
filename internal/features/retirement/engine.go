@@ -229,7 +229,7 @@ func (e Engine) Project(portfolioID *uuid.UUID, input PlanInput, request Project
 	if input.WithdrawalRate != nil {
 		rate = *input.WithdrawalRate
 	}
-	sustainable := medianRetirement * rate
+	sustainable := float64(medianRetirement * rate) // float64() forbids FMA fusion below
 
 	var shortfall *int
 	if len(shortfallAges) > 0 {
@@ -336,7 +336,7 @@ func pensionIncome(pc powCache, p *PensionIncome, age int) float64 {
 	if p == nil || age < p.StartAge {
 		return 0
 	}
-	return p.AnnualAmount * pc.pow(1+p.AnnualIndexationRate, age-p.StartAge)
+	return float64(p.AnnualAmount * pc.pow(1+p.AnnualIndexationRate, age-p.StartAge)) // no FMA at call sites
 }
 
 func contributionHeadroom(input PlanInput, pack *RulePack) float64 {
@@ -391,7 +391,7 @@ func normal(mean, standardDeviation float64, random *splitMix64) float64 {
 	u1 := swiftMax(random.unitInterval(), math.SmallestNonzeroFloat64)
 	u2 := random.unitInterval()
 	standard := math.Sqrt(-2*math.Log(u1)) * math.Cos(2*math.Pi*u2)
-	return mean + standardDeviation*standard
+	return mean + float64(standardDeviation*standard) // float64() forbids FMA fusion (Swift rounds the product)
 }
 
 type splitMix64 struct{ state uint64 }

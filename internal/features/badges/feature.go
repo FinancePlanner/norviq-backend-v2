@@ -24,12 +24,23 @@ import (
 )
 
 // Feature mounts /v1/badges.
-type Feature struct{}
+type Feature struct {
+	// OnEarned is AchievementService.recordLegacyBadge, wired from
+	// features.go (achievements imports badges, so badges cannot import it).
+	OnEarned func(d *server.Deps) EarnedHook
+}
+
+// EarnedHook runs after a newly earned tier is persisted. Best effort: it
+// logs its own failures.
+type EarnedHook func(ctx context.Context, userID uuid.UUID, badgeType, tier string, earnedAt time.Time)
 
 func (Feature) Name() string { return "badges" }
 
-func (Feature) Register(d *server.Deps, r *server.Routes) error {
+func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	svc := &Service{Q: badgesdb.New(d.DB), Logger: d.Logger.Warn}
+	if f.OnEarned != nil {
+		svc.OnEarned = f.OnEarned(d)
+	}
 	r.V1.GET("/badges", func(c *echo.Context) error {
 		s, err := auth.Require(c)
 		if err != nil {
@@ -96,9 +107,10 @@ type List struct {
 
 // Service is DefaultBadgeService.
 type Service struct {
-	Q      badgesdb.Querier
-	Logger func(msg string, args ...any)
-	Now    func() time.Time
+	Q        badgesdb.Querier
+	Logger   func(msg string, args ...any)
+	Now      func() time.Time
+	OnEarned EarnedHook
 }
 
 func (s *Service) now() time.Time {
@@ -188,6 +200,9 @@ func (s *Service) Evaluate(ctx context.Context, userID uuid.UUID) (List, error) 
 		}
 		if awardXP {
 			s.awardXP(ctx, userID, b.badgeType, b.tier)
+		}
+		if s.OnEarned != nil {
+			s.OnEarned(ctx, userID, string(b.badgeType), string(b.tier), b.at)
 		}
 	}
 	return out, nil

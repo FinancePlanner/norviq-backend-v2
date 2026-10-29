@@ -10,6 +10,7 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/store/watchlistdb"
 
@@ -300,6 +301,7 @@ func (h *handlers) updateWatchlistItem(c *echo.Context) error {
 			if err := h.q.DeleteWatchlistItem(ctx, item.ID); err != nil {
 				return err
 			}
+			achievementhooks.Schedule(s.UserID)
 			return httpx.OK(c, makeItemResponse(dup))
 		case !errors.Is(err, pgx.ErrNoRows):
 			return err
@@ -347,6 +349,7 @@ func (h *handlers) updateWatchlistItem(c *echo.Context) error {
 		if item, err = h.q.UpdateWatchlistItem(ctx, updateParams(item, h.now())); err != nil {
 			return err
 		}
+		achievementhooks.Schedule(s.UserID)
 	}
 	return httpx.OK(c, makeItemResponse(item))
 }

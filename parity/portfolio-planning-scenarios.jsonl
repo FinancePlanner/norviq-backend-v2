@@ -1,0 +1,19 @@
+# Scenario snapshot routes with the feature on. Needs BOTH backends started
+# with SCENARIO_PLANNING_ENABLED=true (the shared parity Vapor runs without it).
+# Seed first with parity/portfolio-planning-setup.sql.
+# Run with: -ignore requestId,id,createdAt,valuationTimestamp
+{"name":"sn-list","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001"}
+{"name":"sn-list-empty","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000003"}
+{"name":"sn-list-free-user","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000002"}
+{"name":"sn-get","path":"/v1/portfolio/scenario-snapshots/0d1a0000-0000-4000-8000-0000000000f1","as":"0d1a0000-0000-4000-8000-000000000001"}
+{"name":"sn-get-stranger","path":"/v1/portfolio/scenario-snapshots/0d1a0000-0000-4000-8000-0000000000f1","as":"0d1a0000-0000-4000-8000-000000000004"}
+{"name":"sn-get-bad-id","path":"/v1/portfolio/scenario-snapshots/nope","as":"0d1a0000-0000-4000-8000-000000000001"}
+{"name":"sn-create-capture","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2","baseCurrency":"usd"}}
+{"name":"sn-create-capture-eur","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolio_list_id":"0d1a0000-0000-4000-8000-0000000000a2","base_currency":"EUR"}}
+{"name":"sn-create-empty-portfolio","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a5","baseCurrency":"USD"}}
+{"name":"sn-create-not-owner","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000004","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2","baseCurrency":"USD"}}
+{"name":"sn-create-bad-currency","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2","baseCurrency":"US"}}
+{"name":"sn-create-unknown-crypto","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2","baseCurrency":"USD","cryptoHoldingIds":["0d1a0000-0000-4000-8000-000000000099"]}}
+{"name":"sn-create-bad-payload","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2","baseCurrency":"USD","payload":{"total":1}}}
+{"name":"sn-create-missing-currency","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000001","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a2"}}
+{"name":"sn-create-free-user","method":"POST","path":"/v1/portfolio/scenario-snapshots","as":"0d1a0000-0000-4000-8000-000000000002","body":{"portfolioListId":"0d1a0000-0000-4000-8000-0000000000a4","baseCurrency":"USD"}}

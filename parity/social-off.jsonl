@@ -1,0 +1,24 @@
+# Social with every flag off: the shared, unflagged Vapor on :8081 against a
+# v2 started with no SOCIAL_* / ACHIEVEMENTS_* / GROUPS_* flags on the same
+# database. Everything but /v1/social/config is a 404 behind auth.
+#
+#   psql postgres://pg:pg@127.0.0.1:55499/norviq -q -f parity/social-setup.sql
+#   set -a; . ./.env.example; set +a; env PORT=18141 LEGACY_UPSTREAM_URL=http://127.0.0.1:8081 JWT_SECRET=parity-secret go run ./cmd/api serve
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18141 -jwt-secret parity-secret -cases parity/social-off.jsonl
+{"name": "off-config", "method": "GET", "path": "/v1/social/config", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-config-anon", "method": "GET", "path": "/v1/social/config"}
+{"name": "off-search", "method": "GET", "path": "/v1/social/users/search?q=pss_", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-profile", "method": "GET", "path": "/v1/social/users/5050c1a1-0000-4000-8000-000000000002", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-friends", "method": "GET", "path": "/v1/social/friends", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-requests-post", "method": "POST", "path": "/v1/social/friend-requests", "as": "5050c1a1-0000-4000-8000-000000000001", "body": {"userId": "5050c1a1-0000-4000-8000-000000000006"}}
+{"name": "off-invite", "method": "POST", "path": "/v1/social/invites", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-privacy-put", "method": "PUT", "path": "/v1/social/privacy", "as": "5050c1a1-0000-4000-8000-000000000001", "body": {}}
+{"name": "off-blocks", "method": "GET", "path": "/v1/social/blocks", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-report", "method": "POST", "path": "/v1/social/reports", "as": "5050c1a1-0000-4000-8000-000000000001", "body": {}}
+{"name": "off-contacts", "method": "POST", "path": "/v1/social/discovery/contacts/match", "as": "5050c1a1-0000-4000-8000-000000000001", "body": {}}
+{"name": "off-fb-limited", "method": "POST", "path": "/v1/social/discovery/facebook/limited", "as": "5050c1a1-0000-4000-8000-000000000001", "body": {}}
+{"name": "off-fb-disconnect", "method": "DELETE", "path": "/v1/social/discovery/facebook", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-xp", "method": "GET", "path": "/v1/gamification/xp", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-check-in", "method": "POST", "path": "/v1/gamification/check-in", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-leaderboards", "method": "GET", "path": "/v1/social/leaderboards", "as": "5050c1a1-0000-4000-8000-000000000001"}
+{"name": "off-anon-friends", "method": "GET", "path": "/v1/social/friends"}

@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/market"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/joblock"
@@ -201,9 +202,8 @@ func (a TargetAlerts) evaluate(ctx context.Context, t *watchlistdb.Target) {
 	if !marked {
 		return
 	}
-	// Vapor also scheduled AchievementHooks here (craft.target_hit); the
-	// achievements engine is not ported to v2, and Vapor's own sweep job
-	// picks the change up.
+	// alert_triggered_at is committed now: craft.target_hit can move.
+	achievementhooks.Schedule(t.UserID)
 	a.Logger.Info("target-alert push delivered", "symbol", t.Symbol, "currentPrice", price)
 }
 

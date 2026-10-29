@@ -1,0 +1,16 @@
+# Articles with ARTICLES_ENABLED unset: every route 404s before auth.
+# Compare the unflagged Vapor (8081) with v2 started WITHOUT ARTICLES_ENABLED:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18145 -jwt-secret parity-secret -cases parity/articles-flagoff.jsonl
+{"name":"off-list","method":"GET","path":"/v1/articles","as":"a2710000-0000-4000-8000-0000000000b1"}
+{"name":"off-list-anon","method":"GET","path":"/v1/articles"}
+{"name":"off-get","method":"GET","path":"/v1/articles/pzaaaaaa"}
+{"name":"off-image","method":"GET","path":"/v1/articles/images/A2710000-0000-4000-8000-000000000201"}
+{"name":"off-view","method":"POST","path":"/v1/articles/pzaaaaaa/view"}
+{"name":"off-create","method":"POST","path":"/v1/articles","as":"a2710000-0000-4000-8000-0000000000a1","body":{"title":"x"}}
+{"name":"off-update","method":"PATCH","path":"/v1/articles/pzaaaaaa","body":{}}
+{"name":"off-delete","method":"DELETE","path":"/v1/articles/pzaaaaaa"}
+{"name":"off-vote","method":"POST","path":"/v1/articles/pzaaaaaa/vote"}
+{"name":"off-unvote","method":"DELETE","path":"/v1/articles/pzaaaaaa/vote"}
+{"name":"off-report","method":"POST","path":"/v1/articles/pzaaaaaa/report","body":{"reason":"spam"}}
+{"name":"off-upload","method":"POST","path":"/v1/articles/images","body":{}}
+{"name":"off-images-trie","method":"GET","path":"/v1/articles/images"}

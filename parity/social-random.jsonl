@@ -1,0 +1,10 @@
+# Social cases whose answers carry fresh random values (a new invite code, a
+# new friend-request id). Same servers and seed as parity/social.jsonl (run
+# it right after that file, without re-seeding), with those keys ignored:
+#
+#   go run ./cmd/parity -a http://127.0.0.1:18142 -b http://127.0.0.1:18141 -jwt-secret parity-secret \
+#     -cases parity/social-random.jsonl -ignore requestId,id,code,url
+{"name": "invite-create-new", "method": "POST", "path": "/v1/social/invites", "as": "5050c1a1-0000-4000-8000-000000000006"}
+{"name": "invite-create-new-again", "method": "POST", "path": "/v1/social/invites", "as": "5050c1a1-0000-4000-8000-000000000006"}
+{"name": "send-request-new", "method": "POST", "path": "/v1/social/friend-requests", "as": "5050c1a1-0000-4000-8000-000000000006", "body": {"userId": "5050c1a1-0000-4000-8000-000000000007"}}
+{"name": "requests-after-new", "method": "GET", "path": "/v1/social/friend-requests", "as": "5050c1a1-0000-4000-8000-000000000007"}

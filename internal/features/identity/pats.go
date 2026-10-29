@@ -11,6 +11,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/store/identitydb"
 
@@ -125,6 +126,7 @@ func (s *service) createPAT(c *echo.Context) error {
 	}); err != nil {
 		return err
 	}
+	achievementhooks.Schedule(sess.UserID)
 	return httpx.OK(c, patCreateResponse{
 		ID: apijson.NewUUID(id), Name: name, Scopes: scopes, Token: raw,
 		ExpiresAt: apijson.NewTime(expires), CreatedAt: apijson.NewTime(now),

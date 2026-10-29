@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
+	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
@@ -53,6 +54,8 @@ func All() []server.Feature {
 		// onboarding.
 		identity.Feature{},
 		statistics.Feature{},
+		// BudgetingEngineController (drift, reallocations, templates).
+		budgeting.Feature{},
 	}
 }
 

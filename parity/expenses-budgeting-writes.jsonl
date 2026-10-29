@@ -1,0 +1,9 @@
+# Budgeting engine writes whose responses carry fresh UUIDs / timestamps.
+# Load parity/expenses-budgeting-setup.sql first, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18115 -jwt-secret parity-secret \
+#     -cases parity/expenses-budgeting-writes.jsonl -ignore requestId,id,createdAt,updatedAt
+# The setup trigger replaces a same-named template on insert, and holds
+# snapshot 3d2's revision at 0, so each backend sees the same state.
+{"name":"template-create-ok","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"  Created ","items":[{"title":"Groceries","plannedAmount":400,"pillar":"future you","categoryId":"not-a-uuid","targetType":"fixed","allocationKind":"expense","reallocationEligible":true}]}}
+{"name":"template-apply-replace","method":"POST","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b1/apply","as":"e5c00000-0000-4000-8000-000000000003","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d2","expectedRevision":0,"replaceExisting":true}}
+{"name":"template-update-ok","method":"PUT","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000000b2","as":"e5c00000-0000-4000-8000-000000000002","body":{"name":" Legacy ","items":[{"title":"Rent","plannedAmount":900,"pillar":"Fundamentals","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}

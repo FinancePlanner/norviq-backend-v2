@@ -34,6 +34,7 @@ import (
 	"norviq-api/internal/features/rebalancing"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
+	"norviq-api/internal/features/research"
 	"norviq-api/internal/features/retirement"
 	"norviq-api/internal/features/scenarios"
 	"norviq-api/internal/features/simulations"
@@ -41,6 +42,7 @@ import (
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/features/tax"
+	"norviq-api/internal/features/terminalpositions"
 	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
@@ -114,6 +116,8 @@ func All() []server.Feature {
 		simulations.Feature{},
 		// Holdings, manual transactions and the stock share page.
 		stocks.Feature{},
+		// StockController research notes (/v1/research).
+		research.Feature{},
 		// RetirementController portfolio routes.
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// ScenarioController portfolio snapshot routes.
@@ -134,6 +138,9 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// Terminal position sizing and its AI suggestions
+		// (TerminalPositionsController, TerminalPositionsAIController).
+		terminalpositions.Feature{},
 	}
 }
 

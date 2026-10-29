@@ -24,6 +24,7 @@ import (
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
 	"norviq-api/internal/features/simulations"
+	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -65,6 +66,8 @@ func All() []server.Feature {
 		// TODO(merge): set ScheduleAchievementCheck to achievementhooks.Schedule.
 		rebalancing.Feature{},
 		simulations.Feature{},
+		// Holdings, manual transactions and the stock share page.
+		stocks.Feature{},
 	}
 }
 

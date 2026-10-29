@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
@@ -23,6 +24,8 @@ import (
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/features/retirement"
+	"norviq-api/internal/features/scenarios"
 	"norviq-api/internal/features/simulations"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/platform/entitlements"
@@ -68,6 +71,13 @@ func All() []server.Feature {
 		simulations.Feature{},
 		// Holdings, manual transactions and the stock share page.
 		stocks.Feature{},
+		// RetirementController portfolio routes.
+		// TODO(merge): set ScheduleAchievementCheck to achievementhooks.Schedule.
+		retirement.Feature{},
+		// ScenarioController portfolio snapshot routes.
+		scenarios.Feature{},
+		// WealthAutomationController rebalancing-policy routes.
+		automation.Feature{},
 	}
 }
 

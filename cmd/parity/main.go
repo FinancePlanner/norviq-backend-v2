@@ -69,7 +69,11 @@ func main() {
 		ignored[strings.TrimSpace(k)] = true
 	}
 	signer := auth.NewSigner(*secret)
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+		// Compare redirects themselves, not wherever they lead.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 
 	var total, failed int
 	sc := bufio.NewScanner(in)
@@ -128,6 +132,9 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 	}
 	for k, v := range tc.Headers {
 		req.Header.Set(k, v)
+	}
+	if h := tc.Headers["Host"]; h != "" {
+		req.Host = h // net/http ignores a Host header set on req.Header
 	}
 	if tc.As != "" {
 		id, err := uuid.Parse(tc.As)

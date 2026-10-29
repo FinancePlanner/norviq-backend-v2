@@ -94,6 +94,11 @@ const unavailableReason = "AI lookup unavailable. Try again later or enter the n
 
 func errUnavailable() error { return httpx.Abort(http.StatusServiceUnavailable, unavailableReason) }
 
+// ErrAIUnavailable is the 503 the AI routes answer when app.terminalAIClient
+// is nil. Catalog.LookupShareFacts returns this exact value then, so callers
+// can tell it apart with errors.Is.
+var ErrAIUnavailable = httpx.Abort(http.StatusServiceUnavailable, unavailableReason)
+
 // errUnusable is TerminalAIAdvisor.unusable.
 func errUnusable() error {
 	return httpx.Unprocessable("The AI answer had no usable, sourced numbers. Try again or enter them yourself.")

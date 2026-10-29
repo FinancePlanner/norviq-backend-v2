@@ -815,3 +815,51 @@ func TestAdvisorExported(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestCatalog(t *testing.T) {
+	e := newEnv(t, nil)
+	uid, _ := e.user(false)
+	ctx := context.Background()
+	cat := terminalpositions.NewCatalog(e.Deps)
+	if got, err := cat.Get(ctx, uid, terminalpositions.GetArgs{Ticker: "sofi"}); err != nil || got != nil {
+		t.Fatalf("get none = %v %v", got, err)
+	}
+	set, err := cat.SetScenario(ctx, uid, terminalpositions.SetScenarioArgs{Ticker: "sofi", Fields: terminalpositions.ScenarioFields{
+		TerminalShareCount: f(1_750_000_000), TerminalMarketCap: f(150_000_000_000), ValueWanted: f(250_000),
+	}})
+	if err != nil || set.Ticker != "SOFI" {
+		t.Fatalf("set = %+v %v", set, err)
+	}
+	created, err := cat.Create(ctx, uid, vg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := cat.List(ctx, uid)
+	if err != nil || len(list.Positions) != 2 || list.Currency != "USD" {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+	got, err := cat.Get(ctx, uid, terminalpositions.GetArgs{Ticker: " Sofi "})
+	if err != nil || got == nil || got.ID != set.ID {
+		t.Fatalf("get = %+v %v", got, err)
+	}
+	if err := cat.Delete(ctx, uid, terminalpositions.DeleteArgs{ID: uuid.MustParse(created.ID)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.Delete(ctx, uid, terminalpositions.DeleteArgs{ID: uuid.MustParse(created.ID)}); statusOf(err) != 404 {
+		t.Fatalf("delete again: %v", err)
+	}
+	// Free user: the entitlement error comes back before any client lookup.
+	if _, err := cat.LookupShareFacts(ctx, uid, terminalpositions.LookupShareFactsArgs{Ticker: "amzn"}); err == nil || statusOf(err) == 503 {
+		t.Fatalf("free lookup: %v", err)
+	}
+	pro, _ := e.user(true)
+	terminalpositions.SetAIClient(e.Deps, nil)
+	if _, err := cat.LookupShareFacts(ctx, pro, terminalpositions.LookupShareFactsArgs{Ticker: "amzn"}); !errors.Is(err, terminalpositions.ErrAIUnavailable) {
+		t.Fatalf("no client: %v", err)
+	}
+	terminalpositions.SetAIClient(e.Deps, &scripted{replies: []string{factsJSON}})
+	facts, err := cat.LookupShareFacts(ctx, pro, terminalpositions.LookupShareFactsArgs{Ticker: "amzn"})
+	if err != nil || facts.Ticker != "AMZN" {
+		t.Fatalf("facts = %+v %v", facts, err)
+	}
+}

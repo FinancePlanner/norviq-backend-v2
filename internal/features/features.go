@@ -20,6 +20,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -51,6 +52,9 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// PortfolioController, PortfolioShareController (authenticated
+		// routes).
+		portfolio.Feature{},
 	}
 }
 
@@ -83,6 +87,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		portfolio.SnapshotJob{},
 	}
 }
 

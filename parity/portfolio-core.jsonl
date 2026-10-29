@@ -1,0 +1,75 @@
+# Portfolio core: /v1/portfolio/{summary,performance,sector-exposure,dividends,lists,share-links}, /v1/lots, /v1/pnl.
+# Seed first: psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/portfolio-core-setup.sql
+# Run: go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18192 -jwt-secret parity-secret \
+#   -cases parity/portfolio-core.jsonl -ignore requestId
+# Expected diffs with -ignore requestId: lists-create-pro (fresh id/timestamps per backend) and lists-rename
+# (updatedAt is now); both pass with -ignore requestId,id,createdAt,updatedAt. lists-create-duplicate
+# (unique-name 500) differs only in the development-mode reason text of a raw DB error, which the
+# shared ErrorHandler renders differently from Vapor's PSQLError description (hidden in production).
+{"name": "unauth-v1-portfolio-summary", "method": "GET", "path": "/v1/portfolio/summary"}
+{"name": "unauth-v1-portfolio-performance", "method": "GET", "path": "/v1/portfolio/performance"}
+{"name": "unauth-v1-portfolio-sector-exposure", "method": "GET", "path": "/v1/portfolio/sector-exposure"}
+{"name": "unauth-v1-portfolio-dividends", "method": "GET", "path": "/v1/portfolio/dividends"}
+{"name": "unauth-v1-portfolio-lists", "method": "GET", "path": "/v1/portfolio/lists"}
+{"name": "unauth-v1-lots", "method": "GET", "path": "/v1/lots"}
+{"name": "unauth-v1-pnl", "method": "GET", "path": "/v1/pnl"}
+{"name": "unauth-v1-portfolio-share-links", "method": "GET", "path": "/v1/portfolio/share-links"}
+{"name": "unauth-v1-portfolio-share-links-all", "method": "GET", "path": "/v1/portfolio/share-links/all"}
+{"name": "summary", "method": "GET", "path": "/v1/portfolio/summary", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "summary-list2", "method": "GET", "path": "/v1/portfolio/summary?portfolioId=C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "summary-member", "method": "GET", "path": "/v1/portfolio/summary?portfolioListId=c0c00000-0000-4000-8000-0000000d0002", "as": "c0c00000-0000-4000-8000-000000000003"}
+{"name": "summary-bad-id", "method": "GET", "path": "/v1/portfolio/summary?portfolioId=nope", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "summary-empty-id", "method": "GET", "path": "/v1/portfolio/summary?portfolioId=", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "summary-unknown", "method": "GET", "path": "/v1/portfolio/summary?portfolioId=C0C00000-0000-4000-8000-0000000DFFFF", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "summary-foreign", "method": "GET", "path": "/v1/portfolio/summary?portfolioId=C0C00000-0000-4000-8000-0000000D0001", "as": "c0c00000-0000-4000-8000-000000000004"}
+{"name": "performance", "method": "GET", "path": "/v1/portfolio/performance", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-1w", "method": "GET", "path": "/v1/portfolio/performance?range=1w", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-all", "method": "GET", "path": "/v1/portfolio/performance?range=ALL", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-3m", "method": "GET", "path": "/v1/portfolio/performance?range=%203M%20", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-banana", "method": "GET", "path": "/v1/portfolio/performance?range=banana", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-list2", "method": "GET", "path": "/v1/portfolio/performance?portfolioListId=C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "performance-pro-empty", "method": "GET", "path": "/v1/portfolio/performance", "as": "c0c00000-0000-4000-8000-000000000004"}
+{"name": "sector-exposure", "method": "GET", "path": "/v1/portfolio/sector-exposure", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "sector-exposure-list2", "method": "GET", "path": "/v1/portfolio/sector-exposure?portfolioId=C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "dividends", "method": "GET", "path": "/v1/portfolio/dividends", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "dividends-list2", "method": "GET", "path": "/v1/portfolio/dividends?portfolioId=C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "dividends-bad-id", "method": "GET", "path": "/v1/portfolio/dividends?portfolioId=x", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lots", "method": "GET", "path": "/v1/lots", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lots-none", "method": "GET", "path": "/v1/lots", "as": "c0c00000-0000-4000-8000-000000000004"}
+{"name": "pnl", "method": "GET", "path": "/v1/pnl", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "pnl-list2", "method": "GET", "path": "/v1/pnl?portfolioListId=C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "pnl-lower", "method": "GET", "path": "/v1/pnl?portfolioId=c0c00000-0000-4000-8000-0000000d0001", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists", "method": "GET", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists-creates-default", "method": "GET", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000002"}
+{"name": "lists-create-free-limit", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000001", "body": {"name": "Third"}}
+{"name": "lists-create-pro", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": "  Parity list  "}}
+{"name": "lists-create-duplicate", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": "Pro main"}}
+{"name": "lists-create-missing-name", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {}}
+{"name": "lists-create-null-name", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": null}}
+{"name": "lists-create-number-name", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": 5}}
+{"name": "lists-create-blank", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": "  "}}
+{"name": "lists-create-long", "method": "POST", "path": "/v1/portfolio/lists", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+{"name": "lists-rename", "method": "PATCH", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001", "body": {"name": "Second"}}
+{"name": "lists-rename-bad-id", "method": "PATCH", "path": "/v1/portfolio/lists/nope", "as": "c0c00000-0000-4000-8000-000000000001", "body": {"name": "x"}}
+{"name": "lists-rename-unknown", "method": "PATCH", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000DFFFF", "as": "c0c00000-0000-4000-8000-000000000001", "body": {"name": "x"}}
+{"name": "lists-rename-foreign", "method": "PATCH", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000004", "body": {"name": "x"}}
+{"name": "lists-rename-blank", "method": "PATCH", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001", "body": {"name": ""}}
+{"name": "lists-delete-default", "method": "DELETE", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0001", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists-delete-connected", "method": "DELETE", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists-delete-unknown", "method": "DELETE", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000DFFFF", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists-delete-bad-id", "method": "DELETE", "path": "/v1/portfolio/lists/123", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "lists-delete", "method": "DELETE", "path": "/v1/portfolio/lists/C0C00000-0000-4000-8000-0000000D0009", "as": "c0c00000-0000-4000-8000-000000000004"}
+{"name": "share-list", "method": "GET", "path": "/v1/portfolio/share-links", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-status-all-empty", "method": "GET", "path": "/v1/portfolio/share-links/all", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-status-list", "method": "GET", "path": "/v1/portfolio/share-links/C0C00000-0000-4000-8000-0000000D0001", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-status-list-lower", "method": "GET", "path": "/v1/portfolio/share-links/c0c00000-0000-4000-8000-0000000d0001", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-create-all", "method": "POST", "path": "/v1/portfolio/share-links/all", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-status-all", "method": "GET", "path": "/v1/portfolio/share-links/all", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-list-after-create", "method": "GET", "path": "/v1/portfolio/share-links", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-revoke-all", "method": "DELETE", "path": "/v1/portfolio/share-links/all", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-status-all-revoked", "method": "GET", "path": "/v1/portfolio/share-links/all", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-create-member", "method": "POST", "path": "/v1/portfolio/share-links/C0C00000-0000-4000-8000-0000000D0002", "as": "c0c00000-0000-4000-8000-000000000003"}
+{"name": "share-create-foreign", "method": "POST", "path": "/v1/portfolio/share-links/C0C00000-0000-4000-8000-0000000D0001", "as": "c0c00000-0000-4000-8000-000000000004"}
+{"name": "share-status-bad", "method": "GET", "path": "/v1/portfolio/share-links/nope", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-revoke-bad", "method": "DELETE", "path": "/v1/portfolio/share-links/ALL", "as": "c0c00000-0000-4000-8000-000000000001"}
+{"name": "share-create-unauth", "method": "POST", "path": "/v1/portfolio/share-links/all"}

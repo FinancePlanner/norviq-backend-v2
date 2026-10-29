@@ -1,0 +1,90 @@
+# News parity (NewsController, FinnhubWebhookController, market news archive).
+# The shared Vapor has no FINNHUB_API_KEY, FEEDS_BASE_URL or
+# FINNHUB_WEBHOOK_SECRET, so sync answers 501, the ticker is disabled and the
+# webhook 503. Reset fixtures first, every run:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/news-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18115 -jwt-secret parity-secret \
+#     -cases parity/news.jsonl -ignore requestId,generatedAt
+# Expected diffs: only id/createdAt/updatedAt on "create ok", "create ok
+# snake" and "update ok" (fresh uuid and clock).
+{"name":"list","method":"GET","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list page 2","method":"GET","path":"/v1/news?limit=2","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list cursor","method":"GET","path":"/v1/news?limit=2&cursor=djF8NDc0MDExMzc5Njg1MTMwMjQwMHxBRTAwNTAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDM","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list iso cursor","method":"GET","path":"/v1/news?cursor=2026-10-21T10:00:00.500Z","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list bad cursor","method":"GET","path":"/v1/news?cursor=garbage","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list symbol","method":"GET","path":"/v1/news?symbol=%20zzna%20&limit=0","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"list empty user","method":"GET","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000002"}
+{"name":"list unauth","method":"GET","path":"/v1/news"}
+{"name":"feed","method":"GET","path":"/v1/news/feed","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"feed limit","method":"GET","path":"/v1/news/feed?limit=2","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"feed none tracked","method":"GET","path":"/v1/news/feed","as":"ae005000-0000-4000-8000-000000000002"}
+{"name":"get","method":"GET","path":"/v1/news/ae005000-0000-4000-8000-000000000101","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"get lowercase","method":"GET","path":"/v1/news/AE005000-0000-4000-8000-000000000102","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"get other user","method":"GET","path":"/v1/news/ae005000-0000-4000-8000-000000000101","as":"ae005000-0000-4000-8000-000000000002"}
+{"name":"get bad id","method":"GET","path":"/v1/news/nope","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"create bad symbol","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"  ","headline":"h"}}
+{"name":"create bad headline","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"aapl","headline":" "}}
+{"name":"create bad url","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"aapl","headline":"h","url":"ftp://x.com"}}
+{"name":"create bad date","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"aapl","headline":"h","publishedAt":"yesterday"}}
+{"name":"create missing headline","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"aapl"}}
+{"name":"create wrong type","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":1,"headline":"h"}}
+{"name":"create ok","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000002","body":{"symbol":" aapl ","headline":"  Parity news created ","source":" ","url":" https://example.com/x ","summary":"s","publishedAt":"2026-10-01T12:00:00.250Z"}}
+{"name":"create ok snake","method":"POST","path":"/v1/news","as":"ae005000-0000-4000-8000-000000000002","body":{"symbol":"msft","headline":"Parity news snake","published_at":"2026-10-02T12:00:00Z"}}
+{"name":"update ok","method":"PUT","path":"/v1/news/ae005000-0000-4000-8000-000000000105","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"zzna","headline":"Parity news five","publishedAt":"2026-10-19T08:00:00.001Z"}}
+{"name":"update missing","method":"PUT","path":"/v1/news/ae005000-0000-4000-8000-000000000999","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"zzna","headline":"x"}}
+{"name":"update bad id","method":"PUT","path":"/v1/news/x","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":"zzna","headline":"x"}}
+{"name":"delete missing","method":"DELETE","path":"/v1/news/ae005000-0000-4000-8000-000000000999","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"delete bad id","method":"DELETE","path":"/v1/news/x","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"sync no provider","method":"POST","path":"/v1/news/sync","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"view ok","method":"POST","path":"/v1/news/view","as":"ae005000-0000-4000-8000-000000000001","body":{"symbol":" zzna ","headline":"Parity news   One","url":null}}
+{"name":"view blank headline","method":"POST","path":"/v1/news/view","as":"ae005000-0000-4000-8000-000000000001","body":{"headline":"  "}}
+{"name":"view bad uuid","method":"POST","path":"/v1/news/view","as":"ae005000-0000-4000-8000-000000000001","body":{"headline":"h","newsId":"nope"}}
+{"name":"view missing headline","method":"POST","path":"/v1/news/view","as":"ae005000-0000-4000-8000-000000000001","body":{}}
+{"name":"ticker disabled","method":"GET","path":"/v1/news/ticker","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"ticker settings","method":"GET","path":"/v1/news/ticker/settings","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"ticker settings put","method":"PUT","path":"/v1/news/ticker/settings","as":"ae005000-0000-4000-8000-000000000001","body":{"enabled":false}}
+{"name":"ticker settings put bad","method":"PUT","path":"/v1/news/ticker/settings","as":"ae005000-0000-4000-8000-000000000001","body":{"enabled":"no"}}
+{"name":"ticker feeds","method":"GET","path":"/v1/news/ticker/feeds","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"ticker add feed","method":"POST","path":"/v1/news/ticker/feeds","as":"ae005000-0000-4000-8000-000000000001","body":{"url":"https://example.com"}}
+{"name":"ticker delete feed bad id","method":"DELETE","path":"/v1/news/ticker/feeds/nope","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"ticker delete feed","method":"DELETE","path":"/v1/news/ticker/feeds/ae005000-0000-4000-8000-000000000999","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis free","method":"GET","path":"/v1/news/thesis-watch","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis pro","method":"GET","path":"/v1/news/thesis-watch","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"thesis market","method":"GET","path":"/v1/news/thesis-watch?scope=market&limit=2","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis market page2","method":"GET","path":"/v1/news/thesis-watch?scope=market&limit=2&cursor=2","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis holdings","method":"GET","path":"/v1/news/thesis-watch?scope=holdings","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"thesis watchlist","method":"GET","path":"/v1/news/thesis-watch?scope=watchlist","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis sectors","method":"GET","path":"/v1/news/thesis-watch?scope=sectors","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis bad scope","method":"GET","path":"/v1/news/thesis-watch?scope=nope","as":"ae005000-0000-4000-8000-000000000001"}
+{"name": "thesis story free", "method": "GET", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000301", "as": "ae005000-0000-4000-8000-000000000001"}
+{"name": "thesis story pro", "method": "GET", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000302", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name": "thesis story uppercase", "method": "GET", "path": "/v1/news/thesis-watch/AE005000-0000-4000-8000-000000000301", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name": "thesis feedback relevant", "method": "POST", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000301/feedback", "as": "ae005000-0000-4000-8000-000000000003", "body": {"signal": "relevant"}}
+{"name": "thesis feedback challenges", "method": "POST", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000302/feedback", "as": "ae005000-0000-4000-8000-000000000001", "body": {"signal": "challenges"}}
+{"name": "thesis view", "method": "POST", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000301/view", "as": "ae005000-0000-4000-8000-000000000001"}
+{"name": "thesis after feedback", "method": "GET", "path": "/v1/news/thesis-watch", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name": "thesis after feedback free", "method": "GET", "path": "/v1/news/thesis-watch", "as": "ae005000-0000-4000-8000-000000000001"}
+{"name": "thesis dismiss", "method": "POST", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000302/feedback", "as": "ae005000-0000-4000-8000-000000000003", "body": {"signal": "not_relevant"}}
+{"name": "thesis after dismiss", "method": "GET", "path": "/v1/news/thesis-watch?scope=holdings", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name": "thesis story dismissed", "method": "GET", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000302", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name": "thesis clear", "method": "POST", "path": "/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000302/feedback", "as": "ae005000-0000-4000-8000-000000000003", "body": {"signal": "clear"}}
+{"name": "thesis after clear", "method": "GET", "path": "/v1/news/thesis-watch?scope=holdings", "as": "ae005000-0000-4000-8000-000000000003"}
+{"name":"thesis story bad id","method":"GET","path":"/v1/news/thesis-watch/nope","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis story missing","method":"GET","path":"/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000999","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis feedback missing story","method":"POST","path":"/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000999/feedback","as":"ae005000-0000-4000-8000-000000000001","body":{"signal":"relevant"}}
+{"name":"thesis feedback bad signal","method":"POST","path":"/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000999/feedback","as":"ae005000-0000-4000-8000-000000000001","body":{"signal":"maybe"}}
+{"name":"thesis view missing story","method":"POST","path":"/v1/news/thesis-watch/ae005000-0000-4000-8000-000000000999/view","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis prefs","method":"GET","path":"/v1/news/thesis-watch/notifications","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"thesis prefs bad tz","method":"PUT","path":"/v1/news/thesis-watch/notifications","as":"ae005000-0000-4000-8000-000000000001","body":{"enabled":false,"timezone":"Mars/Base"}}
+{"name":"thesis prefs need pro","method":"PUT","path":"/v1/news/thesis-watch/notifications","as":"ae005000-0000-4000-8000-000000000001","body":{"enabled":true,"timezone":"Europe/Lisbon"}}
+{"name":"thesis prefs ok","method":"PUT","path":"/v1/news/thesis-watch/notifications","as":"ae005000-0000-4000-8000-000000000003","body":{"enabled":true,"timezone":" Europe/Lisbon "}}
+{"name":"thesis prefs after","method":"GET","path":"/v1/news/thesis-watch/notifications","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"webhook not configured","method":"POST","path":"/webhooks/finnhub/news","body":{"news":[]}}
+{"name":"market news archived","method":"GET","path":"/v1/market/news?symbol=zzna","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news limit","method":"GET","path":"/v1/market/news?symbol=ZZNA&limit=1","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news missing symbol","method":"GET","path":"/v1/market/news","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news archive","method":"GET","path":"/v1/market/news/archive?symbol=ZZNB","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news archive empty","method":"GET","path":"/v1/market/news/archive?symbol=NOPE","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news general","method":"GET","path":"/v1/market/news/general?limit=3","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news sync","method":"POST","path":"/v1/market/news/archive/sync?symbol=ZZNA","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"market news sync no symbol","method":"POST","path":"/v1/market/news/archive/sync","as":"ae005000-0000-4000-8000-000000000001"}

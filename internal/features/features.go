@@ -26,6 +26,7 @@ import (
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/insights"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/pilots"
@@ -134,6 +135,9 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// InsightsController (/v1/insights/*): Hermes insights and retail
+		// sentiment.
+		insights.Feature{},
 	}
 }
 
@@ -194,6 +198,10 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// Insights: Hermes pull, daily sentiment roll-up, retention.
+		insights.HermesSyncJob{},
+		insights.SentimentAggregationJob{},
+		insights.SentimentRetentionJob{},
 	}
 }
 

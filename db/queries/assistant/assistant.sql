@@ -146,3 +146,68 @@ UPDATE goals SET title = $2, updated_at = $3 WHERE id = $1;
 
 -- name: DeleteGoal :exec
 DELETE FROM goals WHERE id = $1;
+
+-- Standing tasks (AIAssistantWatch, AIAssistantWatchJob).
+
+-- name: InsertWatch :exec
+INSERT INTO assistant_watches (id, user_id, conversation_id, title_encrypted, spec_encrypted, condition_encrypted,
+    schedule_human, interval_minutes, next_run_at, last_run_at, enabled, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, true, sqlc.arg(now), sqlc.arg(now));
+
+-- name: ClaimDueWatches :many
+UPDATE assistant_watches AS w
+SET next_run_at = w.next_run_at + make_interval(
+        mins => (w.interval_minutes * (floor(extract(epoch FROM (now() - w.next_run_at)) / 60 / w.interval_minutes) + 1))::int
+    ),
+    last_run_at = now(),
+    updated_at = now()
+WHERE w.id IN (
+    SELECT id FROM assistant_watches
+    WHERE enabled AND next_run_at <= now()
+    ORDER BY next_run_at
+    LIMIT sqlc.arg(batch)
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING w.id;
+
+-- name: GetWatch :one
+SELECT * FROM assistant_watches WHERE id = $1;
+
+-- name: DisableWatch :exec
+UPDATE assistant_watches SET enabled = false, updated_at = $2 WHERE id = $1;
+
+-- Retention (AIAssistantRetentionJob).
+
+-- name: DeleteExpiredConversations :exec
+DELETE FROM ai_conversations WHERE expires_at < $1;
+
+-- name: DeleteExpiredTips :exec
+DELETE FROM ai_tips WHERE expires_at < $1;
+
+-- name: ExpirePendingActions :exec
+UPDATE ai_pending_actions SET status = 'expired', updated_at = sqlc.arg(now)
+WHERE status = 'pending' AND expires_at < sqlc.arg(now);
+
+-- name: DeleteOldPendingActions :exec
+DELETE FROM ai_pending_actions WHERE created_at < $1;
+
+-- name: DeleteOldUsage :exec
+DELETE FROM ai_usage_monthly WHERE month_start < $1;
+
+-- name: DeleteOldAudits :exec
+DELETE FROM ai_action_audits WHERE created_at < $1;
+
+-- Daily tips (AIDailyTipJob).
+
+-- name: TipPreferences :many
+SELECT * FROM ai_preferences WHERE proactive_tips_enabled = true;
+
+-- name: CountTipsSince :one
+SELECT count(*) FROM ai_tips WHERE user_id = $1 AND created_at >= $2;
+
+-- name: MonthExpensesForTip :many
+SELECT amount, user_share_percent FROM expenses
+WHERE user_id = $1 AND occurred_on >= sqlc.arg(month_start) AND occurred_on < sqlc.arg(next_month);
+
+-- name: BudgetSnapshotForMonth :one
+SELECT net_salary FROM budget_snapshots WHERE user_id = $1 AND month_start = $2 LIMIT 1;

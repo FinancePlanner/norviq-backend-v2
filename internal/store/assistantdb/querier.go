@@ -6,16 +6,28 @@ package assistantdb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
 	BindMessagingLinks(ctx context.Context, arg BindMessagingLinksParams) error
+	BudgetSnapshotForMonth(ctx context.Context, arg BudgetSnapshotForMonthParams) (float64, error)
+	ClaimDueWatches(ctx context.Context, batch int32) ([]uuid.UUID, error)
+	CountTipsSince(ctx context.Context, arg CountTipsSinceParams) (int64, error)
 	DeleteConversation(ctx context.Context, id uuid.UUID) error
+	// Retention (AIAssistantRetentionJob).
+	DeleteExpiredConversations(ctx context.Context, expiresAt time.Time) error
+	DeleteExpiredTips(ctx context.Context, expiresAt time.Time) error
 	DeleteGoal(ctx context.Context, id uuid.UUID) error
 	DeleteMemo(ctx context.Context, id uuid.UUID) error
+	DeleteOldAudits(ctx context.Context, createdAt *time.Time) error
+	DeleteOldPendingActions(ctx context.Context, createdAt *time.Time) error
+	DeleteOldUsage(ctx context.Context, monthStart time.Time) error
+	DisableWatch(ctx context.Context, arg DisableWatchParams) error
 	DismissTip(ctx context.Context, id uuid.UUID) error
+	ExpirePendingActions(ctx context.Context, now *time.Time) error
 	GetOwnedConversation(ctx context.Context, arg GetOwnedConversationParams) (AiConversation, error)
 	GetOwnedGoal(ctx context.Context, arg GetOwnedGoalParams) (Goal, error)
 	GetOwnedMemo(ctx context.Context, arg GetOwnedMemoParams) (PositionMemo, error)
@@ -23,6 +35,7 @@ type Querier interface {
 	GetOwnedPendingActionForUpdate(ctx context.Context, arg GetOwnedPendingActionForUpdateParams) (AiPendingAction, error)
 	GetOwnedTip(ctx context.Context, arg GetOwnedTipParams) (AiTip, error)
 	GetPreference(ctx context.Context, userID uuid.UUID) (AiPreference, error)
+	GetWatch(ctx context.Context, id uuid.UUID) (AssistantWatch, error)
 	InsertActionAudit(ctx context.Context, arg InsertActionAuditParams) error
 	InsertConversation(ctx context.Context, arg InsertConversationParams) error
 	InsertGoal(ctx context.Context, arg InsertGoalParams) error
@@ -31,6 +44,8 @@ type Querier interface {
 	InsertPendingAction(ctx context.Context, arg InsertPendingActionParams) error
 	InsertPreference(ctx context.Context, arg InsertPreferenceParams) error
 	InsertTip(ctx context.Context, arg InsertTipParams) error
+	// Standing tasks (AIAssistantWatch, AIAssistantWatchJob).
+	InsertWatch(ctx context.Context, arg InsertWatchParams) error
 	ListConversationMessages(ctx context.Context, arg ListConversationMessagesParams) ([]AiMessage, error)
 	// AIAssistantController, PositionMemoService, AIAssistantTurnCoordinator and
 	// the assistant jobs. Fluent wrote created_at/updated_at from the client
@@ -43,12 +58,15 @@ type Querier interface {
 	ListPendingActions(ctx context.Context, arg ListPendingActionsParams) ([]AiPendingAction, error)
 	ListTips(ctx context.Context, arg ListTipsParams) ([]AiTip, error)
 	MarkTipSeen(ctx context.Context, id uuid.UUID) error
+	MonthExpensesForTip(ctx context.Context, arg MonthExpensesForTipParams) ([]MonthExpensesForTipRow, error)
 	NewestConversation(ctx context.Context, arg NewestConversationParams) (AiConversation, error)
 	RecentConversationMessages(ctx context.Context, arg RecentConversationMessagesParams) ([]AiMessage, error)
 	RenameGoal(ctx context.Context, arg RenameGoalParams) error
 	SetActionAuditStatus(ctx context.Context, arg SetActionAuditStatusParams) error
 	SetMemoBookmarked(ctx context.Context, arg SetMemoBookmarkedParams) error
 	SetPendingActionStatus(ctx context.Context, arg SetPendingActionStatusParams) error
+	// Daily tips (AIDailyTipJob).
+	TipPreferences(ctx context.Context) ([]AiPreference, error)
 	TouchConversation(ctx context.Context, arg TouchConversationParams) error
 	UpdatePreference(ctx context.Context, arg UpdatePreferenceParams) error
 }

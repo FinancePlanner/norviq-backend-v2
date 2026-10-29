@@ -59,3 +59,6 @@ func (s *Sources) readToolsReady() bool {
 func (s *Sources) viewSummaryReady() bool {
 	return s.hasDashboard() && s.hasMacro() && s.hasCrypto() && s.Tax != nil
 }
+
+// turnsReady: the assistant chat/stream and /v1/ai/chat can be served.
+func (h *handlers) turnsReady() bool { return h.src.readToolsReady() && h.memo != nil }

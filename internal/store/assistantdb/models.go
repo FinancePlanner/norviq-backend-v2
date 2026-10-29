@@ -67,6 +67,22 @@ type AiTip struct {
 	ExpiresAt      time.Time
 }
 
+type AssistantWatch struct {
+	ID                 uuid.UUID
+	UserID             uuid.UUID
+	ConversationID     uuid.UUID
+	TitleEncrypted     []byte
+	SpecEncrypted      []byte
+	ConditionEncrypted []byte
+	ScheduleHuman      string
+	IntervalMinutes    int64
+	NextRunAt          time.Time
+	LastRunAt          *time.Time
+	Enabled            bool
+	CreatedAt          *time.Time
+	UpdatedAt          *time.Time
+}
+
 type Goal struct {
 	ID              uuid.UUID
 	UserID          uuid.UUID

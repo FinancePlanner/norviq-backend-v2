@@ -56,6 +56,15 @@ func (f field) swiftType() string {
 // reasons for the common failures, so 400s read the same. Absent or null
 // optionals are missing from the result.
 func decodeBody(c *echo.Context, fields []field) (map[string]any, error) {
+	obj, err := readObject(c)
+	if err != nil {
+		return nil, err
+	}
+	return decodeFields(obj, fields, nil)
+}
+
+// readObject reads the body as a JSON object with normalized keys.
+func readObject(c *echo.Context) (map[string]json.RawMessage, error) {
 	raw, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		return nil, err
@@ -76,7 +85,7 @@ func decodeBody(c *echo.Context, fields []field) (map[string]any, error) {
 	if obj == nil {
 		return nil, httpx.BadRequest("Value was not of type 'Dictionary<String, Any>' at path ''. Expected to decode Dictionary<String, Any> but found null instead.")
 	}
-	return decodeFields(obj, fields, nil)
+	return obj, nil
 }
 
 func joinPath(path []string, name string) string {

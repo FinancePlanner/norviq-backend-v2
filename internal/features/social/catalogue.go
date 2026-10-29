@@ -2,7 +2,7 @@ package social
 
 // achievementDef is the part of AchievementDefinition the profile showcase
 // reads. A copy of AchievementCatalogue.all (Swift 37128c4), in order; the
-// achievements feature keeps the full catalogue.
+// achievements feature keeps the full list.
 type achievementDef struct {
 	Key           string
 	IconKey       string
@@ -11,6 +11,7 @@ type achievementDef struct {
 	TitlePT       string
 }
 
+//nolint:misspell // titles are copied verbatim from Swift (pt and en-GB copy)
 var achievementCatalogue = []achievementDef{
 	{Key: "start.first_holding", IconKey: "chart.pie.fill", IsPerformance: false, TitleEN: "First Holding", TitlePT: "Primeira posição"},
 	{Key: "start.first_budget", IconKey: "wallet.pass.fill", IsPerformance: false, TitleEN: "Budget Set", TitlePT: "Orçamento definido"},

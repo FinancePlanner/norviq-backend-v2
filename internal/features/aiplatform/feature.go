@@ -11,6 +11,7 @@ import (
 	"norviq-api/internal/auth"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/platform/discord"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
 )
 
@@ -39,6 +40,8 @@ var (
 		// Chain-exhausted and free-tier alerts go to the operator Discord
 		// webhook, as in Vapor; an unset DISCORD_WEBHOOK_URL skips them.
 		p.SetAlerter(discord.FromEnv(d.Logger))
+		// Pro vs free routing reads the user's plan from billing.
+		p.Plans = entitlements.NewFromEnv(d.DB)
 		return p, nil
 	}
 )
@@ -47,7 +50,7 @@ var (
 // feature calls this from Register so they all share one set of chains, one
 // alert throttle and one cap. Other domains plug in after building it:
 //
-//	p.Plans = <billing entitlement resolver>   // Pro vs free routing
+//	p.Plans = <billing entitlement resolver>   // wired to entitlements below
 //	p.SetAlerter(<Discord sender>)            // already wired to discord.FromEnv
 //	p.Cipher = <identity's credential cipher> // optional; the built-in one is compatible
 func Platform(d *server.Deps) (*ai.Platform, error) {

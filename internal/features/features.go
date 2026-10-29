@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
 )
 
@@ -25,10 +26,11 @@ import (
 func All() []server.Feature {
 	return []server.Feature{
 		billing.Feature{},
-		// Earnings preferences wait for billing's premium gate
-		// (notifications.Feature.Premium); assets search waits for market
-		// data (assets.Feature.Search). Both stay on Vapor until wired.
-		notifications.Feature{},
+		notifications.Feature{Premium: func(d *server.Deps) notifications.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
+		// Assets search waits for market data (assets.Feature.Search) and
+		// stays on Vapor until wired.
 		activity.Feature{},
 		badges.Feature{},
 		feedback.Feature{},

@@ -6,6 +6,7 @@ package statistics
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"norviq-api/internal/auth"
@@ -104,7 +105,7 @@ func (h *handlers) prepare(c *echo.Context) (uuid.UUID, QueryOptions, error) {
 	if err := h.ent.RequirePremium(c.Request().Context(), entitlements.FeatureStatistics, s.UserID); err != nil {
 		return uuid.Nil, QueryOptions{}, err
 	}
-	top, err := httpx.QueryInt(c, "top")
+	top, err := queryTop(c)
 	if err != nil {
 		return uuid.Nil, QueryOptions{}, err
 	}
@@ -119,4 +120,19 @@ func (h *handlers) prepare(c *echo.Context) (uuid.UUID, QueryOptions, error) {
 		return uuid.Nil, QueryOptions{}, err
 	}
 	return s.UserID, opts, nil
+}
+
+// queryTop decodes `top` as `req.query.decode(StatisticsQueryParams.self)`
+// did: present but not an Int (empty included) is a 400 with the
+// URLEncodedFormDecoder's reason.
+func queryTop(c *echo.Context) (*int, error) {
+	raw := httpx.QueryString(c, "top")
+	if raw == nil {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(*raw)
+	if err != nil {
+		return nil, httpx.BadRequest("Value was not of type 'Int' at path 'top'. Data found at 'top' was not Int.")
+	}
+	return &n, nil
 }

@@ -391,7 +391,8 @@ func TestErrors(t *testing.T) {
 	e := newEnv(t, true)
 	for path, want := range map[string]string{
 		"/v1/statistics/overview?period=bogus":    "Invalid `period`",
-		"/v1/statistics/overview?top=abc":         "Value for key 'top' is not an Int.",
+		"/v1/statistics/overview?top=abc":         "Value was not of type 'Int' at path 'top'. Data found at 'top' was not Int.",
+		"/v1/statistics/overview?top=":            "Value was not of type 'Int' at path 'top'.",
 		"/v1/statistics/overview?top=500":         "Invalid `top`",
 		"/v1/statistics/market?benchmark=%24%24":  "Invalid `benchmark`. Use a valid symbol like SPY.",
 		"/v1/statistics/overview?asOf=2099-01-01": "`asOf` cannot be in the future.",

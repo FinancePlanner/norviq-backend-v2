@@ -70,7 +70,8 @@ func loadCatalog() (*catalog, error) {
 	if strings.TrimSpace(r.Version) == "" || strings.TrimSpace(e.Version) == "" {
 		return nil, errors.New("tax catalog must declare a version")
 	}
-	for _, entry := range r.Entries {
+	for idx := range r.Entries {
+		entry := &r.Entries[idx]
 		if entry.ReviewedAt == "" || entry.ReviewReference == "" || entry.ReplacementSymbol == "" ||
 			len(entry.EligibleJurisdictions) == 0 ||
 			(len(entry.SourceSymbols) == 0 && (entry.SourceTaxIdentityGroup == nil || *entry.SourceTaxIdentityGroup == "")) {
@@ -137,10 +138,11 @@ func score(m replacementMetrics) (dec.Decimal, dec.Decimal) {
 func (s *service) replacementCandidates(ctx context.Context, source taxdb.Instrument, j Jurisdiction) ([]ReplacementCandidate, error) {
 	sourceSymbol := strings.ToUpper(source.Symbol)
 	var matching []replacementEntry
-	for _, e := range s.catalog.replacements {
+	for idx := range s.catalog.replacements {
+		e := &s.catalog.replacements[idx]
 		symbolMatches := false
 		for _, sym := range e.SourceSymbols {
-			if strings.ToUpper(sym) == sourceSymbol {
+			if strings.EqualFold(sym, sourceSymbol) {
 				symbolMatches = true
 			}
 		}
@@ -152,7 +154,7 @@ func (s *service) replacementCandidates(ctx context.Context, source taxdb.Instru
 			}
 		}
 		if (symbolMatches || identityMatches) && eligible {
-			matching = append(matching, e)
+			matching = append(matching, *e)
 		}
 	}
 	out := []ReplacementCandidate{}
@@ -160,7 +162,8 @@ func (s *service) replacementCandidates(ctx context.Context, source taxdb.Instru
 		return out, nil
 	}
 	symbols := make([]string, len(matching))
-	for i, e := range matching {
+	for i := range matching {
+		e := &matching[i]
 		symbols[i] = strings.ToUpper(e.ReplacementSymbol)
 	}
 	instruments, err := s.q.InstrumentsBySymbols(ctx, symbols)
@@ -168,19 +171,21 @@ func (s *service) replacementCandidates(ctx context.Context, source taxdb.Instru
 		return nil, err
 	}
 	bySymbol := map[string]taxdb.Instrument{}
-	for _, in := range instruments {
+	for idx := range instruments {
+		in := &instruments[idx]
 		k := strings.ToUpper(in.Symbol)
 		if _, ok := bySymbol[k]; !ok {
-			bySymbol[k] = in
+			bySymbol[k] = *in
 		}
 	}
 	sort.SliceStable(matching, func(a, b int) bool { return matching[a].Priority < matching[b].Priority })
-	for _, entry := range matching {
+	for idx := range matching {
+		entry := &matching[idx]
 		replacement, ok := bySymbol[strings.ToUpper(entry.ReplacementSymbol)]
 		if !ok || substantiallyIdentical(source, replacement) {
 			continue
 		}
-		m, err := s.replacementMetrics(ctx, source, replacement, entry)
+		m, err := s.replacementMetrics(ctx, source, replacement, *entry)
 		if err != nil {
 			return nil, err
 		}

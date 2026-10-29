@@ -244,9 +244,10 @@ func decodeTaxQuery(c *echo.Context) (taxQuery, error) {
 	return q, nil
 }
 
-func (q taxQuery) jurisdictionOr(def Jurisdiction) Jurisdiction {
+// jurisdiction is `query.jurisdiction ?? .unitedStates`.
+func (q taxQuery) jurisdiction() Jurisdiction {
 	if q.Jurisdiction == nil {
-		return def
+		return US
 	}
 	return *q.Jurisdiction
 }

@@ -71,13 +71,16 @@ func parseWrapper(raw string) (Wrapper, bool) {
 	return "", false
 }
 
+// statusCancelled is the action plan and leg status Vapor spells British.
+const statusCancelled = "cancelled" //nolint:misspell // Vapor wire value
+
 var (
 	filingStatuses   = []string{"single", "married_joint", "married_separate", "domestic_partnership"}
 	taxationModes    = []string{"jurisdiction_default", "autonomous", "aggregate_with_income"}
 	lotMethods       = []string{"fifo", "lifo", "specific_id", "jurisdiction_default"}
 	marketAdmissions = []string{"regulated", "unlisted", "unknown"}
 	fundClasses      = []string{"equity", "mixed", "real_estate", "foreign_real_estate", "other", "unknown"}
-	planStatuses     = []string{"accepted", "partially_matched", "requires_review", "completed", "cancelled"}
+	planStatuses     = []string{"accepted", "partially_matched", "requires_review", "completed", statusCancelled}
 	reportKinds      = []string{"transaction_workpaper", "form_8949", "schedule_d_summary", "country_capital_gains", "annual_filing_pack"}
 	reportFormats    = []string{"csv", "pdf"}
 )

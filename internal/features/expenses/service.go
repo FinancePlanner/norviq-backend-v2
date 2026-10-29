@@ -18,6 +18,7 @@ import (
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/users"
 	"norviq-api/internal/server"
@@ -1012,6 +1013,8 @@ func (s *Service) ReconcileBadges(ctx context.Context, db expensesdb.DBTX, userI
 	if _, err := svc.Evaluate(ctx, userID); err != nil {
 		s.logger.Warn("badge reconciliation failed", "user", userID, "error", err)
 	}
+	// Request.reconcileBadges ends with scheduleAchievementCheck(for:).
+	achievementhooks.Schedule(userID)
 }
 
 // EvaluateDrift runs the wired drift evaluator best-effort for each month.

@@ -7,83 +7,9 @@ package expensesdb
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
-
-const overviewAdjustedCloses = `-- name: OverviewAdjustedCloses :many
-SELECT date, adjusted_close FROM market_price_bars
-WHERE instrument_key = $1::text
-  AND date BETWEEN $2::date AND $3::date
-ORDER BY date ASC
-`
-
-type OverviewAdjustedClosesParams struct {
-	InstrumentKey string
-	FromDay       time.Time
-	ToDay         time.Time
-}
-
-type OverviewAdjustedClosesRow struct {
-	Date          time.Time
-	AdjustedClose float64
-}
-
-// MarketPriceBarRepository.adjustedCloses.
-func (q *Queries) OverviewAdjustedCloses(ctx context.Context, arg OverviewAdjustedClosesParams) ([]OverviewAdjustedClosesRow, error) {
-	rows, err := q.db.Query(ctx, overviewAdjustedCloses, arg.InstrumentKey, arg.FromDay, arg.ToDay)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []OverviewAdjustedClosesRow{}
-	for rows.Next() {
-		var i OverviewAdjustedClosesRow
-		if err := rows.Scan(&i.Date, &i.AdjustedClose); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const overviewLatestQuotes = `-- name: OverviewLatestQuotes :many
-SELECT DISTINCT ON (symbol) symbol, currency, price
-FROM quote_cache
-WHERE symbol = ANY($1::text[])
-ORDER BY symbol, as_of DESC
-`
-
-type OverviewLatestQuotesRow struct {
-	Symbol   string
-	Currency string
-	Price    float64
-}
-
-// PortfolioSnapshotValuator.latestQuotes.
-func (q *Queries) OverviewLatestQuotes(ctx context.Context, symbols []string) ([]OverviewLatestQuotesRow, error) {
-	rows, err := q.db.Query(ctx, overviewLatestQuotes, symbols)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []OverviewLatestQuotesRow{}
-	for rows.Next() {
-		var i OverviewLatestQuotesRow
-		if err := rows.Scan(&i.Symbol, &i.Currency, &i.Price); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
 
 const overviewStocks = `-- name: OverviewStocks :many
 
@@ -96,9 +22,8 @@ type OverviewStocksRow struct {
 	BuyPrice float64
 }
 
-// ReportsController.resolvePortfolioStatistics and the
-// PortfolioSnapshotValuator.prices(pricing: .live) it calls. The portfolio
-// port has the same two price queries; fold these into it once both land.
+// ReportsController.resolvePortfolioStatistics; prices come from
+// portfolio.SnapshotValuator.Prices.
 // Stock.query(on:).filter(\.$userId == userId).all(): no ORDER BY, as Fluent.
 func (q *Queries) OverviewStocks(ctx context.Context, userID uuid.UUID) ([]OverviewStocksRow, error) {
 	rows, err := q.db.Query(ctx, overviewStocks, userID)

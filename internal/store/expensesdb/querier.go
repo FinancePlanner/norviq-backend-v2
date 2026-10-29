@@ -47,13 +47,8 @@ type Querier interface {
 	ListSnapshotsByUser(ctx context.Context, userID uuid.UUID) ([]BudgetSnapshot, error)
 	ListSnapshotsByUserRange(ctx context.Context, arg ListSnapshotsByUserRangeParams) ([]BudgetSnapshot, error)
 	ListSuggestionDismissals(ctx context.Context, arg ListSuggestionDismissalsParams) ([]string, error)
-	// MarketPriceBarRepository.adjustedCloses.
-	OverviewAdjustedCloses(ctx context.Context, arg OverviewAdjustedClosesParams) ([]OverviewAdjustedClosesRow, error)
-	// PortfolioSnapshotValuator.latestQuotes.
-	OverviewLatestQuotes(ctx context.Context, symbols []string) ([]OverviewLatestQuotesRow, error)
-	// ReportsController.resolvePortfolioStatistics and the
-	// PortfolioSnapshotValuator.prices(pricing: .live) it calls. The portfolio
-	// port has the same two price queries; fold these into it once both land.
+	// ReportsController.resolvePortfolioStatistics; prices come from
+	// portfolio.SnapshotValuator.Prices.
 	// Stock.query(on:).filter(\.$userId == userId).all(): no ORDER BY, as Fluent.
 	OverviewStocks(ctx context.Context, userID uuid.UUID) ([]OverviewStocksRow, error)
 	PortfolioListOwned(ctx context.Context, arg PortfolioListOwnedParams) (bool, error)

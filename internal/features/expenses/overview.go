@@ -9,14 +9,12 @@ import (
 	"time"
 
 	"norviq-api/internal/apijson"
+	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/store/expensesdb"
 
 	"github.com/google/uuid"
 )
-
-// overviewCloseLookbackDays is PortfolioSnapshotValuator.closeLookbackDays.
-const overviewCloseLookbackDays = 10
 
 // StatisticsOverview is the OverviewSource Vapor's ReportsController used:
 // StatisticsService.overviewStatistics with an empty query, then
@@ -43,7 +41,7 @@ func (o StatisticsOverview) PortfolioOverview(ctx context.Context, db expensesdb
 		return "", nil, err
 	}
 	dto := vm.DTO()
-	resolved, err := resolvePortfolioStatistics(ctx, expensesdb.New(db), dto.ImportedStocks, userID, now())
+	resolved, err := resolvePortfolioStatistics(ctx, db, dto.ImportedStocks, userID, now())
 	if err != nil {
 		return "", nil, err
 	}
@@ -55,11 +53,11 @@ func (o StatisticsOverview) PortfolioOverview(ctx context.Context, db expensesdb
 }
 
 // resolvePortfolioStatistics is ReportsController.resolvePortfolioStatistics.
-func resolvePortfolioStatistics(ctx context.Context, q *expensesdb.Queries, preferred statistics.ImportedStocksStatisticsDTO, userID uuid.UUID, now time.Time) (statistics.ImportedStocksStatisticsDTO, error) {
+func resolvePortfolioStatistics(ctx context.Context, db expensesdb.DBTX, preferred statistics.ImportedStocksStatisticsDTO, userID uuid.UUID, now time.Time) (statistics.ImportedStocksStatisticsDTO, error) {
 	if preferred.TotalPositions > 0 || preferred.TotalMarketValue > 0 {
 		return preferred, nil
 	}
-	stocks, err := q.OverviewStocks(ctx, userID)
+	stocks, err := expensesdb.New(db).OverviewStocks(ctx, userID)
 	if err != nil {
 		return preferred, err
 	}
@@ -70,7 +68,8 @@ func resolvePortfolioStatistics(ctx context.Context, q *expensesdb.Queries, pref
 	for i, s := range stocks {
 		symbols[i] = s.Symbol
 	}
-	prices, err := livePrices(ctx, q, symbols, now)
+	// PortfolioSnapshotValuator().prices(for:asOf:pricing: .live).
+	prices, err := portfolio.SnapshotValuator{DB: db}.Prices(ctx, symbols, now, portfolio.PricingLive)
 	if err != nil {
 		return preferred, err
 	}
@@ -118,48 +117,6 @@ func resolvePortfolioStatistics(ctx context.Context, q *expensesdb.Queries, pref
 		SectorAllocations:   preferred.SectorAllocations,
 		CalendarPerformance: preferred.CalendarPerformance,
 	}, nil
-}
-
-// livePrices is PortfolioSnapshotValuator.prices(for:asOf:pricing: .live):
-// the last adjusted close in the lookback window, overridden by the latest
-// cached quote.
-func livePrices(ctx context.Context, q *expensesdb.Queries, symbols []string, asOf time.Time) (map[string]float64, error) {
-	u := asOf.UTC()
-	day := time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
-	from := day.AddDate(0, 0, -overviewCloseLookbackDays)
-	var unique []string
-	seen := map[string]bool{}
-	for _, s := range symbols {
-		n := normalizePortfolioSymbol(s)
-		if n == "" || seen[n] {
-			continue
-		}
-		seen[n] = true
-		unique = append(unique, n)
-	}
-	out := map[string]float64{}
-	for _, sym := range unique {
-		rows, err := q.OverviewAdjustedCloses(ctx, expensesdb.OverviewAdjustedClosesParams{InstrumentKey: sym, FromDay: from, ToDay: day})
-		if err != nil {
-			return nil, err
-		}
-		if n := len(rows); n > 0 && rows[n-1].AdjustedClose > 0 {
-			out[sym] = rows[n-1].AdjustedClose
-		}
-	}
-	if len(unique) == 0 {
-		return out, nil
-	}
-	quotes, err := q.OverviewLatestQuotes(ctx, unique)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range quotes {
-		if r.Price > 0 {
-			out[normalizePortfolioSymbol(r.Symbol)] = r.Price
-		}
-	}
-	return out, nil
 }
 
 // normalizePortfolioSymbol is the Swift free function of the same name.

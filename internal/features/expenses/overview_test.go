@@ -9,7 +9,6 @@ import (
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
-	"norviq-api/internal/store/expensesdb"
 	"norviq-api/internal/testutil"
 
 	"github.com/google/uuid"
@@ -51,7 +50,7 @@ func TestResolvePortfolioStatisticsFallback(t *testing.T) {
 		SectorAllocations:   []statistics.SectorAllocationDTO{},
 		CalendarPerformance: []statistics.CalendarPerformanceDTO{},
 	}
-	got, err := resolvePortfolioStatistics(ctx, expensesdb.New(db), preferred, user, now)
+	got, err := resolvePortfolioStatistics(ctx, db, preferred, user, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +67,7 @@ func TestResolvePortfolioStatisticsFallback(t *testing.T) {
 
 	// Positions from statistics are returned untouched.
 	preferred.TotalPositions = 1
-	kept, err := resolvePortfolioStatistics(ctx, expensesdb.New(db), preferred, user, now)
+	kept, err := resolvePortfolioStatistics(ctx, db, preferred, user, now)
 	if err != nil || kept.TotalPositions != 1 || len(kept.StockSummaries) != 0 {
 		t.Fatalf("preferred not kept: %+v %v", kept, err)
 	}

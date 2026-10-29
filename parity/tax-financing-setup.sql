@@ -9,6 +9,8 @@
 --   cancelled, 5 pro used by mutating cases, 6 pro that only PUTs assumptions.
 BEGIN;
 
+DROP TRIGGER IF EXISTS parity_fin_match_sticky ON financing_expense_matches;
+DROP TRIGGER IF EXISTS parity_fin_match_reset ON financing_expense_matches;
 DELETE FROM users WHERE id::text LIKE 'f1f1f1f1-0000-4000-8000-%';
 
 INSERT INTO users (id, email, password_hash, created_at, is_verified) VALUES
@@ -74,12 +76,41 @@ INSERT INTO financing_plan_revisions (id, plan_id, effective_installment, terms,
 
 INSERT INTO expenses (id, user_id, title, amount, pillar, occurred_on, created_at, updated_at) VALUES
   ('f1f1f1f1-0000-4000-8000-0000000000e1', 'f1f1f1f1-0000-4000-8000-000000000002', 'Car loan September', 545.5, 'fundamentals', '2026-09-15', now(), now()),
-  ('f1f1f1f1-0000-4000-8000-0000000000e2', 'f1f1f1f1-0000-4000-8000-000000000002', 'car loan', 694.4, 'fundamentals', '2026-10-17', now(), now()),
+  ('f1f1f1f1-0000-4000-8000-0000000000e2', 'f1f1f1f1-0000-4000-8000-000000000002', 'car loan', 612.4, 'fundamentals', '2026-10-17', now(), now()),
   ('f1f1f1f1-0000-4000-8000-0000000000e3', 'f1f1f1f1-0000-4000-8000-000000000004', 'Sofa', 150, 'fun', '2026-08-01', now(), now()),
-  ('f1f1f1f1-0000-4000-8000-0000000000e5', 'f1f1f1f1-0000-4000-8000-000000000005', 'Home payment', 900, 'fundamentals', '2027-02-27', now(), now());
+  ('f1f1f1f1-0000-4000-8000-0000000000e5', 'f1f1f1f1-0000-4000-8000-000000000005', 'Home payment', 900, 'fundamentals', '2027-02-27', now(), now()),
+  ('f1f1f1f1-0000-4000-8000-0000000000e6', 'f1f1f1f1-0000-4000-8000-000000000005', 'Home payment 2', 900, 'fundamentals', '2027-03-31', now(), now()),
+  ('f1f1f1f1-0000-4000-8000-0000000000e7', 'f1f1f1f1-0000-4000-8000-000000000001', 'Not yours', 10, 'fun', '2027-03-31', now(), now());
 
 INSERT INTO financing_expense_matches (id, plan_id, installment_number, expense_id, created_at) VALUES
   ('f1f1f1f1-0000-4000-8000-0000000000d1', 'f1f1f1f1-0000-4000-8000-0000000000c1', 1, 'f1f1f1f1-0000-4000-8000-0000000000e1', now()),
-  ('f1f1f1f1-0000-4000-8000-0000000000d4', 'f1f1f1f1-0000-4000-8000-0000000000c4', 2, 'f1f1f1f1-0000-4000-8000-0000000000e3', now());
+  ('f1f1f1f1-0000-4000-8000-0000000000d4', 'f1f1f1f1-0000-4000-8000-0000000000c4', 2, 'f1f1f1f1-0000-4000-8000-0000000000e3', now()),
+  ('f1f1f1f1-0000-4000-8000-0000000000d6', 'f1f1f1f1-0000-4000-8000-0000000000c5', 2, 'f1f1f1f1-0000-4000-8000-0000000000e6', now());
+
+-- Mutating cases run twice (Vapor, then v2). On user 5's plan c5 only:
+-- an insert first drops a match it would collide with (so POST .../match
+-- succeeds twice), and deleting installment 2 puts it straight back (so
+-- DELETE .../installments/2/match answers 204 twice).
+CREATE OR REPLACE FUNCTION parity_fin_match_reset() RETURNS trigger AS $$
+BEGIN
+  DELETE FROM financing_expense_matches
+   WHERE plan_id = NEW.plan_id AND id <> NEW.id
+     AND (installment_number = NEW.installment_number OR expense_id = NEW.expense_id);
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS parity_fin_match_reset ON financing_expense_matches;
+CREATE TRIGGER parity_fin_match_reset BEFORE INSERT ON financing_expense_matches
+  FOR EACH ROW WHEN (NEW.plan_id = 'f1f1f1f1-0000-4000-8000-0000000000c5') EXECUTE FUNCTION parity_fin_match_reset();
+
+CREATE OR REPLACE FUNCTION parity_fin_match_sticky() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO financing_expense_matches (id, plan_id, installment_number, expense_id, created_at)
+  VALUES (gen_random_uuid(), OLD.plan_id, OLD.installment_number, OLD.expense_id, now());
+  RETURN OLD;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS parity_fin_match_sticky ON financing_expense_matches;
+CREATE TRIGGER parity_fin_match_sticky AFTER DELETE ON financing_expense_matches
+  FOR EACH ROW WHEN (OLD.plan_id = 'f1f1f1f1-0000-4000-8000-0000000000c5' AND OLD.installment_number = 2)
+  EXECUTE FUNCTION parity_fin_match_sticky();
 
 COMMIT;

@@ -1,4 +1,4 @@
--- Fixtures for parity/expenses-overview.jsonl (GET /v1/reports/overview).
+-- Fixtures for parity/expenses.jsonl (GET /v1/reports/overview).
 -- Load parity/expenses-core-setup.sql first (budget data for its users),
 -- then this file. Idempotent; scratch database only.
 --

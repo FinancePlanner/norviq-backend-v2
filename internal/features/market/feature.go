@@ -142,6 +142,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g.GET("/fx", h.fx)
 	g.GET("/price-chart/compare", h.priceChartComparison)
 	g.GET("/price-chart/:symbol", h.priceChart)
+	g.GET("/chart-builder/metrics", h.chartBuilderMetrics)
+	gated("/chart-builder/:symbol/csv", PremiumMarketFundamentals, h.chartBuilderCSV)
+	gated("/chart-builder/:symbol", PremiumMarketFundamentals, h.chartBuilder)
 	return nil
 }
 

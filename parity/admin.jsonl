@@ -1,0 +1,98 @@
+# Admin moderation, account deletion (non-destructive cases), data export,
+# public portfolio share, /share/app, docs and /internal/metrics.
+# Vapor needs NORVIQ_ADMIN_USER_IDS=ad000000-0000-4000-8000-000000000001, ARTICLES_ENABLED=true and
+# METRICS_SECRET=parity-metrics (the shared 8081 has none of these, so this
+# ran against an own Vapor on 18129); start v2 with the same three. Load
+# parity/admin-setup.sql first (see its header), then:
+#   go run ./cmd/parity -a http://127.0.0.1:18129 -b http://127.0.0.1:18119 -jwt-secret parity-secret \
+#     -cases parity/admin.jsonl -ignore requestId,id,createdAt,expiresAt,exportId \
+#     -headers Content-Type,Cache-Control,Content-Disposition,Last-Modified
+{"name":"sanctions-anon","path":"/v1/admin/community/sanctions"}
+{"name":"sanctions-member","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000002"}
+{"name":"social-reports-member","path":"/v1/admin/social/reports","as":"ad000000-0000-4000-8000-000000000002"}
+{"name":"sanctions-list","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"community-reports","path":"/v1/admin/community/reports","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"sanction-system","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_sys","kind":"mute","reason":"x"}}
+{"name":"sanction-norviq","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"norviq","kind":"mute","reason":"x"}}
+{"name":"sanction-unknown","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_nobody","kind":"mute","reason":"x"}}
+{"name":"sanction-admin","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_boss","kind":"ban","reason":"x"}}
+{"name":"sanction-blank-reason","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"ban","reason":"   "}}
+{"name":"sanction-long-reason","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"ban","reason":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+{"name":"sanction-zero-hours","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"ban","reason":"x","durationHours":0}}
+{"name":"sanction-too-long","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"ban","reason":"x","durationHours":8761}}
+{"name":"sanction-bad-kind","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"slap","reason":"x"}}
+{"name":"sanction-missing-kind","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","reason":"x"}}
+{"name":"sanction-bad-json","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","raw":"{nope","headers":{"Content-Type":"application/json"}}
+{"name":"sanction-mute-at-username","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":" @PARITY_ADMIN_TROLL ","kind":"mute","reason":" spam ","durationHours":24}}
+{"name":"sanction-ban-indefinite","method":"POST","path":"/v1/admin/community/sanctions","as":"ad000000-0000-4000-8000-000000000001","body":{"username":"parity_admin_troll","kind":"ban","reason":"enough"}}
+{"name":"sanction-revoke-bad-id","method":"DELETE","path":"/v1/admin/community/sanctions/nope","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"sanction-revoke-unknown","method":"DELETE","path":"/v1/admin/community/sanctions/ad000000-0000-4000-8000-000000000099","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"sanction-revoke","method":"DELETE","path":"/v1/admin/community/sanctions/ad000000-0000-4000-8000-0000000000f1","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"board-delete-daily","method":"DELETE","path":"/v1/admin/boards/daily","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"board-delete-unknown","method":"DELETE","path":"/v1/admin/boards/parity-admin-nope","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"board-delete-member","method":"DELETE","path":"/v1/admin/boards/parity-admin-doomed","as":"ad000000-0000-4000-8000-000000000002"}
+{"name":"report-resolve-unknown","method":"POST","path":"/v1/admin/community/reports/ad000000-0000-4000-8000-000000000099/resolve","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"report-resolve-bad-id","method":"POST","path":"/v1/admin/community/reports/nope/resolve","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"report-resolve","method":"POST","path":"/v1/admin/community/reports/ad000000-0000-4000-8000-0000000000e1/resolve","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"community-reports-after","path":"/v1/admin/community/reports","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"social-reports","path":"/v1/admin/social/reports","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"social-reports-all","path":"/v1/admin/social/reports?status=all","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"social-reports-resolved","path":"/v1/admin/social/reports?status=resolved","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"social-resolve-msg-suspend","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-0000000000e6/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"suspend_user"}}
+{"name":"social-resolve-bad-action","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-0000000000e6/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"nuke"}}
+{"name":"social-resolve-no-body","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-0000000000e6/resolve","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"social-resolve-unknown","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-000000000099/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"dismiss"}}
+{"name":"social-resolve-bad-id","method":"POST","path":"/v1/admin/social/reports/nope/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"dismiss"}}
+{"name":"social-resolve-msg-dismiss","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-0000000000e6/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"dismiss","note":"  fine  "}}
+{"name":"social-resolve-user-suspend","method":"POST","path":"/v1/admin/social/reports/ad000000-0000-4000-8000-0000000000e5/resolve","as":"ad000000-0000-4000-8000-000000000001","body":{"action":"suspend_user","note":"bye"}}
+{"name":"social-reports-all-after","path":"/v1/admin/social/reports?status=all","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"suspend-bad-id","method":"POST","path":"/v1/admin/social/users/nope/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"suspend-unknown","method":"POST","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000099/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"suspend-system","method":"POST","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000009/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"suspend-troll","method":"POST","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000002/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"unsuspend-troll","method":"DELETE","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000002/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"unsuspend-no-settings","method":"DELETE","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000004/suspend","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"suspend-member","method":"POST","path":"/v1/admin/social/users/ad000000-0000-4000-8000-000000000002/suspend","as":"ad000000-0000-4000-8000-000000000002"}
+{"name":"article-hide-member","method":"PUT","path":"/v1/admin/articles/padmin01/visibility","as":"ad000000-0000-4000-8000-000000000002","body":{"hidden":true}}
+{"name":"article-hide","method":"PUT","path":"/v1/admin/articles/padmin01/visibility","as":"ad000000-0000-4000-8000-000000000001","body":{"hidden":true}}
+{"name":"article-hidden-read","path":"/v1/articles/padmin01","as":"ad000000-0000-4000-8000-000000000002"}
+{"name":"article-show","method":"PUT","path":"/v1/admin/articles/padmin01/visibility","as":"ad000000-0000-4000-8000-000000000001","body":{"hidden":false}}
+{"name":"article-unknown","method":"PUT","path":"/v1/admin/articles/pnope000/visibility","as":"ad000000-0000-4000-8000-000000000001","body":{"hidden":true}}
+{"name":"article-bad-body","method":"PUT","path":"/v1/admin/articles/padmin01/visibility","as":"ad000000-0000-4000-8000-000000000001","body":{"hidden":"yes"}}
+{"name":"user-delete-anon","method":"DELETE","path":"/v1/users"}
+{"name":"user-delete-bad-id","method":"DELETE","path":"/v1/users/nope","as":"ad000000-0000-4000-8000-000000000005"}
+{"name":"user-delete-other","method":"DELETE","path":"/v1/users/ad000000-0000-4000-8000-000000000006","as":"ad000000-0000-4000-8000-000000000005"}
+{"name":"user-delete-unknown-session","method":"DELETE","path":"/v1/users","as":"ad000000-0000-4000-8000-000000000099"}
+{"name":"export-list","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-list-page","path":"/v1/api/v3/export?limit=1&offset=1","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-list-junk","path":"/v1/api/v3/export?limit=x&offset=y","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-list-negative","path":"/v1/api/v3/export?limit=-1","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-detail-ready","path":"/v1/api/v3/export/ad000000-0000-4000-8000-000000000301","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-detail-expired","path":"/v1/api/v3/export/ad000000-0000-4000-8000-000000000302","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-detail-pending","path":"/v1/api/v3/export/ad000000-0000-4000-8000-000000000303","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-detail-other-user","path":"/v1/api/v3/export/ad000000-0000-4000-8000-000000000301","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"export-detail-bad-id","path":"/v1/api/v3/export/nope","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-ready","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000301.csv","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-lower","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000301.anything","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-expired","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000302.json","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-pending","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000303.json","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-other","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000301.csv","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"export-file-bad-user","path":"/v1/api/v3/export/file/nope/ad000000-0000-4000-8000-000000000301.csv","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-bad-name","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/report.csv","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-file-unknown","path":"/v1/api/v3/export/file/ad000000-0000-4000-8000-000000000007/ad000000-0000-4000-8000-000000000399.csv","as":"ad000000-0000-4000-8000-000000000007"}
+{"name":"export-create-bad-type","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"everything","format":"csv"}}
+{"name":"export-create-bad-format","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"all","format":"xml"}}
+{"name":"export-create-missing","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"all"}}
+{"name":"export-create-watchlist-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"watchlist","format":"json"}}
+{"name":"export-create-all-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"all","format":"csv","filters":{"dateFrom":"2026-01-01T00:00:00Z","portfolioListId":"nope"}}}
+{"name":"export-anon","path":"/v1/api/v3/export"}
+{"name":"share-public","path":"/v1/public/portfolio-shares/pparityadmin00000000000"}
+{"name":"share-revoked","path":"/v1/public/portfolio-shares/pparityadminrevoked0000"}
+{"name":"share-unknown","path":"/v1/public/portfolio-shares/pdoesnotexist0000000000"}
+{"name":"share-app","path":"/share/app","headers":{"Host":"api.norviq.org"}}
+{"name":"openapi","path":"/openapi.yaml"}
+{"name":"docs","path":"/docs"}
+{"name":"internal-metrics-anon","path":"/internal/metrics"}
+{"name":"internal-metrics-wrong","path":"/internal/metrics","headers":{"Authorization":"Bearer wrong"}}
+{"name":"internal-metrics-basic","path":"/internal/metrics","headers":{"Authorization":"Basic cGFyaXR5LW1ldHJpY3M="}}
+{"name":"internal-metrics","path":"/internal/metrics","headers":{"Authorization":"bearer parity-metrics"}}

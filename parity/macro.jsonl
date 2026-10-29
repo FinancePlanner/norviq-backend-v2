@@ -1,0 +1,74 @@
+# Macro: /v1/macro/* (MacroController). Setup: psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/macro-setup.sql
+# Data is what the parity Vapor ingested (Eurostat/ECB/IBGE; US is stub: no FRED key, MACRO_ALLOW_STUB_FALLBACK
+# defaults on outside production). Under 80 cases: the macro group shares an 80/min per-IP limiter.
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18116 -jwt-secret parity-secret \
+#     -cases parity/macro.jsonl -ignore requestId,updatedAt
+{"name": "current-unauth", "method": "GET", "path": "/v1/macro/inflation/current"}
+{"name": "current-noscope-pat", "method": "GET", "path": "/v1/macro/inflation/current", "headers": {"Authorization": "Bearer nvq_pat_paritymacronoscope01"}}
+{"name": "current-read-pat", "method": "GET", "path": "/v1/macro/inflation/current?country=pt", "headers": {"Authorization": "Bearer nvq_pat_paritymacroread0001"}}
+{"name": "current-us-default", "method": "GET", "path": "/v1/macro/inflation/current", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-pt", "method": "GET", "path": "/v1/macro/inflation/current?country=pt", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-BR", "method": "GET", "path": "/v1/macro/inflation/current?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-ea", "method": "GET", "path": "/v1/macro/inflation/current?country=ea", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-DE", "method": "GET", "path": "/v1/macro/inflation/current?country=DE", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-ES", "method": "GET", "path": "/v1/macro/inflation/current?country=ES", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-FR", "method": "GET", "path": "/v1/macro/inflation/current?country=FR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-IT", "method": "GET", "path": "/v1/macro/inflation/current?country=IT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-euro", "method": "GET", "path": "/v1/macro/inflation/current?country=euro", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-ez", "method": "GET", "path": "/v1/macro/inflation/current?country=%20ez%20", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "current-xx", "method": "GET", "path": "/v1/macro/inflation/current?country=xx", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "components-US", "method": "GET", "path": "/v1/macro/inflation/components?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "components-PT", "method": "GET", "path": "/v1/macro/inflation/components?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "components-BR", "method": "GET", "path": "/v1/macro/inflation/components?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-US", "method": "GET", "path": "/v1/macro/top-movers?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-PT", "method": "GET", "path": "/v1/macro/top-movers?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-BR", "method": "GET", "path": "/v1/macro/top-movers?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-focus-food", "method": "GET", "path": "/v1/macro/top-movers?focus=food", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-focus-comma", "method": "GET", "path": "/v1/macro/top-movers?focus=,", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-focus-empty", "method": "GET", "path": "/v1/macro/top-movers?focus=", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-focus-space", "method": "GET", "path": "/v1/macro/top-movers?focus=%20,%20x", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "top-movers-focus-multi-pt", "method": "GET", "path": "/v1/macro/top-movers?country=PT&focus=FOOD,Transport", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-default", "method": "GET", "path": "/v1/macro/inflation/series", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-pt", "method": "GET", "path": "/v1/macro/inflation/series?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-pt-core", "method": "GET", "path": "/v1/macro/inflation/series?country=PT&series=core", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-pt-official-limit5", "method": "GET", "path": "/v1/macro/inflation/series?country=pt&series=official_cpi&limit=5", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-de-unemp-range", "method": "GET", "path": "/v1/macro/inflation/series?country=DE&series=unemployment&from=2024-01-01&to=2025-01-01", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-ea-policy", "method": "GET", "path": "/v1/macro/inflation/series?country=EA&series=policy_rate&limit=0", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-br-limit-abc", "method": "GET", "path": "/v1/macro/inflation/series?country=BR&limit=abc", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-br-limit-big", "method": "GET", "path": "/v1/macro/inflation/series?country=BR&limit=5000", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-blank", "method": "GET", "path": "/v1/macro/inflation/series?country=PT&series=%20%20", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-us-nowflation", "method": "GET", "path": "/v1/macro/inflation/series?series=nowflation_cpi", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-pt-unknown", "method": "GET", "path": "/v1/macro/inflation/series?country=PT&series=nope", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "series-pt-emptyfrom", "method": "GET", "path": "/v1/macro/inflation/series?country=PT&series=food_cpi&from=&to=2019-03-01", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-US", "method": "GET", "path": "/v1/macro/inflation/personal?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-PT", "method": "GET", "path": "/v1/macro/inflation/personal?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-BR", "method": "GET", "path": "/v1/macro/inflation/personal?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-EA", "method": "GET", "path": "/v1/macro/inflation/personal?country=EA", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-months1", "method": "GET", "path": "/v1/macro/inflation/personal?months=1&country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-months30", "method": "GET", "path": "/v1/macro/inflation/personal?months=30&country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-months-abc", "method": "GET", "path": "/v1/macro/inflation/personal?months=abc&country=DE", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "personal-empty-user", "method": "GET", "path": "/v1/macro/inflation/personal?country=PT", "as": "3ac00000-0000-4000-8000-000000000002"}
+{"name": "supported-countries", "method": "GET", "path": "/v1/macro/supported-countries", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "fed-watch", "method": "GET", "path": "/v1/macro/fed-watch", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "policy-watch-US", "method": "GET", "path": "/v1/macro/policy-watch?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "policy-watch-PT", "method": "GET", "path": "/v1/macro/policy-watch?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "policy-watch-BR", "method": "GET", "path": "/v1/macro/policy-watch?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "policy-watch-EA", "method": "GET", "path": "/v1/macro/policy-watch?country=EA", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "housing-US", "method": "GET", "path": "/v1/macro/housing?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "housing-PT", "method": "GET", "path": "/v1/macro/housing?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "housing-BR", "method": "GET", "path": "/v1/macro/housing?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "housing-EA", "method": "GET", "path": "/v1/macro/housing?country=EA", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "economy-US", "method": "GET", "path": "/v1/macro/economy?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "economy-PT", "method": "GET", "path": "/v1/macro/economy?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "economy-BR", "method": "GET", "path": "/v1/macro/economy?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "economy-DE", "method": "GET", "path": "/v1/macro/economy?country=DE", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "items-US", "method": "GET", "path": "/v1/macro/items?country=US", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "items-PT", "method": "GET", "path": "/v1/macro/items?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "items-BR", "method": "GET", "path": "/v1/macro/items?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-eggs-us", "method": "GET", "path": "/v1/macro/items/eggs/series", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-bread-pt", "method": "GET", "path": "/v1/macro/items/bread/series?country=PT&limit=3", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-fuels-it-range", "method": "GET", "path": "/v1/macro/items/fuels/series?country=IT&from=2020-01-01&to=2020-06-01", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-alimentos-br", "method": "GET", "path": "/v1/macro/items/alimentos/series?country=BR", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-unknown", "method": "GET", "path": "/v1/macro/items/unknown/series", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-eggs-pt", "method": "GET", "path": "/v1/macro/items/eggs/series?country=PT", "as": "3ac00000-0000-4000-8000-000000000001"}
+{"name": "item-series-unauth", "method": "GET", "path": "/v1/macro/items/eggs/series"}

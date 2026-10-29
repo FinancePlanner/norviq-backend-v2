@@ -2,6 +2,7 @@ package retirement
 
 import (
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -146,6 +147,7 @@ func (e Engine) Project(portfolioID *uuid.UUID, input PlanInput, request Project
 		now = e.Now()
 	}
 
+	pc := powCache{}
 	years := input.LongevityAge - input.CurrentAge
 	samples := make([][]float64, years+1)
 	for i := range samples {
@@ -175,8 +177,8 @@ func (e Engine) Project(portfolioID *uuid.UUID, input PlanInput, request Project
 				salary *= 1 + input.AnnualSalaryGrowthRate
 				contribution *= 1 + input.AnnualContributionGrowthRate
 			} else {
-				pension := pensionIncome(input.PublicPension, age) + input.OtherAnnualRetirementIncome
-				w := withdrawal(input, balance, inflatedSpending(input, offset))
+				pension := pensionIncome(pc, input.PublicPension, age) + input.OtherAnnualRetirementIncome
+				w := withdrawal(input, balance, inflatedSpending(pc, input, offset))
 				balance = swiftMax(0, balance-swiftMax(0, w-pension))
 				if balance <= 0 && firstShortfall == nil {
 					a := age
@@ -201,15 +203,15 @@ func (e Engine) Project(portfolioID *uuid.UUID, input PlanInput, request Project
 		sort.Float64s(sorted)
 		contribution := 0.0
 		if age < input.RetirementAge {
-			contribution = annualContribution(input, input.AnnualSalary*math.Pow(1+input.AnnualSalaryGrowthRate, float64(index)))
+			contribution = annualContribution(input, input.AnnualSalary*pc.pow(1+input.AnnualSalaryGrowthRate, index))
 		}
-		pension := pensionIncome(input.PublicPension, age)
+		pension := pensionIncome(pc, input.PublicPension, age)
 		median := percentile(sorted, 0.50)
 		phase := PhaseAccumulation
 		w := 0.0
 		if age >= input.RetirementAge {
 			pension += input.OtherAnnualRetirementIncome
-			w = withdrawal(input, median, inflatedSpending(input, index))
+			w = withdrawal(input, median, inflatedSpending(pc, input, index))
 			phase = PhaseRetirement
 		}
 		points[index] = ProjectionPoint{
@@ -255,7 +257,7 @@ func (e Engine) Project(portfolioID *uuid.UUID, input PlanInput, request Project
 		Summary: ProjectionSummary{
 			ReadinessProbability:            probability,
 			SustainableAnnualSpending:       sustainable,
-			ProjectedAnnualRetirementIncome: sustainable + pensionIncome(input.PublicPension, input.RetirementAge) + input.OtherAnnualRetirementIncome,
+			ProjectedAnnualRetirementIncome: sustainable + pensionIncome(pc, input.PublicPension, input.RetirementAge) + input.OtherAnnualRetirementIncome,
 			AnnualContributionHeadroom:      headroom,
 			ShortfallAge:                    shortfall,
 			MedianValueAtRetirement:         medianRetirement,
@@ -311,8 +313,8 @@ func annualContribution(input PlanInput, salary float64) float64 {
 
 // inflatedSpending carries today's-money spending forward by inflation over
 // the whole horizon, accumulation years included.
-func inflatedSpending(input PlanInput, offset int) float64 {
-	return input.DesiredAnnualSpending * math.Pow(1+input.InflationRate, float64(offset))
+func inflatedSpending(pc powCache, input PlanInput, offset int) float64 {
+	return input.DesiredAnnualSpending * pc.pow(1+input.InflationRate, offset)
 }
 
 func withdrawal(input PlanInput, balance, spending float64) float64 {
@@ -330,11 +332,11 @@ func withdrawal(input PlanInput, balance, spending float64) float64 {
 	}
 }
 
-func pensionIncome(p *PensionIncome, age int) float64 {
+func pensionIncome(pc powCache, p *PensionIncome, age int) float64 {
 	if p == nil || age < p.StartAge {
 		return 0
 	}
-	return p.AnnualAmount * math.Pow(1+p.AnnualIndexationRate, float64(age-p.StartAge))
+	return p.AnnualAmount * pc.pow(1+p.AnnualIndexationRate, age-p.StartAge)
 }
 
 func contributionHeadroom(input PlanInput, pack *RulePack) float64 {
@@ -420,4 +422,34 @@ func swiftMin(x, y float64) float64 {
 		return y
 	}
 	return x
+}
+
+// powCache computes Foundation's pow(x, Double(n)) for the integer exponents
+// the engine uses, correctly rounded (as Darwin's and glibc's libm return
+// them; math.Pow is a few ULP off), memoized per projection.
+type powCache map[[2]uint64]float64
+
+func (c powCache) pow(x float64, n int) float64 {
+	if n == 0 {
+		return 1
+	}
+	if n < 0 || x == 0 || math.IsInf(x, 0) || math.IsNaN(x) {
+		return math.Pow(x, float64(n))
+	}
+	key := [2]uint64{math.Float64bits(x), uint64(n)}
+	if v, ok := c[key]; ok {
+		return v
+	}
+	const prec = 512
+	base := new(big.Float).SetPrec(prec).SetFloat64(x)
+	result := new(big.Float).SetPrec(prec).SetInt64(1)
+	for e := n; e > 0; e >>= 1 {
+		if e&1 == 1 {
+			result.Mul(result, base)
+		}
+		base.Mul(base, base)
+	}
+	v, _ := result.Float64()
+	c[key] = v
+	return v
 }

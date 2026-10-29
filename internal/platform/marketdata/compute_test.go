@@ -434,3 +434,19 @@ func TestSwiftDoubleString(t *testing.T) {
 		}
 	}
 }
+
+// Production sets no base URLs: they must fall back to the real APIs, or
+// every uncached provider call fails before leaving the process.
+func TestNewFromSettingsDefaultsBaseURLs(t *testing.T) {
+	svc := NewFromSettings(Settings{FinnhubAPIKey: "k", FMPAPIKey: "k"}, nil, nil, nil, nil)
+	if f, ok := svc.Provider.(*Finnhub); !ok || f.BaseURL != DefaultFinnhubBaseURL {
+		t.Fatalf("finnhub provider = %#v", svc.Provider)
+	}
+	if svc.FMP == nil || svc.FMP.BaseURL != DefaultFMPBaseURL {
+		t.Fatalf("fmp = %#v", svc.FMP)
+	}
+	stub := NewFromSettings(Settings{FinnhubAPIKey: "k", FinnhubBaseURL: "http://stub"}, nil, nil, nil, nil)
+	if f := stub.Provider.(*Finnhub); f.BaseURL != "http://stub" {
+		t.Fatalf("override ignored: %q", f.BaseURL)
+	}
+}

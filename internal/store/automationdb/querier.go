@@ -13,15 +13,25 @@ import (
 type Querier interface {
 	ConfirmRebalanceEvent(ctx context.Context, arg ConfirmRebalanceEventParams) error
 	ConfirmRebalancingPolicy(ctx context.Context, arg ConfirmRebalancingPolicyParams) error
+	DeleteNetWorthForecast(ctx context.Context, id uuid.UUID) error
 	DeleteRebalancingPolicy(ctx context.Context, id uuid.UUID) error
 	DismissRebalanceEvent(ctx context.Context, arg DismissRebalanceEventParams) error
+	ForecastCryptoItemIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	ForecastTrailingExpenses(ctx context.Context, arg ForecastTrailingExpensesParams) ([]ForecastTrailingExpensesRow, error)
+	GetNetWorthForecast(ctx context.Context, arg GetNetWorthForecastParams) ([]NetWorthForecast, error)
 	GetRebalanceEvent(ctx context.Context, arg GetRebalanceEventParams) (RebalanceEvent, error)
 	// RebalancingPolicyModel.owned(by:).filter(portfolioListId).first()
 	GetRebalancingPolicy(ctx context.Context, arg GetRebalancingPolicyParams) (RebalancingPolicy, error)
+	InsertNetWorthForecast(ctx context.Context, arg InsertNetWorthForecastParams) error
 	InsertRebalancingPolicy(ctx context.Context, arg InsertRebalancingPolicyParams) error
+	LatestNetWorthForecastRun(ctx context.Context, arg LatestNetWorthForecastRunParams) ([]NetWorthForecastRun, error)
+	// WealthAutomationController's /v1/net-worth-forecasts routes.
+	ListNetWorthForecasts(ctx context.Context, userID uuid.UUID) ([]NetWorthForecast, error)
 	ListRebalanceEvents(ctx context.Context, arg ListRebalanceEventsParams) ([]RebalanceEvent, error)
+	NetWorthForecastForPortfolio(ctx context.Context, arg NetWorthForecastForPortfolioParams) ([]uuid.UUID, error)
 	// WealthAutomationController rebalancing-policy routes.
 	OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfolioListExistsParams) (bool, error)
+	UpdateNetWorthForecast(ctx context.Context, arg UpdateNetWorthForecastParams) error
 	UpdateRebalancingPolicy(ctx context.Context, arg UpdateRebalancingPolicyParams) error
 }
 

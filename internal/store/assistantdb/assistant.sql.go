@@ -35,6 +35,15 @@ func (q *Queries) DeleteConversation(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteGoal = `-- name: DeleteGoal :exec
+DELETE FROM goals WHERE id = $1
+`
+
+func (q *Queries) DeleteGoal(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteGoal, id)
+	return err
+}
+
 const deleteMemo = `-- name: DeleteMemo :exec
 DELETE FROM position_memos WHERE id = $1
 `
@@ -74,6 +83,31 @@ func (q *Queries) GetOwnedConversation(ctx context.Context, arg GetOwnedConversa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getOwnedGoal = `-- name: GetOwnedGoal :one
+SELECT id, user_id, title, created_at, updated_at, status, status_updated_by, completed_at FROM goals WHERE id = $1 AND user_id = $2
+`
+
+type GetOwnedGoalParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) GetOwnedGoal(ctx context.Context, arg GetOwnedGoalParams) (Goal, error) {
+	row := q.db.QueryRow(ctx, getOwnedGoal, arg.ID, arg.UserID)
+	var i Goal
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusUpdatedBy,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -255,6 +289,28 @@ func (q *Queries) InsertConversation(ctx context.Context, arg InsertConversation
 		arg.TitleEncrypted,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertGoal = `-- name: InsertGoal :exec
+INSERT INTO goals (id, user_id, title, status, status_updated_by, completed_at, created_at, updated_at)
+VALUES ($1, $2, $3, 'pending', 'manual', NULL, $4, $4)
+`
+
+type InsertGoalParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+	Title  string
+	Now    *time.Time
+}
+
+func (q *Queries) InsertGoal(ctx context.Context, arg InsertGoalParams) error {
+	_, err := q.db.Exec(ctx, insertGoal,
+		arg.ID,
+		arg.UserID,
+		arg.Title,
+		arg.Now,
 	)
 	return err
 }
@@ -504,6 +560,42 @@ func (q *Queries) ListConversations(ctx context.Context, arg ListConversationsPa
 	return items, nil
 }
 
+const listManualGoals = `-- name: ListManualGoals :many
+
+SELECT id, user_id, title, created_at, updated_at, status, status_updated_by, completed_at FROM goals WHERE user_id = $1 ORDER BY created_at DESC
+`
+
+// Goals (ActionCatalog+Goals.swift reads the goals table directly, so the
+// synthesised onboarding goals never reach a model).
+func (q *Queries) ListManualGoals(ctx context.Context, userID uuid.UUID) ([]Goal, error) {
+	rows, err := q.db.Query(ctx, listManualGoals, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Goal{}
+	for rows.Next() {
+		var i Goal
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Status,
+			&i.StatusUpdatedBy,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMemos = `-- name: ListMemos :many
 SELECT id, user_id, conversation_id, asked_symbol, primary_symbol, title_encrypted, mark_encrypted, sections_encrypted, verdict_encrypted, sources_encrypted, evidence_encrypted, bookmarked, created_at FROM position_memos
 WHERE user_id = $1
@@ -714,6 +806,21 @@ func (q *Queries) RecentConversationMessages(ctx context.Context, arg RecentConv
 		return nil, err
 	}
 	return items, nil
+}
+
+const renameGoal = `-- name: RenameGoal :exec
+UPDATE goals SET title = $2, updated_at = $3 WHERE id = $1
+`
+
+type RenameGoalParams struct {
+	ID        uuid.UUID
+	Title     string
+	UpdatedAt *time.Time
+}
+
+func (q *Queries) RenameGoal(ctx context.Context, arg RenameGoalParams) error {
+	_, err := q.db.Exec(ctx, renameGoal, arg.ID, arg.Title, arg.UpdatedAt)
+	return err
 }
 
 const setActionAuditStatus = `-- name: SetActionAuditStatus :exec

@@ -9,6 +9,7 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/features/aiplatform"
+	"norviq-api/internal/features/tax"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/entitlements"
@@ -25,6 +26,9 @@ const maxMessageCharacters = 12000
 type Feature struct {
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// Sources wires the other domains' services the AI surfaces read; see
+	// Sources. Nil leaves every source-dependent route on Vapor.
+	Sources SourcesFunc
 }
 
 // Name implements server.Feature.
@@ -37,9 +41,12 @@ type handlers struct {
 	ai  *ai.Platform
 	ent *entitlements.Service
 	now func() time.Time
+
+	src     Sources
+	actions *actionServices
 }
 
-func newHandlers(d *server.Deps, now func() time.Time) (*handlers, error) {
+func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*handlers, error) {
 	p, err := aiplatform.Platform(d)
 	if err != nil {
 		return nil, err
@@ -51,14 +58,30 @@ func newHandlers(d *server.Deps, now func() time.Time) (*handlers, error) {
 	if now == nil {
 		now = time.Now
 	}
+	q := assistantdb.New(d.DB)
+	var src Sources
+	if sources != nil {
+		if src, err = sources(d); err != nil {
+			return nil, err
+		}
+	}
+	if src.Tax == nil {
+		if src.Tax, err = tax.SharedDashboard(d); err != nil {
+			return nil, err
+		}
+	}
+	acts, err := newActionServices(d, q, now)
+	if err != nil {
+		return nil, err
+	}
 	return &handlers{
-		d: d, q: assistantdb.New(d.DB), pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now,
+		d: d, q: q, pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now, src: src, actions: acts,
 	}, nil
 }
 
 // Register mounts the routes as routes.swift and each boot(routes:) did.
 func (f Feature) Register(d *server.Deps, r *server.Routes) error {
-	h, err := newHandlers(d, f.Now)
+	h, err := newHandlers(d, f.Now, f.Sources)
 	if err != nil {
 		return err
 	}

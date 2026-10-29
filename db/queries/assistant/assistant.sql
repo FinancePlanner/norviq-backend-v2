@@ -127,3 +127,22 @@ INSERT INTO position_memos (id, user_id, conversation_id, asked_symbol, primary_
                             mark_encrypted, sections_encrypted, verdict_encrypted, sources_encrypted,
                             evidence_encrypted, bookmarked, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12);
+
+-- Goals (ActionCatalog+Goals.swift reads the goals table directly, so the
+-- synthesised onboarding goals never reach a model).
+
+-- name: ListManualGoals :many
+SELECT * FROM goals WHERE user_id = $1 ORDER BY created_at DESC;
+
+-- name: InsertGoal :exec
+INSERT INTO goals (id, user_id, title, status, status_updated_by, completed_at, created_at, updated_at)
+VALUES ($1, $2, $3, 'pending', 'manual', NULL, sqlc.arg(now), sqlc.arg(now));
+
+-- name: GetOwnedGoal :one
+SELECT * FROM goals WHERE id = $1 AND user_id = $2;
+
+-- name: RenameGoal :exec
+UPDATE goals SET title = $2, updated_at = $3 WHERE id = $1;
+
+-- name: DeleteGoal :exec
+DELETE FROM goals WHERE id = $1;

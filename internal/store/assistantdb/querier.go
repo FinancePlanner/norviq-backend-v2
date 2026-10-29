@@ -13,9 +13,11 @@ import (
 type Querier interface {
 	BindMessagingLinks(ctx context.Context, arg BindMessagingLinksParams) error
 	DeleteConversation(ctx context.Context, id uuid.UUID) error
+	DeleteGoal(ctx context.Context, id uuid.UUID) error
 	DeleteMemo(ctx context.Context, id uuid.UUID) error
 	DismissTip(ctx context.Context, id uuid.UUID) error
 	GetOwnedConversation(ctx context.Context, arg GetOwnedConversationParams) (AiConversation, error)
+	GetOwnedGoal(ctx context.Context, arg GetOwnedGoalParams) (Goal, error)
 	GetOwnedMemo(ctx context.Context, arg GetOwnedMemoParams) (PositionMemo, error)
 	GetOwnedPendingAction(ctx context.Context, arg GetOwnedPendingActionParams) (AiPendingAction, error)
 	GetOwnedPendingActionForUpdate(ctx context.Context, arg GetOwnedPendingActionForUpdateParams) (AiPendingAction, error)
@@ -23,6 +25,7 @@ type Querier interface {
 	GetPreference(ctx context.Context, userID uuid.UUID) (AiPreference, error)
 	InsertActionAudit(ctx context.Context, arg InsertActionAuditParams) error
 	InsertConversation(ctx context.Context, arg InsertConversationParams) error
+	InsertGoal(ctx context.Context, arg InsertGoalParams) error
 	InsertMemo(ctx context.Context, arg InsertMemoParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) error
 	InsertPendingAction(ctx context.Context, arg InsertPendingActionParams) error
@@ -33,12 +36,16 @@ type Querier interface {
 	// the assistant jobs. Fluent wrote created_at/updated_at from the client
 	// clock, so every timestamp is a parameter.
 	ListConversations(ctx context.Context, arg ListConversationsParams) ([]AiConversation, error)
+	// Goals (ActionCatalog+Goals.swift reads the goals table directly, so the
+	// synthesised onboarding goals never reach a model).
+	ListManualGoals(ctx context.Context, userID uuid.UUID) ([]Goal, error)
 	ListMemos(ctx context.Context, arg ListMemosParams) ([]PositionMemo, error)
 	ListPendingActions(ctx context.Context, arg ListPendingActionsParams) ([]AiPendingAction, error)
 	ListTips(ctx context.Context, arg ListTipsParams) ([]AiTip, error)
 	MarkTipSeen(ctx context.Context, id uuid.UUID) error
 	NewestConversation(ctx context.Context, arg NewestConversationParams) (AiConversation, error)
 	RecentConversationMessages(ctx context.Context, arg RecentConversationMessagesParams) ([]AiMessage, error)
+	RenameGoal(ctx context.Context, arg RenameGoalParams) error
 	SetActionAuditStatus(ctx context.Context, arg SetActionAuditStatusParams) error
 	SetMemoBookmarked(ctx context.Context, arg SetMemoBookmarkedParams) error
 	SetPendingActionStatus(ctx context.Context, arg SetPendingActionStatusParams) error

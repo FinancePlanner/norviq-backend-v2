@@ -67,6 +67,17 @@ type AiTip struct {
 	ExpiresAt      time.Time
 }
 
+type Goal struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	Title           string
+	CreatedAt       *time.Time
+	UpdatedAt       *time.Time
+	Status          string
+	StatusUpdatedBy *string
+	CompletedAt     *time.Time
+}
+
 type PositionMemo struct {
 	ID                uuid.UUID
 	UserID            uuid.UUID

@@ -97,7 +97,7 @@ func (a actionArgs) bool(key string) (bool, bool) {
 	return false, false
 }
 
-func (a actionArgs) uuid(key string) (uuid.UUID, bool) {
+func (a actionArgs) uuid(key string) (uuid.UUID, bool) { //nolint:unparam // ActionArguments.uuid(_:) takes any key
 	s, ok := a.string(key)
 	if !ok {
 		return uuid.Nil, false

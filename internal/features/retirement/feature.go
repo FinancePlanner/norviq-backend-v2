@@ -27,12 +27,16 @@ import (
 type Feature struct {
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// ScheduleAchievementCheck is req.scheduleAchievementCheck(for:), run
+	// for the portfolio owner after a plan is saved. nil is a no-op (wire
+	// achievementhooks.Schedule).
+	ScheduleAchievementCheck func(userID uuid.UUID)
 }
 
 func (Feature) Name() string { return "retirement" }
 
 func (f Feature) Register(d *server.Deps, r *server.Routes) error {
-	h := &handler{d: d, access: portfolios.NewAccess(d.DB), now: f.Now}
+	h := &handler{d: d, access: portfolios.NewAccess(d.DB), now: f.Now, achievements: f.ScheduleAchievementCheck}
 	if h.now == nil {
 		h.now = portfolios.Now
 	}
@@ -46,9 +50,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 }
 
 type handler struct {
-	d      *server.Deps
-	access portfolios.Access
-	now    func() time.Time
+	d            *server.Deps
+	access       portfolios.Access
+	now          func() time.Time
+	achievements func(uuid.UUID)
 }
 
 // Plan is RetirementPlan.
@@ -172,8 +177,10 @@ func (h *handler) upsertPlan(c *echo.Context) error {
 			return err
 		}
 	}
-	// Vapor also scheduled an achievement check for the portfolio owner
-	// (req.scheduleAchievementCheck); v2 has no achievements engine yet.
+	// The metric counts plans by portfolio owner, who may not be the editor.
+	if h.achievements != nil {
+		h.achievements(access.Portfolio.UserID)
+	}
 	plan, err := makePlan(rec, id)
 	if err != nil {
 		return err

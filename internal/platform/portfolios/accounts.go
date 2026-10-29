@@ -122,3 +122,31 @@ func AccountForManualEdit(ctx context.Context, db portfoliocoredb.DBTX, userID, 
 	}
 	return FindOrCreateManualAccount(ctx, db, userID, portfolioID)
 }
+
+// RemovePilotLeftovers is PilotPortfolioLeftovers.remove: a stopped follow's
+// simulated stocks (source_provider "pilot") and its pilot accounts, with
+// their cash balances and transactions, go with the portfolio. Run it inside
+// the transaction that deletes the portfolio.
+func RemovePilotLeftovers(ctx context.Context, db portfoliocoredb.DBTX, portfolioListID uuid.UUID) error {
+	q := portfoliocoredb.New(db)
+	broker := PilotBroker
+	if err := q.DeleteStocksInListBySource(ctx, portfoliocoredb.DeleteStocksInListBySourceParams{PortfolioListID: portfolioListID, SourceProvider: &broker}); err != nil {
+		return err
+	}
+	ids, err := q.AccountIDsForPortfolioBroker(ctx, portfoliocoredb.AccountIDsForPortfolioBrokerParams{PortfolioID: &portfolioListID, Broker: broker})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := q.DeleteCashBalancesForAccountID(ctx, id); err != nil {
+			return err
+		}
+		if err := q.DeleteTransactionsForAccountID(ctx, id); err != nil {
+			return err
+		}
+		if err := q.DeleteAccountByID(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}

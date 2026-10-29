@@ -655,7 +655,7 @@ func deleteListTx(c *echo.Context, tx pgx.Tx, userID, listID uuid.UUID) error {
 	if connected != 0 {
 		return httpx.Conflict("Move connected accounts to another portfolio before deleting this portfolio.")
 	}
-	if err := removePilotLeftovers(c, q, listID); err != nil {
+	if err := portfolios.RemovePilotLeftovers(ctx, tx, listID); err != nil {
 		return err
 	}
 	defaultID, err := portfolios.ResolvePortfolioListID(ctx, tx, nil, userID, true)
@@ -708,30 +708,4 @@ func deleteListTx(c *echo.Context, tx pgx.Tx, userID, listID uuid.UUID) error {
 		}
 	}
 	return q.DeletePortfolioList(ctx, listID)
-}
-
-// removePilotLeftovers is PilotPortfolioLeftovers.remove: a stopped
-// follow's simulated stocks and pilot accounts (with their cash and trades)
-// go with the list.
-func removePilotLeftovers(c *echo.Context, q *portfoliodb.Queries, listID uuid.UUID) error {
-	ctx := c.Request().Context()
-	if err := q.DeletePilotStocksForPortfolio(ctx, portfoliodb.DeletePilotStocksForPortfolioParams{PortfolioListID: listID, PilotBroker: portfolios.PilotBroker}); err != nil {
-		return err
-	}
-	ids, err := q.PilotAccountIDsForPortfolio(ctx, portfoliodb.PilotAccountIDsForPortfolioParams{PortfolioID: &listID, PilotBroker: portfolios.PilotBroker})
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if err := q.DeleteCashBalancesForAccount(ctx, id); err != nil {
-			return err
-		}
-		if err := q.DeleteTransactionsForAccount(ctx, id); err != nil {
-			return err
-		}
-		if err := q.DeleteAccount(ctx, id); err != nil {
-			return err
-		}
-	}
-	return nil
 }

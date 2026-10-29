@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,14 +67,18 @@ func decodeBody(c *echo.Context, fields []field) (map[string]any, error) {
 
 // readObject reads the body as a JSON object with normalized keys.
 func readObject(c *echo.Context) (map[string]json.RawMessage, error) {
+	if err := requireJSONContent(c); err != nil {
+		return nil, err
+	}
 	raw, err := io.ReadAll(c.Request().Body)
 	if err != nil {
 		return nil, err
 	}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, httpx.BadRequest("Request body is empty.")
+	if len(raw) == 0 {
+		// Vapor's req.content.decode on a request with no body.
+		return nil, httpx.Unprocessable("")
 	}
+	trimmed := bytes.TrimSpace(raw)
 	var obj map[string]json.RawMessage
 	if err := apijson.UnmarshalKeyed(trimmed, &obj); err != nil {
 		if json.Valid(trimmed) {
@@ -86,6 +92,29 @@ func readObject(c *echo.Context) (map[string]json.RawMessage, error) {
 		return nil, httpx.BadRequest("Value was not of type 'Dictionary<String, Any>' at path ''. Expected to decode Dictionary<String, Any> but found null instead.")
 	}
 	return obj, nil
+}
+
+// requireJSONContent is ContentConfiguration's decoder lookup: no content
+// type is a 415, text/plain a 400 (the plaintext decoder can't produce a
+// dictionary) and any other non-JSON type a 415. Form bodies are read as
+// JSON (Vapor would run its URL-encoded decoder; no client sends them).
+func requireJSONContent(c *echo.Context) error {
+	raw := strings.TrimSpace(c.Request().Header.Get(echo.HeaderContentType))
+	if raw == "" {
+		return httpx.CodedAbort(http.StatusUnsupportedMediaType, "request_failed", "Can't decode data without a content type")
+	}
+	mt, _, err := mime.ParseMediaType(raw)
+	if err != nil {
+		mt = strings.ToLower(raw)
+	}
+	switch mt {
+	case "application/json", "application/vnd.api+json", "application/x-www-form-urlencoded":
+		return nil
+	case "text/plain":
+		return httpx.BadRequest("Value was not of type 'Dictionary<String, Decodable>' at path ''. Plaintext decoding does not support dictionaries.")
+	}
+	return httpx.CodedAbort(http.StatusUnsupportedMediaType, "request_failed",
+		"Support for reading media type '"+raw+"' has not been configured.")
 }
 
 func joinPath(path []string, name string) string {
@@ -106,9 +135,7 @@ func decodeFields(obj map[string]json.RawMessage, fields []field, path []string)
 					"No such key '%s' at path '%s'. No value associated with key CodingKeys(stringValue: %q, intValue: nil) (%q).",
 					f.name, strings.Join(path, "."), f.name, f.name))
 			}
-			return nil, httpx.BadRequest(fmt.Sprintf(
-				"No value found (expected type '%s') at path '%s'. Cannot get value of type %s -- found null value instead.",
-				f.swiftType(), joinPath(path, f.name), f.swiftType()))
+			return nil, mismatch(f.swiftType(), joinPath(path, f.name), v)
 		}
 		p := joinPath(path, f.name)
 		switch f.kind {
@@ -121,7 +148,7 @@ func decodeFields(obj map[string]json.RawMessage, fields []field, path []string)
 			case kEnum:
 				if !slices.Contains(f.values, s) {
 					return nil, httpx.BadRequest(fmt.Sprintf(
-						"Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s", p, f.enum, s))
+						"Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s.", p, f.enum, s))
 				}
 				out[f.name] = s
 			case kUUID:

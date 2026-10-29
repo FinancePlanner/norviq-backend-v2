@@ -306,7 +306,7 @@ func TestPrivacyDefaultsAndPartialPut(t *testing.T) {
 	bad := defaultPrivacy()
 	bad["searchVisibility"] = "aliens"
 	if r := e.call(http.MethodPut, "/v1/social/privacy", a, bad); r.Status != 400 ||
-		r.reason(t) != "Data corrupted at path 'searchVisibility'. Cannot initialize SocialSearchVisibility from invalid String value aliens" {
+		r.reason(t) != "Data corrupted at path 'searchVisibility'. Cannot initialize SocialSearchVisibility from invalid String value aliens." {
 		t.Fatalf("bad enum = %d %s", r.Status, r.Body)
 	}
 	missing := defaultPrivacy()
@@ -351,7 +351,7 @@ func TestContactMatching(t *testing.T) {
 		t.Fatalf("too many = %d", r.Status)
 	}
 	if r := e.call(http.MethodPost, "/v1/social/discovery/contacts/match", a, map[string]any{"hashVersion": 1, "items": []map[string]any{{"hash": "x", "kind": "fax"}}}); r.Status != 400 ||
-		r.reason(t) != "Data corrupted at path 'items.Index 0.kind'. Cannot initialize SocialContactKind from invalid String value fax" {
+		r.reason(t) != "Data corrupted at path 'items.Index 0.kind'. Cannot initialize SocialContactKind from invalid String value fax." {
 		t.Fatalf("bad kind = %d %s", r.Status, r.Body)
 	}
 	t.Setenv("SOCIAL_CONTACT_PEPPER", "")
@@ -416,7 +416,7 @@ func TestReports(t *testing.T) {
 	for body, reason := range map[string]string{
 		`{"targetType":"user","targetId":"  ","reason":"spam"}`:                                           "A report needs a target.",
 		`{"targetType":"user","targetId":"x","reason":"spam","note":"` + strings.Repeat("n", 1001) + `"}`: "Keep the details under 1,000 characters.",
-		`{"targetType":"group","targetId":"x","reason":"spam"}`:                                          "Data corrupted at path 'targetType'. Cannot initialize SocialReportTargetType from invalid String value group",
+		`{"targetType":"group","targetId":"x","reason":"spam"}`:                                           "Data corrupted at path 'targetType'. Cannot initialize SocialReportTargetType from invalid String value group.",
 	} {
 		if r := e.call(http.MethodPost, "/v1/social/reports", a, body); r.Status != 400 || r.reason(t) != reason {
 			t.Fatalf("%s: %d %s", body, r.Status, r.Body)
@@ -468,9 +468,9 @@ func TestProfileShowcase(t *testing.T) {
 	ins("craft.target_hit", "gold", 5, nil)
 	ins("social.friends", "silver", 2, nil)
 	ins("start.first_goal", "", 0, nil)
-	ins("perf.comeback", "", 3, nil)          // performance: hidden without return %
-	ins("legacy.investor", "gold", 4, nil)    // pre-engine badge: never shown
-	ins("unknown.key", "gold", 4, nil)        // not in the catalogue
+	ins("perf.comeback", "", 3, nil)       // performance: hidden without return %
+	ins("legacy.investor", "gold", 4, nil) // pre-engine badge: never shown
+	ins("unknown.key", "gold", 4, nil)     // not in the catalog
 	type entry struct{ Key, Tier, Title, IconKey string }
 	var p struct {
 		BadgeCount *int     `json:"badgeCount"`
@@ -491,7 +491,7 @@ func TestProfileShowcase(t *testing.T) {
 	e.exec(`UPDATE user_achievements SET showcase_rank = $1 WHERE achievement_key = 'start.first_goal'`, one)
 	e.exec(`UPDATE user_achievements SET showcase_rank = $1 WHERE achievement_key = 'craft.thesis'`, two)
 	e.get("/v1/social/users/"+up(b), a, &p, "Accept-Language", "pt-PT,pt;q=0.9")
-	if len(*p.Showcase) != 2 || (*p.Showcase)[0].Key != "start.first_goal" || (*p.Showcase)[1].Title != "Autor de teses" {
+	if len(*p.Showcase) != 2 || (*p.Showcase)[0].Key != "start.first_goal" || (*p.Showcase)[1].Title != "Autor de teses" { //nolint:misspell // Portuguese title
 		t.Fatalf("pinned = %+v", *p.Showcase)
 	}
 	// Performance shows once the owner shares return %.

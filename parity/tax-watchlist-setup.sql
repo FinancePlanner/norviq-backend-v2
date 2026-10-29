@@ -6,8 +6,10 @@
 --
 -- Users 0a7c0000-0000-4000-8000-0000000000aN:
 --   a1 pro, read fixtures        a2 free, no data
---   a3 pro, mutating cases       a4 pro, no data (default list creation)
---   a5 pro, follows a pilot on its only (default) watchlist
+--   a3 pro, mutating cases       a4 pro, no watchlists (default list
+--                                creation), an unloadable risk profile
+--   a5 pro, follows a pilot on its only (default) watchlist; an
+--      unloadable screen
 --
 -- Mutating cases run twice (Vapor, then v2). The triggers below make them
 -- repeatable: rows inserted with PARITY* markers are removed again right
@@ -69,20 +71,20 @@ INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at
   ('0a7c0000-0000-4000-8000-000000000413', '0a7c0000-0000-4000-8000-0000000000a3', 'VTI', 2, 200, '2026-01-01', '2026-01-01T00:00:00Z', '0a7c0000-0000-4000-8000-000000000403', 'etf'),
   ('0a7c0000-0000-4000-8000-000000000414', '0a7c0000-0000-4000-8000-0000000000a3', 'GLD', 2, 180, '2026-01-01', '2026-01-01T00:00:00Z', '0a7c0000-0000-4000-8000-000000000403', 'commodity');
 INSERT INTO holding_risk_profiles (id, user_id, holding_id, asset_category, sector, region, benchmark_proxy, manual_value, duration, convexity, factor_overrides, created_at, updated_at) VALUES
-  ('0a7c0000-0000-4000-8000-000000000421', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000411', 'stock', 'Technology', 'US', 'QQQ', NULL, NULL, NULL, '{"equity_beta": 1.2, "nested": {"b": [1, 2.5, "x", true, null]}}', '2026-03-01T00:00:00Z', '2026-03-02T00:00:00.5Z'),
-  ('0a7c0000-0000-4000-8000-000000000422', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000412', 'bond', NULL, NULL, NULL, 210, 6.5, 0.4, '{}', '2026-03-01T00:00:00Z', '2026-03-03T00:00:00Z'),
-  ('0a7c0000-0000-4000-8000-000000000423', '0a7c0000-0000-4000-8000-0000000000a3', '0a7c0000-0000-4000-8000-000000000414', 'commodity', NULL, NULL, NULL, NULL, NULL, NULL, '{}', '2026-03-01T00:00:00Z', '2026-03-03T00:00:00Z');
+  ('0a7c0000-0000-4000-8000-000000000421', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000411', 'stock', 'Technology', 'US', 'QQQ', NULL, NULL, NULL, '{"values": {"equity_beta": 1.2, "nested": {"b": [1, 2.5, "x", true, null]}}}', '2026-03-01T00:00:00Z', '2026-03-02T00:00:00.5Z'),
+  ('0a7c0000-0000-4000-8000-000000000422', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000412', 'bond', NULL, NULL, NULL, 210, 6.5, 0.4, '{"values": {}}', '2026-03-01T00:00:00Z', '2026-03-03T00:00:00Z'),
+  ('0a7c0000-0000-4000-8000-000000000423', '0a7c0000-0000-4000-8000-0000000000a3', '0a7c0000-0000-4000-8000-000000000414', 'commodity', NULL, NULL, NULL, NULL, NULL, NULL, '{"values": {}}', '2026-03-01T00:00:00Z', '2026-03-03T00:00:00Z');
 
 -- a1: a smart screen with one prior evaluation.
 INSERT INTO watchlist_screens (id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled, last_evaluated_at, created_at, updated_at) VALUES
   ('0a7c0000-0000-4000-8000-000000000501', '0a7c0000-0000-4000-8000-0000000000a1', 'Cheap quality', ARRAY['0a7c0000-0000-4000-8000-000000000101'::uuid, '0a7c0000-0000-4000-8000-000000000102'::uuid], 'all',
-   '{"groups": [{"id": "g1", "logical_operator": "any", "conditions": [{"id": "c1", "metric": "pe_ratio", "comparison": "less_than", "period": "ttm", "value": 15}, {"id": "c2", "metric": "revenue_growth", "comparison": "improving", "period": "annual"}]}]}',
+   '{"values": {"groups": [{"id": "g1", "logical_operator": "any", "conditions": [{"id": "c1", "metric": "pe_ratio", "comparison": "less_than", "period": "ttm", "value": 15}, {"id": "c2", "metric": "revenue_growth", "comparison": "improving", "period": "annual"}]}]}}',
    true, '2026-03-10T08:00:00Z', '2026-03-01T00:00:00Z', '2026-03-01T00:00:00.25Z');
 INSERT INTO watchlist_screen_evaluations (id, user_id, screen_id, symbol_count, match_symbols, result, is_alert_baseline, evaluated_at) VALUES
   ('0a7c0000-0000-4000-8000-000000000511', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000501', 3, ARRAY['AAPL'],
-   '{"matches": [{"id": "AAPL", "symbol": "AAPL", "name": "Apple Inc.", "is_new": false, "condition_results": [{"condition_id": "c1", "matched": true, "value": 12.5, "explanation": "Condition matched."}, {"condition_id": "c2", "matched": false, "value": 0.1, "previous_value": 0.2, "explanation": "Condition did not match."}]}]}',
+   '{"values": {"matches": [{"id": "AAPL", "symbol": "AAPL", "name": "Apple Inc.", "is_new": false, "condition_results": [{"condition_id": "c1", "matched": true, "value": 12.5, "explanation": "Condition matched."}, {"condition_id": "c2", "matched": false, "value": 0.1, "previous_value": 0.2, "explanation": "Condition did not match."}]}]}}',
    true, '2026-03-10T08:00:00Z'),
-  ('0a7c0000-0000-4000-8000-000000000512', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000501', 2, ARRAY[]::text[], '{"matches": []}', false, '2026-03-11T08:00:00.75Z');
+  ('0a7c0000-0000-4000-8000-000000000512', '0a7c0000-0000-4000-8000-0000000000a1', '0a7c0000-0000-4000-8000-000000000501', 2, ARRAY[]::text[], '{"values": {"matches": []}}', false, '2026-03-11T08:00:00.75Z');
 
 -- a3: lists and items for the mutating cases.
 INSERT INTO watchlist_lists (id, user_id, name, is_default, created_at, updated_at) VALUES
@@ -99,13 +101,13 @@ INSERT INTO targets (id, user_id, symbol, scenario, target_price, created_at, up
   ('0a7c0000-0000-4000-8000-000000000622', '0a7c0000-0000-4000-8000-0000000000a3', 'KEEP', 'base', 1, '2026-03-01T00:00:00Z', NULL);
 INSERT INTO watchlist_screens (id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled, last_evaluated_at, created_at, updated_at) VALUES
   ('0a7c0000-0000-4000-8000-000000000631', '0a7c0000-0000-4000-8000-0000000000a3', 'Editable', ARRAY['0a7c0000-0000-4000-8000-000000000601'::uuid], 'any',
-   '{"groups": [{"id": "g1", "logical_operator": "all", "conditions": [{"id": "c1", "metric": "price", "comparison": "greater_than", "period": "ttm", "value": 1}]}]}',
+   '{"values": {"groups": [{"id": "g1", "logical_operator": "all", "conditions": [{"id": "c1", "metric": "price", "comparison": "greater_than", "period": "ttm", "value": 1}]}]}}',
    false, NULL, '2026-03-01T00:00:00Z', NULL),
   ('0a7c0000-0000-4000-8000-000000000632', '0a7c0000-0000-4000-8000-0000000000a3', 'Keep screen', ARRAY['0a7c0000-0000-4000-8000-000000000601'::uuid], 'any',
-   '{"groups": [{"id": "g1", "logical_operator": "all", "conditions": [{"id": "c1", "metric": "price", "comparison": "greater_than", "period": "ttm", "value": 1}]}]}',
+   '{"values": {"groups": [{"id": "g1", "logical_operator": "all", "conditions": [{"id": "c1", "metric": "price", "comparison": "greater_than", "period": "ttm", "value": 1}]}]}}',
    false, NULL, '2026-03-01T00:00:00Z', NULL);
 INSERT INTO watchlist_screen_evaluations (id, user_id, screen_id, symbol_count, match_symbols, result, is_alert_baseline, evaluated_at) VALUES
-  ('0a7c0000-0000-4000-8000-000000000641', '0a7c0000-0000-4000-8000-0000000000a3', '0a7c0000-0000-4000-8000-000000000632', 1, ARRAY['AMZN'], '{"matches": []}', true, '2026-03-10T08:00:00Z');
+  ('0a7c0000-0000-4000-8000-000000000641', '0a7c0000-0000-4000-8000-0000000000a3', '0a7c0000-0000-4000-8000-000000000632', 1, ARRAY['AMZN'], '{"values": {"matches": []}}', true, '2026-03-10T08:00:00Z');
 
 -- a5: its only watchlist is managed by a pilot follow, so resolving the
 -- default creates "Main Watchlist 2" (the follow's list is "Main Watchlist").
@@ -115,6 +117,18 @@ INSERT INTO watchlist_lists (id, user_id, name, is_default, created_at, updated_
   ('0a7c0000-0000-4000-8000-000000000701', '0a7c0000-0000-4000-8000-0000000000a5', 'Main Watchlist', true, '2026-02-01T00:00:00Z', NULL);
 INSERT INTO pilot_follows (id, user_id, pilot_id, target_kind, watchlist_list_id, created_at) VALUES
   ('0a7c0000-0000-4000-8000-000000000702', '0a7c0000-0000-4000-8000-0000000000a5', '0a7c0000-0000-4000-8000-0000000000f1', 'watchlist', '0a7c0000-0000-4000-8000-000000000701', now());
+
+-- Rows Fluent cannot load (jsonb not ScenarioJSON-shaped, i.e. without the
+-- "values" wrapper): a4's risk profile list and a5's screen list are 500s.
+INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at) VALUES
+  ('0a7c0000-0000-4000-8000-000000000404', '0a7c0000-0000-4000-8000-0000000000a4', 'Main Portfolio', true, '2026-01-01T00:00:00Z');
+INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id, category) VALUES
+  ('0a7c0000-0000-4000-8000-000000000415', '0a7c0000-0000-4000-8000-0000000000a4', 'IEF', 1, 95, '2026-01-01', '2026-01-01T00:00:00Z', '0a7c0000-0000-4000-8000-000000000404', 'bond');
+INSERT INTO holding_risk_profiles (id, user_id, holding_id, asset_category, factor_overrides, created_at, updated_at) VALUES
+  ('0a7c0000-0000-4000-8000-000000000424', '0a7c0000-0000-4000-8000-0000000000a4', '0a7c0000-0000-4000-8000-000000000415', 'bond', '{"equity_beta": 1}', '2026-03-01T00:00:00Z', '2026-03-01T00:00:00Z');
+INSERT INTO watchlist_screens (id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled, last_evaluated_at, created_at, updated_at) VALUES
+  ('0a7c0000-0000-4000-8000-000000000801', '0a7c0000-0000-4000-8000-0000000000a5', 'Legacy shape', ARRAY['0a7c0000-0000-4000-8000-000000000701'::uuid], 'all',
+   '{"groups": []}', false, NULL, '2026-03-01T00:00:00Z', NULL);
 
 -- Repeatability triggers (user a3 only).
 CREATE OR REPLACE FUNCTION parity_tax_wl_drop_new() RETURNS trigger AS $$

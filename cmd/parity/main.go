@@ -39,6 +39,9 @@ type testCase struct {
 	As      string            `json:"as"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
+	// RawBody is sent verbatim (CSV, multipart, malformed JSON) with only
+	// the Content-Type the case sets in Headers.
+	RawBody *string `json:"rawBody"`
 }
 
 type result struct {
@@ -123,11 +126,14 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 	if len(tc.Body) > 0 {
 		body = bytes.NewReader(tc.Body)
 	}
+	if tc.RawBody != nil {
+		body = strings.NewReader(*tc.RawBody)
+	}
 	req, err := http.NewRequest(method, base+tc.Path, body) //nolint:noctx // CLI tool, client has a timeout
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
+	if body != nil && tc.RawBody == nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range tc.Headers {

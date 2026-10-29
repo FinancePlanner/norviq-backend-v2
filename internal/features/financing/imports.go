@@ -168,6 +168,9 @@ func uploadedFile(c *echo.Context, body []byte) ([]byte, error) {
 		}
 		return multipartFile(body, boundary)
 	case mediaForm:
+		if len(bytes.TrimSpace(body)) == 0 {
+			return nil, httpx.Abort(http.StatusUnprocessableEntity, "")
+		}
 		values, perr := url.ParseQuery(string(body))
 		if perr != nil {
 			return nil, httpx.BadRequest(perr.Error())

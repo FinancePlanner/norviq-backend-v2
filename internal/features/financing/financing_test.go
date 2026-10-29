@@ -422,3 +422,35 @@ func TestImportURL(t *testing.T) {
 		t.Fatalf("free %d", r.Status)
 	}
 }
+
+func TestAssumptionsFromForms(t *testing.T) {
+	f := newFixture(t, nil)
+	put := func(contentType, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(context.Background(), "PUT", f.app.Server.URL+"/v1/financing/assumptions", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+f.tok)
+		req.Header.Set("Content-Type", contentType)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	const form = "application/x-www-form-urlencoded"
+	if st, body := put(form, "incomeScope=household&externalMonthlyDebtPayments=12.5&safetyBufferPercent=5"); st != 200 || !strings.Contains(body, `"externalMonthlyDebtPayments":12.5`) {
+		t.Fatalf("%d %s", st, body)
+	}
+	// Form keys are not snake_case-normalized.
+	if st, body := put(form, "income_scope=personal&external_monthly_debt_payments=1&safety_buffer_percent=5"); st != 400 || !strings.Contains(body, "No value found (expected type 'String') at path 'incomeScope'.") {
+		t.Fatalf("%d %s", st, body)
+	}
+	if st, _ := put(form, ""); st != 422 {
+		t.Fatalf("empty form %d", st)
+	}
+	st, body := put("multipart/form-data; boundary=XB", "--XB\r\nContent-Disposition: form-data; name=\"incomeScope\"\r\n\r\npersonal\r\n--XB--\r\n")
+	if st != 400 || !strings.Contains(body, `No such key 'externalMonthlyDebtPayments' at path ''.`) {
+		t.Fatalf("%d %s", st, body)
+	}
+}

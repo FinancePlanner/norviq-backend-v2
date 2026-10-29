@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -60,7 +61,7 @@ type validator interface{ validate() error }
 // decodeBody is `req.content.decode(T.self)` for a JSON (or flat
 // urlencoded) body.
 func decodeBody(c *echo.Context, v validator) error {
-	kind, _, err := mediaType(c)
+	kind, params, err := mediaType(c)
 	if err != nil {
 		return err
 	}
@@ -68,23 +69,26 @@ func decodeBody(c *echo.Context, v validator) error {
 	if err != nil {
 		return err
 	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return httpx.Abort(http.StatusUnprocessableEntity, "")
+	}
 	switch kind {
 	case mediaForm:
 		values, perr := url.ParseQuery(string(body))
 		if perr != nil {
 			return httpx.BadRequest(perr.Error())
 		}
-		if err := decodeForm(values, v); err != nil {
+		if err := decodeForm(values, v, formMissing); err != nil {
 			return httpx.BadRequest(err.Error())
 		}
 	case mediaMultipart:
-		// MultipartKit's FormDataDecoder; no client sends these bodies as
-		// multipart.
-		return httpx.Abort(http.StatusUnsupportedMediaType, "Unsupported Media Type")
-	default:
-		if len(bytes.TrimSpace(body)) == 0 {
-			return httpx.Abort(http.StatusUnprocessableEntity, "")
+		if params["boundary"] == "" {
+			return httpx.Abort(http.StatusUnsupportedMediaType, "Unsupported Media Type")
 		}
+		if err := decodeForm(multipartValues(body, params["boundary"]), v, multipartMissing); err != nil {
+			return httpx.BadRequest(err.Error())
+		}
+	default:
 		if err := decodeStrict(body, v); err != nil {
 			return httpx.BadRequest(err.Error())
 		}
@@ -185,9 +189,51 @@ func checkRequired(t reflect.Type, node any, path string) error {
 	return nil
 }
 
-// decodeForm is URLEncodedFormDecoder for the flat request types: every
-// value arrives as a string and is converted to the field's type.
-func decodeForm(values url.Values, v any) error {
+// formMissing is URLEncodedFormDecoder's error for an absent key.
+func formMissing(name, typ string) error {
+	return fmt.Errorf("No value found (expected type '%s') at path '%s'. No %s was found at '%s'.", typ, name, typ, name) //nolint:staticcheck // Vapor's wording
+}
+
+// multipartMissing is FormDataDecoder's error for an absent key.
+func multipartMissing(name, _ string) error {
+	return fmt.Errorf("No such key '%s' at path ''. No value associated with key %q.", name, name) //nolint:staticcheck // Vapor's wording
+}
+
+// multipartValues reads the text parts of a multipart body (the last part
+// with a name wins); an unparseable body yields what was read so far.
+func multipartValues(body []byte, boundary string) url.Values {
+	values := url.Values{}
+	r := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		p, err := r.NextRawPart()
+		if err != nil {
+			return values
+		}
+		data, err := io.ReadAll(p)
+		if err != nil {
+			return values
+		}
+		if name := p.FormName(); name != "" {
+			values[name] = []string{string(data)}
+		}
+	}
+}
+
+// swiftTypeName names a Go field kind as the Swift decoder did.
+func swiftTypeName(k reflect.Kind) string {
+	switch k {
+	case reflect.Float64:
+		return "Double"
+	case reflect.Int:
+		return "Int"
+	}
+	return "String"
+}
+
+// decodeForm is URLEncodedFormDecoder (and FormDataDecoder) for the flat
+// request types: every value arrives as a string, keys exactly as sent, and
+// is converted to the field's type.
+func decodeForm(values url.Values, v any, missing func(name, typ string) error) error {
 	rv := reflect.ValueOf(v).Elem()
 	rt := rv.Type()
 	for i := range rt.NumField() {
@@ -203,7 +249,7 @@ func decodeForm(values url.Values, v any) error {
 			if optional {
 				continue
 			}
-			return fmt.Errorf("No value associated with key '%s' at path ''.", name) //nolint:staticcheck // Foundation's wording
+			return missing(name, swiftTypeName(ft.Kind()))
 		}
 		target := reflect.New(ft).Elem()
 		switch ft.Kind() {
@@ -236,23 +282,8 @@ func decodeForm(values url.Values, v any) error {
 }
 
 func formValue(values url.Values, name string) (string, bool) {
-	for _, k := range []string{name, toSnake(name)} {
-		if vs, ok := values[k]; ok && len(vs) > 0 {
-			return vs[len(vs)-1], true
-		}
+	if vs, ok := values[name]; ok && len(vs) > 0 {
+		return vs[len(vs)-1], true
 	}
 	return "", false
-}
-
-func toSnake(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			b.WriteByte('_')
-			b.WriteRune(r + ('a' - 'A'))
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
 }

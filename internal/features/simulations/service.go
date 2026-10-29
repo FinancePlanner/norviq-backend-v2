@@ -120,24 +120,39 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, p UpsertRequest)
 			return Simulation{}, err
 		}
 	}
-	id := uuid.New()
 	now := portfolios.Now()
-	if err := s.q().InsertSimulation(ctx, simulationsdb.InsertSimulationParams{
-		ID: id, UserID: userID, Mode: p.Mode, SourcePortfolioID: sourceID(p), Name: cleanName(p.Name),
+	rec := simulationsdb.PortfolioSimulation{
+		ID: uuid.New(), UserID: userID, Mode: p.Mode, SourcePortfolioID: sourceID(p), Name: cleanName(p.Name),
 		BaseCurrency: strings.ToUpper(p.BaseCurrency), TargetCapital: p.TargetCapital,
 		FractionalSharesEnabled: p.FractionalSharesEnabled,
 		QuantityIncrement:       orDefault(p.QuantityIncrement, 0.001),
 		MinimumTradeAmount:      orDefault(p.MinimumTradeAmount, 1),
 		FlatFee:                 orDefault(p.FlatFee, 0),
 		VariableFeeBps:          int64(orDefault(p.VariableFeeBasisPoints, 0)),
-		Now:                     &now,
+		Revision:                1, ShareShowCapital: true, CreatedAt: &now, UpdatedAt: &now,
+	}
+	if err := s.q().InsertSimulation(ctx, simulationsdb.InsertSimulationParams{
+		ID: rec.ID, UserID: userID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
+		BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
+		FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
+		MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
+		Now: &now,
 	}); err != nil {
 		return Simulation{}, err
 	}
-	if err := s.replaceLegs(ctx, id, legs); err != nil {
+	if err := s.replaceLegs(ctx, rec.ID, legs); err != nil {
 		return Simulation{}, err
 	}
-	return s.Detail(ctx, id, userID)
+	// Swift rendered the in-memory record (not a re-read) with fresh legs.
+	return s.render(ctx, &rec)
+}
+
+func (s *Service) render(ctx context.Context, rec *simulationsdb.PortfolioSimulation) (Simulation, error) {
+	legs, err := s.q().LegsForSimulation(ctx, rec.ID)
+	if err != nil {
+		return Simulation{}, err
+	}
+	return dto(rec, legs), nil
 }
 
 // Update is PUT /v1/portfolio/simulations/:simulationId.
@@ -159,23 +174,31 @@ func (s *Service) Update(ctx context.Context, simulationID, userID uuid.UUID, p 
 		}
 	}
 	now := portfolios.Now()
+	rec.Mode = p.Mode
+	rec.SourcePortfolioID = sourceID(p)
+	rec.Name = cleanName(p.Name)
+	rec.BaseCurrency = strings.ToUpper(p.BaseCurrency)
+	rec.TargetCapital = p.TargetCapital
+	rec.FractionalSharesEnabled = p.FractionalSharesEnabled
+	rec.QuantityIncrement = orDefault(p.QuantityIncrement, rec.QuantityIncrement)
+	rec.MinimumTradeAmount = orDefault(p.MinimumTradeAmount, rec.MinimumTradeAmount)
+	rec.FlatFee = orDefault(p.FlatFee, rec.FlatFee)
+	rec.VariableFeeBps = int64(orDefault(p.VariableFeeBasisPoints, int(rec.VariableFeeBps)))
+	rec.Revision++
+	rec.UpdatedAt = &now
 	if err := s.q().UpdateSimulation(ctx, simulationsdb.UpdateSimulationParams{
-		ID: simulationID, Mode: p.Mode, SourcePortfolioID: sourceID(p), Name: cleanName(p.Name),
-		BaseCurrency: strings.ToUpper(p.BaseCurrency), TargetCapital: p.TargetCapital,
-		FractionalSharesEnabled: p.FractionalSharesEnabled,
-		QuantityIncrement:       orDefault(p.QuantityIncrement, rec.QuantityIncrement),
-		MinimumTradeAmount:      orDefault(p.MinimumTradeAmount, rec.MinimumTradeAmount),
-		FlatFee:                 orDefault(p.FlatFee, rec.FlatFee),
-		VariableFeeBps:          int64(orDefault(p.VariableFeeBasisPoints, int(rec.VariableFeeBps))),
-		Revision:                rec.Revision + 1,
-		Now:                     &now,
+		ID: simulationID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
+		BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
+		FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
+		MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
+		Revision: rec.Revision, Now: &now,
 	}); err != nil {
 		return Simulation{}, err
 	}
 	if err := s.replaceLegs(ctx, simulationID, legs); err != nil {
 		return Simulation{}, err
 	}
-	return s.Detail(ctx, simulationID, userID)
+	return s.render(ctx, rec)
 }
 
 // Delete is DELETE /v1/portfolio/simulations/:simulationId (legs cascade).

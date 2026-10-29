@@ -21,6 +21,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -49,6 +50,9 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		earnings.Feature{},
+		// Watchlist, lists, CSV import, price targets, smart screens and
+		// holding risk profiles.
+		watchlist.Feature{},
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
@@ -86,6 +90,8 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		watchlist.TargetAlertJob{},
+		watchlist.EarningsReminderJob{},
 	}
 }
 

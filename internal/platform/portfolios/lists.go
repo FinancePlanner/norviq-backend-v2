@@ -218,9 +218,11 @@ func ParseSwiftUUID(s string) (uuid.UUID, bool) {
 }
 
 // FormatISODateTime is ISO8601DateFormatter with .withFractionalSeconds
-// (formatISODateTime in ListSupport.swift): UTC, milliseconds, "Z".
+// (formatISODateTime in ListSupport.swift): UTC, milliseconds, "Z". The
+// formatter rounds to the nearest millisecond (a stored .669583 renders as
+// .670 in Vapor), it does not truncate.
 func FormatISODateTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	return t.UTC().Round(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 }
 
 // FormatISODateTimePtr is formatISODateTime for an optional date.

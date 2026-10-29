@@ -2,6 +2,7 @@ package portfoliomgmt
 
 import (
 	"regexp"
+	"strconv"
 	"time"
 
 	"norviq-api/internal/auth"
@@ -13,28 +14,59 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+// Foundation's ISO8601DateFormatter parses through ICU in lenient mode, so
+// Vapor accepted far more than the ISO forms. These patterns reproduce what
+// the parity Vapor (macOS Foundation) was observed to accept: any of
+// "-./ " between date fields, 1-3 digit months, overflowing days (Feb 30 is
+// Mar 2), single-digit hours, "z"/"GMT" zones, offsets as +hh, +hhmm or
+// +hh:mm, and anything after a parsed prefix ignored.
 var (
-	internetDateTime = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:?\d{2})$`)
-	fullDate         = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	isoDatePrefix = regexp.MustCompile(`^\s*(\d+)[-./ ](\d{1,3})[-./ ](\d+)`)
+	isoTimeSuffix = regexp.MustCompile(`^T(\d{1,2}):(\d{2}):(\d{2})\s*(Z|z|GMT|([+-])(\d{2})(?::?(\d{2}))?)`)
 )
 
+// lenientDate parses the date prefix; ok is false when a field is out of
+// ICU's range (month 1-12, day 1-31).
+func lenientDate(raw string) (y, m, d int, rest string, ok bool) {
+	g := isoDatePrefix.FindStringSubmatch(raw)
+	if g == nil {
+		return 0, 0, 0, "", false
+	}
+	y, _ = strconv.Atoi(g[1])
+	m, _ = strconv.Atoi(g[2])
+	d, _ = strconv.Atoi(g[3])
+	if m < 1 || m > 12 || d < 1 || d > 31 {
+		return 0, 0, 0, "", false
+	}
+	return y, m, d, raw[len(g[0]):], true
+}
+
 // parseDate is the controller's parseDate: ISO8601DateFormatter's default
-// (.withInternetDateTime, no fractional seconds), then .withFullDate (UTC
-// midnight), else 400 "Invalid date.".
+// (.withInternetDateTime: date, time to the second, zone), then
+// .withFullDate (UTC midnight), else 400 "Invalid date.".
 func parseDate(raw string) (time.Time, error) {
-	if internetDateTime.MatchString(raw) {
-		for _, layout := range []string{"2006-01-02T15:04:05Z07:00", "2006-01-02T15:04:05Z0700"} {
-			if t, err := time.Parse(layout, raw); err == nil {
-				return t.UTC(), nil
+	y, m, d, rest, ok := lenientDate(raw)
+	if !ok {
+		return time.Time{}, httpx.BadRequest("Invalid date.")
+	}
+	if g := isoTimeSuffix.FindStringSubmatch(rest); g != nil {
+		hh, _ := strconv.Atoi(g[1])
+		mm, _ := strconv.Atoi(g[2])
+		ss, _ := strconv.Atoi(g[3])
+		if hh <= 24 && mm < 60 && ss < 60 {
+			offset := 0
+			if g[5] != "" {
+				oh, _ := strconv.Atoi(g[6])
+				om, _ := strconv.Atoi(g[7])
+				offset = oh*3600 + om*60
+				if g[5] == "-" {
+					offset = -offset
+				}
 			}
+			return time.Date(y, time.Month(m), d, hh, mm, ss, 0, time.UTC).Add(-time.Duration(offset) * time.Second), nil
 		}
 	}
-	if fullDate.MatchString(raw) {
-		if t, err := time.Parse("2006-01-02", raw); err == nil {
-			return t.UTC(), nil
-		}
-	}
-	return time.Time{}, httpx.BadRequest("Invalid date.")
+	return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC), nil
 }
 
 // cashRequest is StockPlanShared.PortfolioCashPositionRequest.

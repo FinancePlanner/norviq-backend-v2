@@ -360,7 +360,7 @@ func TestCashPositions(t *testing.T) {
 		t.Fatalf("listed %s", r.Body)
 	}
 
-	expectReason(t, e.do(http.MethodPut, base+"/"+id, token, map[string]any{"label": "x", "currency": "USD", "balance": 1, "asOf": "2026-09-02T10:00:00.123Z"}),
+	expectReason(t, e.do(http.MethodPut, base+"/"+id, token, map[string]any{"label": "x", "currency": "USD", "balance": 1, "asOf": "20260902"}),
 		http.StatusBadRequest, "Invalid date.")
 	expectReason(t, e.do(http.MethodPost, base, token, map[string]any{"label": " ", "currency": "USD", "balance": 1, "asOf": "2026-09-02"}),
 		http.StatusBadRequest, "label is required.")

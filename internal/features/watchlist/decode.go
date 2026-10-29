@@ -114,8 +114,7 @@ const dictType = "Dictionary<String, Any>"
 
 // swiftTypeName is the type Foundation names in a mismatch.
 func swiftTypeName(t reflect.Type) string {
-	switch t {
-	case reflect.TypeFor[uuid.UUID]():
+	if t == reflect.TypeFor[uuid.UUID]() {
 		return "String"
 	}
 	switch t.Kind() {

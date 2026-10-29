@@ -260,7 +260,8 @@ func (h *handlers) deleteWatchlistList(c *echo.Context) error {
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
+		for i := range items {
+			item := &items[i]
 			dup, err := q.DuplicateWatchlistItem(ctx, watchlistdb.DuplicateWatchlistItemParams{
 				UserID: s.UserID, WatchlistListID: defaultID, Symbol: item.Symbol, ID: item.ID,
 			})
@@ -289,7 +290,7 @@ func (h *handlers) deleteWatchlistList(c *echo.Context) error {
 				return err
 			}
 			item.WatchlistListID = defaultID
-			if _, err := q.UpdateWatchlistItem(ctx, updateParams(item, h.now())); err != nil {
+			if _, err := q.UpdateWatchlistItem(ctx, updateParams(*item, h.now())); err != nil {
 				return err
 			}
 		}

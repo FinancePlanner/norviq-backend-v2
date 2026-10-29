@@ -133,7 +133,7 @@ func isNewline(r rune) bool {
 // lowercased.
 func normalizeHeaderField(raw string) string {
 	var b strings.Builder
-	for _, r := range strings.ReplaceAll(raw, "﻿", "") {
+	for _, r := range strings.ReplaceAll(raw, "\uFEFF", "") {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) {
 			b.WriteRune(r)
 		}
@@ -277,18 +277,18 @@ func readMultipartCSV(req *http.Request, boundary string) ([]byte, error) {
 }
 
 // csvPreview is WatchlistCsvImportService.preview.
-func (h *handlers) csvPreview(ctx context.Context, csv string, rawListID *string, userID uuid.UUID) (csvPreviewResponse, []csvRow, map[string]watchlistdb.WatchlistItem, error) {
+func (h *handlers) csvPreview(ctx context.Context, csv string, rawListID *string, userID uuid.UUID) (csvPreviewResponse, error) {
 	listID, err := h.resolveListID(ctx, h.q, rawListID, userID, true)
 	if err != nil {
-		return csvPreviewResponse{}, nil, nil, err
+		return csvPreviewResponse{}, err
 	}
 	rows, errs, err := parseCSV(csv)
 	if err != nil {
-		return csvPreviewResponse{}, nil, nil, err
+		return csvPreviewResponse{}, err
 	}
 	existing, err := h.existingBySymbol(ctx, userID, *listID)
 	if err != nil {
-		return csvPreviewResponse{}, nil, nil, err
+		return csvPreviewResponse{}, err
 	}
 	items := make([]csvPreviewItem, 0, len(rows))
 	for _, r := range rows {
@@ -299,7 +299,7 @@ func (h *handlers) csvPreview(ctx context.Context, csv string, rawListID *string
 		}
 		items = append(items, item)
 	}
-	return csvPreviewResponse{WatchlistListID: uuidString(*listID), Items: items, Errors: dedupeErrors(errs)}, rows, existing, nil
+	return csvPreviewResponse{WatchlistListID: uuidString(*listID), Items: items, Errors: dedupeErrors(errs)}, nil
 }
 
 func (h *handlers) existingBySymbol(ctx context.Context, userID, listID uuid.UUID) (map[string]watchlistdb.WatchlistItem, error) {
@@ -308,8 +308,8 @@ func (h *handlers) existingBySymbol(ctx context.Context, userID, listID uuid.UUI
 		return nil, err
 	}
 	out := make(map[string]watchlistdb.WatchlistItem, len(items))
-	for _, it := range items {
-		out[it.Symbol] = it
+	for i := range items {
+		out[items[i].Symbol] = items[i]
 	}
 	return out, nil
 }
@@ -324,7 +324,7 @@ func (h *handlers) importCSVPreview(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	res, _, _, err := h.csvPreview(c.Request().Context(), csv, rawListID, s.UserID)
+	res, err := h.csvPreview(c.Request().Context(), csv, rawListID, s.UserID)
 	if err != nil {
 		return err
 	}
@@ -345,7 +345,7 @@ func (h *handlers) importCSVCommit(c *echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	preview, _, _, err := h.csvPreview(ctx, csv, rawListID, s.UserID)
+	preview, err := h.csvPreview(ctx, csv, rawListID, s.UserID)
 	if err != nil {
 		return err
 	}

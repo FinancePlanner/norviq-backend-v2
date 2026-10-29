@@ -78,14 +78,14 @@ func (h *handlers) listTargets(c *echo.Context) error {
 		}
 	}
 	targets, err := h.q.ListTargets(c.Request().Context(), watchlistdb.ListTargetsParams{
-		UserID: s.UserID, Symbol: symbol, Lim: int32(clampedLimit(httpx.QueryOptionalInt(c, "limit"))),
+		UserID: s.UserID, Symbol: symbol, Lim: int32(clampedLimit(httpx.QueryOptionalInt(c, "limit"))), // #nosec G115 -- clamped to 1...200
 	})
 	if err != nil {
 		return err
 	}
 	out := make([]targetResponse, len(targets))
-	for i, t := range targets {
-		out[i] = makeTargetResponse(t)
+	for i := range targets {
+		out[i] = makeTargetResponse(targets[i])
 	}
 	return httpx.OK(c, out)
 }

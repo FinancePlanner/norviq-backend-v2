@@ -128,8 +128,8 @@ func (h *handlers) listWatchlist(c *echo.Context) error {
 		return err
 	}
 	out := make([]itemResponse, len(items))
-	for i, it := range items {
-		out[i] = makeItemResponse(it)
+	for i := range items {
+		out[i] = makeItemResponse(items[i])
 	}
 	return httpx.OK(c, out)
 }

@@ -20,6 +20,8 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/crypto"
+	"norviq-api/internal/features/dashboard"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
@@ -140,6 +142,10 @@ func All() []server.Feature {
 		financing.Feature{},
 		// NewsController (/v1/news/*) and FinnhubWebhookController.
 		news.Feature{},
+		// DashboardController (dashboard, insights, why-moved).
+		dashboard.Feature{},
+		// CryptoController (/v1/crypto/*, incl. the markets view).
+		crypto.Feature{},
 	}
 }
 
@@ -204,6 +210,8 @@ func AllJobs() []Job {
 		news.NotificationJob{},
 		// MacroRefreshJob.
 		macro.RefreshJob{},
+		// Crypto markets snapshot (CoinGecko + FMP YTD bases).
+		crypto.RefreshJob{},
 	}
 }
 

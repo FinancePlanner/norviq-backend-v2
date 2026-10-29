@@ -116,5 +116,17 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.GET("/ai/memos/:id", h.getMemo, read...)
 	r.V1.POST("/ai/memos/:id/bookmark", h.bookmarkMemo, write...)
 	r.V1.DELETE("/ai/memos/:id", h.deleteMemo, write...)
+
+	// AIInsightsController and AIViewSummaryController: the same
+	// `ratelimit:ai` group, then their own authenticator, guard and
+	// assistant.read scope. Each stays on Vapor until its sources are wired.
+	if h.src.hasDashboard() {
+		r.V1.GET("/ai/insights/expenses", h.insightHandler("expenses"), read...)
+		r.V1.GET("/ai/insights/portfolio", h.insightHandler("portfolio"), read...)
+		r.V1.GET("/ai/insights/summary", h.insightHandler("summary"), read...)
+	}
+	if h.src.viewSummaryReady() {
+		r.V1.GET("/ai/view-summary/:scope", h.viewSummary, read...)
+	}
 	return nil
 }

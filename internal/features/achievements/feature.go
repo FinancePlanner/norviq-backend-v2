@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/achievementhooks"
@@ -142,18 +141,19 @@ func (h *handlers) markSeen(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var body struct {
-		IDs *[]apijson.UUID `json:"ids"`
-	}
-	if err := httpx.Decode(c, &body); err != nil {
+	body, err := readObject(c)
+	if err != nil {
 		return err
 	}
-	if body.IDs == nil {
-		return httpx.BadRequest("No such key 'ids' at path ''.")
+	raw, err := body.requiredArray("ids")
+	if err != nil {
+		return err
 	}
-	ids := make([]uuid.UUID, len(*body.IDs))
-	for i, id := range *body.IDs {
-		ids[i] = id.Std()
+	ids := make([]uuid.UUID, len(raw))
+	for i := range raw {
+		if ids[i], err = uuidAt(raw[i], indexPath("ids", i)); err != nil {
+			return err
+		}
 	}
 	if err := h.svc.MarkSeen(c.Request().Context(), s.UserID, ids); err != nil {
 		return err
@@ -167,27 +167,26 @@ func (h *handlers) setShowcase(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var body struct {
-		Items *[]struct {
-			Key  *string `json:"key"`
-			Tier *string `json:"tier"`
-		} `json:"items"`
-	}
-	if err := httpx.Decode(c, &body); err != nil {
+	body, err := readObject(c)
+	if err != nil {
 		return err
 	}
-	if body.Items == nil {
-		return httpx.BadRequest("No such key 'items' at path ''.")
+	raw, err := body.requiredArray("items")
+	if err != nil {
+		return err
 	}
-	items := make([]ShowcaseItem, len(*body.Items))
-	for i, it := range *body.Items {
-		if it.Key == nil {
-			return httpx.BadRequest("No such key 'key' at path 'items/Index " + itoa(i) + "'.")
+	items := make([]ShowcaseItem, len(raw))
+	for i := range raw {
+		item, err := asObject(raw[i], indexPath("items", i))
+		if err != nil {
+			return err
 		}
-		if it.Tier == nil {
-			return httpx.BadRequest("No such key 'tier' at path 'items/Index " + itoa(i) + "'.")
+		if items[i].Key, err = item.requiredString("key"); err != nil {
+			return err
 		}
-		items[i] = ShowcaseItem{Key: *it.Key, Tier: *it.Tier}
+		if items[i].Tier, err = item.requiredString("tier"); err != nil {
+			return err
+		}
 	}
 	res, err := h.svc.SetShowcase(c.Request().Context(), s.UserID, items, language(c), time.Now())
 	if err != nil {

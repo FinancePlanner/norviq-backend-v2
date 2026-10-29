@@ -75,7 +75,7 @@ func (h *handlers) feed(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	requested, err := httpx.QueryInt(c, "limit")
+	requested, err := queryLimit(c, "limit")
 	if err != nil {
 		return err
 	}

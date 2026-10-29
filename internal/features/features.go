@@ -21,6 +21,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/social"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -54,6 +55,9 @@ func All() []server.Feature {
 		identity.Feature{},
 		// Community boards (BoardsController).
 		boards.Feature{},
+		// Social graph, discovery and gamification (SocialController,
+		// GamificationController).
+		social.Feature{},
 	}
 }
 

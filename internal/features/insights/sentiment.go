@@ -113,7 +113,7 @@ func classify(text string) classifierResult {
 		}
 		matches++
 		if isNegated(tokens, i) {
-			sum += -weight * 0.8
+			sum += float64(-weight * 0.8) // float64() blocks FMA fusion; Swift rounds each product
 		} else {
 			sum += weight
 		}
@@ -126,7 +126,7 @@ func classify(text string) classifierResult {
 	return classifierResult{
 		Score:      &score,
 		Label:      labelForScore(score),
-		Confidence: math.Min(1.0, evidence*(0.5+0.5*math.Abs(score))),
+		Confidence: math.Min(1.0, evidence*(0.5+float64(0.5*math.Abs(score)))),
 		MatchCount: matches,
 	}
 }
@@ -334,7 +334,7 @@ func aggregate(posts []aggregateInput) dailyAggregate {
 			conf = *p.Scored.Confidence
 		}
 		weight := math.Max(0.1, conf)
-		weightedSum += *p.Scored.Score * weight
+		weightedSum += float64(*p.Scored.Score * weight) // no FMA, as in Swift
 		weightTotal += weight
 		confidenceSum += conf
 		scoredCount++

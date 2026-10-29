@@ -149,7 +149,7 @@ func (s *SentimentQueries) Portfolio(ctx context.Context, userID uuid.UUID, list
 			if !ok {
 				p = h.BuyPrice
 			}
-			weights[sym] += h.Shares * p
+			weights[sym] += float64(h.Shares * p) // no FMA, as in Swift
 		}
 	}
 	return s.rollUp(ctx, "portfolio", symbols, weights)
@@ -190,7 +190,7 @@ func (s *SentimentQueries) rollUp(ctx context.Context, scope string, symbols []s
 		if w <= 0 {
 			continue
 		}
-		weightedSum += *r.Score * w
+		weightedSum += float64(*r.Score * w) // no FMA, as in Swift
 		weightTotal += w
 		contributions = append(contributions, HoldingContribution{Symbol: sym, Score: *r.Score, Label: r.Label, Weight: w, Delta1d: r.Delta1d})
 	}

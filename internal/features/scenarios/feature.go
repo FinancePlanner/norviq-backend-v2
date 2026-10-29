@@ -85,12 +85,12 @@ type SnapshotModel struct {
 
 // snapshotInput is the controller's private SnapshotInput.
 type snapshotInput struct {
-	PortfolioListID    apijson.UUID   `json:"portfolioListId"`
-	BaseCurrency       string         `json:"baseCurrency"`
-	ValuationTimestamp *apijson.Time  `json:"valuationTimestamp"`
-	Payload            *ScenarioJSON  `json:"payload"`
-	Warnings           *ScenarioJSON  `json:"warnings"`
-	CryptoHoldingIDs   []apijson.UUID `json:"cryptoHoldingIds"`
+	PortfolioListID    apijson.UUID    `json:"portfolioListId"`
+	BaseCurrency       string          `json:"baseCurrency"`
+	ValuationTimestamp *apijson.Time   `json:"valuationTimestamp"`
+	Payload            *ScenarioJSON   `json:"payload"`
+	Warnings           *ScenarioJSON   `json:"warnings"`
+	CryptoHoldingIDs   *[]apijson.UUID `json:"cryptoHoldingIds"`
 }
 
 // authorize is ScenarioController.authorize: 404 unless
@@ -190,9 +190,11 @@ func (h *handler) createSnapshot(c *echo.Context) error {
 			ValuationTimestamp: valuation, Payload: *input.Payload, Warnings: warnings,
 		}
 	} else {
-		crypto := make([]uuid.UUID, len(input.CryptoHoldingIDs))
-		for i, id := range input.CryptoHoldingIDs {
-			crypto[i] = id.Std()
+		var crypto []uuid.UUID
+		if input.CryptoHoldingIDs != nil {
+			for _, id := range *input.CryptoHoldingIDs {
+				crypto = append(crypto, id.Std())
+			}
 		}
 		snap, err = Capture(ctx, h.q, h.market, h.now, listID, userID, baseCurrency, crypto)
 		if err != nil {

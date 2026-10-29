@@ -15,8 +15,12 @@
 -- events e1/e3 stay pending and policy d1 keeps last_confirmed_at NULL, so
 -- both backends confirm/dismiss the same pending event.
 
+-- The delete guard below would also stop the cascade from the users delete.
+DROP TRIGGER IF EXISTS parity_planning_keep_policy_row ON rebalancing_policies;
+
 BEGIN;
 
+DELETE FROM rebalancing_policies WHERE id::text LIKE '0d1a0000-0000-4000-8000-%';
 DELETE FROM stocks WHERE user_id::text LIKE '0d1a0000-0000-4000-8000-%';
 DELETE FROM users WHERE id::text LIKE '0d1a0000-0000-4000-8000-%';
 
@@ -104,3 +108,15 @@ END $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS parity_planning_keep_policy ON rebalancing_policies;
 CREATE TRIGGER parity_planning_keep_policy BEFORE UPDATE ON rebalancing_policies
   FOR EACH ROW EXECUTE FUNCTION parity_planning_keep_policy();
+
+-- Keep policy d1 when the DELETE case runs, so both backends answer 204.
+CREATE OR REPLACE FUNCTION parity_planning_keep_policy_row() RETURNS trigger AS $$
+BEGIN
+  IF OLD.id::text = '0d1a0000-0000-4000-8000-0000000000d1' THEN
+    RETURN NULL;
+  END IF;
+  RETURN OLD;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS parity_planning_keep_policy_row ON rebalancing_policies;
+CREATE TRIGGER parity_planning_keep_policy_row BEFORE DELETE ON rebalancing_policies
+  FOR EACH ROW EXECUTE FUNCTION parity_planning_keep_policy_row();

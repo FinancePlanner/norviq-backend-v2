@@ -106,6 +106,10 @@ func swiftTypeMismatch(typeName string, path []string, found any) *httpx.Error {
 }
 
 func swiftDataCorrupted(path []string, description string) *httpx.Error {
+	// Vapor appends the "." a debugDescription lacks.
+	if !strings.HasSuffix(description, ".") {
+		description += "."
+	}
 	return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. %s", strings.Join(path, "."), description))
 }
 

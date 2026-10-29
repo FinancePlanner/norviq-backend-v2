@@ -618,3 +618,19 @@ func TestUnitHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestCSVDryRunFlag(t *testing.T) {
+	e := newEnv(t)
+	token, _ := e.user()
+	// Vapor reads an absent dry_run as false, an unparsable one as the
+	// `?? true` fallback.
+	if res := e.importCSV(token, "dry_run=maybe", sampleCSV); !res.DryRun {
+		t.Fatalf("garbage flag %+v", res)
+	}
+	if res := e.importCSV(token, "dry_run", sampleCSV); !res.DryRun {
+		t.Fatalf("bare flag %+v", res)
+	}
+	if res := e.importCSV(token, "", sampleCSV); res.DryRun || res.Imported != 2 {
+		t.Fatalf("absent flag %+v", res)
+	}
+}

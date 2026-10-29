@@ -180,7 +180,7 @@ func (b body) enum(key, typeName string, required bool, cases ...string) (*strin
 			return s, nil
 		}
 	}
-	return nil, httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s", key, typeName, *s))
+	return nil, httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s.", key, typeName, *s))
 }
 
 func (b body) doubleMap(key string, required bool) (map[string]float64, error) {
@@ -213,7 +213,7 @@ func (b body) receiptMetadata(key string) (*ExpenseReceiptMetadata, error) {
 			"No such key 'source' at path '%s'. No value associated with key CodingKeys(stringValue: \"source\", intValue: nil) (\"source\").", key))
 	}
 	if m.Source != "qr" && m.Source != "ocr" {
-		return nil, httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s.source'. Cannot initialize ExpenseReceiptSource from invalid String value %s", key, m.Source))
+		return nil, httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s.source'. Cannot initialize ExpenseReceiptSource from invalid String value %s.", key, m.Source))
 	}
 	return &m, nil
 }

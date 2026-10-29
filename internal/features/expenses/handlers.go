@@ -170,9 +170,15 @@ func (h *handlers) importCSV(c *echo.Context) error {
 	if utf8.Valid(raw) {
 		csv = string(raw)
 	}
+	// req.query[Bool.self, at: "dry_run"] ?? true: Vapor's URL-form decoder
+	// reads an absent Bool key as an unset flag (false), so a request
+	// without dry_run imports for real; only an unparsable value falls back
+	// to the dry run.
 	dryRun := true
 	if v := httpx.QueryOptionalBool(c, "dry_run"); v != nil {
 		dryRun = *v
+	} else if _, present := c.Request().URL.Query()["dry_run"]; !present {
+		dryRun = false
 	}
 	ctx := c.Request().Context()
 	cats, err := h.svc.GetCategories(ctx, h.d.DB, s.UserID)

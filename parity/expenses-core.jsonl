@@ -1,0 +1,111 @@
+# Expenses core: /v1/expenses (minus the spreadsheet/receipt imports),
+# /v1/budget/snapshots, /v1/budget/items, /v1/reports/{expenses,suggestions}.
+# Load parity/expenses-core-setup.sql first, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18116 -jwt-secret parity-secret \
+#     -cases parity/expenses-core.jsonl -ignore requestId,id,createdAt,updatedAt,generatedAt,revision
+# revision is ignored: each mutating case runs on Vapor first, so v2's
+# write lands one revision later on the same row.
+# Known diff: reports-suggestions and suggestions-after-dismiss format
+# amounts with NumberFormatter in Locale.current. A Vapor run on a Mac
+# with a pt_PT locale says "1 750,00"/"70,3%"; v2 assumes the en
+# formatting ("1,750.00"/"70.3%") of the Linux image. Everything else in
+# those two cases matches.
+# /v1/reports/overview is not here: v2 leaves it on Vapor until an
+# OverviewSource (statistics) is wired.
+{"name":"expenses-list","path":"/v1/expenses","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-list-range","path":"/v1/expenses?from=2026-09-01&to=2026-09-30","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-list-limit-cursor","path":"/v1/expenses?limit=2","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-search-q","path":"/v1/expenses?q=core","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-search-category","path":"/v1/expenses?categoryId=e5d00000-0000-4000-8000-000000000103","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-search-category-snake","path":"/v1/expenses?category_id=E5D00000-0000-4000-8000-000000000102","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-search-pillar","path":"/v1/expenses?pillar=fun","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-list-bad-from","path":"/v1/expenses?from=09/01/2026","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-list-anonymous","path":"/v1/expenses"}
+{"name":"expenses-list-empty-user","path":"/v1/expenses","as":"e5d00000-0000-4000-8000-000000000003"}
+{"name":"categories-list","path":"/v1/expenses/categories","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"export-csv","path":"/v1/expenses/export.csv","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"export-csv-range","path":"/v1/expenses/export.csv?from=2026-07-01&to=2026-07-31","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"reports-expenses-monthly","path":"/v1/reports/expenses?from=2026-07-01&to=2026-09-30","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"reports-expenses-yearly","path":"/v1/reports/expenses?granularity=year&from=2026-01-01&to=2026-09-30","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"reports-expenses-empty","path":"/v1/reports/expenses","as":"e5d00000-0000-4000-8000-000000000003"}
+{"name":"reports-suggestions","path":"/v1/reports/suggestions?from=2026-07-01&to=2026-09-30","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"reports-suggestions-empty","path":"/v1/reports/suggestions","as":"e5d00000-0000-4000-8000-000000000003"}
+{"name":"snapshot-items","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-000000000201/items","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshot-items-missing","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-0000000009ff/items","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshot-items-bad-id","path":"/v1/budget/snapshots/nope/items","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"budget-items-all","path":"/v1/budget/items","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshots-month","path":"/v1/budget/snapshots?year=2026&month=9","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshots-list","path":"/v1/budget/snapshots","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshots-list-again","path":"/v1/budget/snapshots","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"budget-items-after-rollover","path":"/v1/budget/items","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"recurring-list-pro","path":"/v1/expenses/recurring","as":"e5d00000-0000-4000-8000-000000000002"}
+{"name":"recurring-list-free","path":"/v1/expenses/recurring","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"partner-get-pro","path":"/v1/expenses/partner","as":"e5d00000-0000-4000-8000-000000000004"}
+{"name":"partner-get-free","path":"/v1/expenses/partner","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"csv-import-default-writes","path":"/v1/expenses/import","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":"title,amount,pillar,occurred_on\nVet,25.5,fun,2026-07-20\nBad,notanumber,fun,2026-07-06\nOld,5,fun,07/05/2026\n"}
+{"name":"csv-import-garbage-flag-dry-run","path":"/v1/expenses/import?dry_run=maybe","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":"title,amount,pillar,occurred_on,category\nCoffee,4.50,fun,2026-07-05,Dining\n\"Rent, flat\",1200,fundamentals,2026-07-01,\nBad,notanumber,fun,2026-07-06,\nOld,5,fun,07/05/2026,\nGhost,5,nopillar!!,2026-07-07,\n"}
+{"name":"csv-import-dry-run-explicit","path":"/v1/expenses/import?dry_run=true","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":"title,amount,pillar,occurred_on,category\nCoffee,4.50,fun,2026-07-05,Dining\n\"Rent, flat\",1200,fundamentals,2026-07-01,\nBad,notanumber,fun,2026-07-06,\nOld,5,fun,07/05/2026,\nGhost,5,nopillar!!,2026-07-07,\n"}
+{"name":"csv-import-dedup-dry-run","path":"/v1/expenses/import?dry_run=true","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":"title,amount,pillar,occurred_on\nVet,25.5,fun,2026-07-20\n"}
+{"name":"csv-import-bad-header","path":"/v1/expenses/import","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":"name,amount\nx,1\n"}
+{"name":"csv-import-empty","path":"/v1/expenses/import","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","headers":{"Content-Type":"text/csv"},"rawBody":""}
+{"name":"expense-create","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"Groceries","amount":45.2,"pillar":"fundamentals","occurredOn":"2026-10-03","notes":"weekly"}}
+{"name":"expense-create-split-foreign","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"Dinner","amount":60,"pillar":"Fun","occurredOn":"2026-10-04","splitMode":"shared","userSharePercent":50,"foreignAmount":50,"foreignCurrency":"GBP","exchangeRate":1.2}}
+{"name":"expense-create-snake","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"Snake","amount":1,"pillar":"fun","occurred_on":"2026-10-05","split_mode":"personal"}}
+{"name":"expense-create-missing-date","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun"}}
+{"name":"expense-create-bad-pillar","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"!!","occurredOn":"2026-10-05"}}
+{"name":"expense-create-negative","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":-1,"pillar":"fun","occurredOn":"2026-10-05"}}
+{"name":"expense-create-bad-date","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"yesterday"}}
+{"name":"expense-create-bad-linked","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"2026-10-05","linkedPlanItemId":"not-a-uuid"}}
+{"name":"expense-create-foreign-linked","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"2026-10-05","linkedPlanItemId":"e5d00000-0000-4000-8000-000000000301"}}
+{"name":"expense-create-share-oob","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"2026-10-05","splitMode":"shared","userSharePercent":150}}
+{"name":"expense-create-no-content-type","path":"/v1/expenses","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","rawBody":"{\"title\":\"x\"}"}
+{"name":"expense-update","path":"/v1/expenses/e5d00000-0000-4000-8000-000000000404","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"title":"Coffee large","amount":4.75,"pillar":"fun","occurredOn":"2026-07-21","categoryId":"e5d00000-0000-4000-8000-000000000103"}}
+{"name":"expense-update-missing","path":"/v1/expenses/e5d00000-0000-4000-8000-0000000009ff","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"2026-07-21"}}
+{"name":"expense-update-other-user","path":"/v1/expenses/e5d00000-0000-4000-8000-000000000404","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000003","body":{"title":"x","amount":1,"pillar":"fun","occurredOn":"2026-07-21"}}
+{"name":"expense-delete","path":"/v1/expenses/e5d00000-0000-4000-8000-000000000403","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expense-delete-missing","path":"/v1/expenses/e5d00000-0000-4000-8000-0000000009ff","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expense-delete-bad-id","path":"/v1/expenses/abc","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"category-create","path":"/v1/expenses/categories","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"name":"  Hobbies ","pillar":"fun"}}
+{"name":"category-create-no-pillar","path":"/v1/expenses/categories","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"name":"Misc"}}
+{"name":"category-create-empty","path":"/v1/expenses/categories","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"name":"   "}}
+{"name":"category-create-missing-name","path":"/v1/expenses/categories","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"pillar":"fun"}}
+{"name":"category-delete","path":"/v1/expenses/categories/e5d00000-0000-4000-8000-000000000102","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"category-delete-missing","path":"/v1/expenses/categories/e5d00000-0000-4000-8000-0000000009ff","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"recurring-create","path":"/v1/expenses/recurring","method":"POST","as":"e5d00000-0000-4000-8000-000000000002","body":{"title":"Spotify","amount":11.99,"pillar":"fun","frequency":"monthly","splitMode":"personal","userSharePercent":100}}
+{"name":"recurring-create-free","path":"/v1/expenses/recurring","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"title":"Spotify","amount":11.99,"pillar":"fun","frequency":"monthly","splitMode":"personal","userSharePercent":100}}
+{"name":"recurring-create-bad-frequency","path":"/v1/expenses/recurring","method":"POST","as":"e5d00000-0000-4000-8000-000000000002","body":{"title":"Spotify","amount":11.99,"pillar":"fun","frequency":"hourly","splitMode":"personal","userSharePercent":100}}
+{"name":"recurring-create-missing-split","path":"/v1/expenses/recurring","method":"POST","as":"e5d00000-0000-4000-8000-000000000002","body":{"title":"Spotify","amount":11.99,"pillar":"fun","frequency":"monthly","userSharePercent":100}}
+{"name":"recurring-update","path":"/v1/expenses/recurring/e5d00000-0000-4000-8000-000000000501","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000002","body":{"title":"Gym+","amount":45,"pillar":"fun","frequency":"monthly","splitMode":"personal","userSharePercent":100,"categoryId":"e5d00000-0000-4000-8000-000000000104"}}
+{"name":"recurring-update-missing","path":"/v1/expenses/recurring/e5d00000-0000-4000-8000-0000000009ff","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000002","body":{"title":"Spotify","amount":11.99,"pillar":"fun","frequency":"monthly","splitMode":"personal","userSharePercent":100}}
+{"name":"recurring-delete","path":"/v1/expenses/recurring/e5d00000-0000-4000-8000-000000000502","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000002"}
+{"name":"recurring-delete-missing","path":"/v1/expenses/recurring/e5d00000-0000-4000-8000-0000000009ff","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000002"}
+{"name":"partner-put","path":"/v1/expenses/partner","method":"PUT","as":"e5d00000-0000-4000-8000-000000000004","body":{"displayName":"  Ana  ","defaultUserSharePercent":40}}
+{"name":"partner-get-after-put","path":"/v1/expenses/partner","as":"e5d00000-0000-4000-8000-000000000004"}
+{"name":"partner-put-clear","path":"/v1/expenses/partner","method":"PUT","as":"e5d00000-0000-4000-8000-000000000004","body":{"displayName":"Ana"}}
+{"name":"partner-put-oob","path":"/v1/expenses/partner","method":"PUT","as":"e5d00000-0000-4000-8000-000000000004","body":{"defaultUserSharePercent":101}}
+{"name":"partner-put-free","path":"/v1/expenses/partner","method":"PUT","as":"e5d00000-0000-4000-8000-000000000001","body":{"displayName":"Ana"}}
+{"name":"snapshot-create","path":"/v1/budget/snapshots","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"monthStart":"2026-06-01","netSalary":4200,"targetShares":{"fundamentals":0.5,"Future You":0.3,"fun":0.2},"currencyCode":"eur","categoryDriftThreshold":12}}
+{"name":"snapshot-create-missing-shares","path":"/v1/budget/snapshots","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"monthStart":"2026-06-01","netSalary":4200}}
+{"name":"snapshot-create-bad-month","path":"/v1/budget/snapshots","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"monthStart":"June","netSalary":4200,"targetShares":{}}}
+{"name":"snapshot-create-bad-currency","path":"/v1/budget/snapshots","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"monthStart":"2026-05-01","netSalary":4200,"targetShares":{},"currencyCode":"EURO"}}
+{"name":"snapshot-create-bad-threshold","path":"/v1/budget/snapshots","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"monthStart":"2026-05-01","netSalary":4200,"targetShares":{},"totalDriftThreshold":-5}}
+{"name":"snapshot-update","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-000000000202","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"monthStart":"2026-07-01","netSalary":2900,"targetShares":{"fundamentals":0.6,"futureYou":0.25,"fun":0.15},"alertsEnabled":true}}
+{"name":"snapshot-update-missing","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-0000000009ff","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"monthStart":"2026-07-01","netSalary":2900,"targetShares":{}}}
+{"name":"snapshot-delete","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-000000000202","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"snapshot-delete-missing","path":"/v1/budget/snapshots/e5d00000-0000-4000-8000-0000000009ff","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"item-create","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","title":"Car","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-create-full","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","title":"ETF","plannedAmount":150,"pillar":"futureYou","splitMode":"shared","userSharePercent":70,"targetType":"percentageIncome","incomePercentage":5,"thresholdOverride":4,"allocationKind":"investmentContribution","reallocationEligible":true,"categoryId":"e5d00000-0000-4000-8000-000000000101"}}
+{"name":"item-create-missing-snapshot","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-0000000009ff","title":"Car","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-create-bad-snapshot-id","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"nope","title":"Car","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-create-other-user","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000003","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","title":"Car","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-create-bad-target-type","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","title":"Car","plannedAmount":150,"pillar":"fundamentals","targetType":"weird"}}
+{"name":"item-create-missing-title","path":"/v1/budget/items","method":"POST","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-update","path":"/v1/budget/items/e5d00000-0000-4000-8000-000000000302","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000201","title":"Index fund","plannedAmount":0,"pillar":"futureYou","targetType":"percentageIncome","incomePercentage":12,"allocationKind":"investmentContribution","reallocationEligible":true}}
+{"name":"item-update-missing","path":"/v1/budget/items/e5d00000-0000-4000-8000-0000000009ff","method":"PATCH","as":"e5d00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5d00000-0000-4000-8000-000000000202","title":"Car","plannedAmount":150,"pillar":"fundamentals"}}
+{"name":"item-delete","path":"/v1/budget/items/e5d00000-0000-4000-8000-000000000303","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"item-delete-missing","path":"/v1/budget/items/e5d00000-0000-4000-8000-0000000009ff","method":"DELETE","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"suggestion-dismiss","path":"/v1/reports/suggestions/overspend-2026-09-01-40/dismiss","method":"POST","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"suggestions-after-dismiss","path":"/v1/reports/suggestions?from=2026-07-01&to=2026-09-30","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"suggestion-dismiss-empty-id","path":"/v1/reports/suggestions/%20/dismiss","method":"POST","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"expenses-list-final","path":"/v1/expenses?from=2026-07-01","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"reports-expenses-final","path":"/v1/reports/expenses?from=2026-07-01","as":"e5d00000-0000-4000-8000-000000000001"}

@@ -28,7 +28,7 @@ func (f *fakeSearch) Search(_ context.Context, q string) ([]assets.SearchResult,
 
 func newApp(t *testing.T, s *fakeSearch) *testutil.App {
 	t.Helper()
-	return testutil.NewApp(t, []server.Feature{assets.Feature{Search: func(*server.Deps) assets.SymbolSearch { return s }}})
+	return testutil.NewApp(t, []server.Feature{assets.Feature{Search: func(*server.Deps) (assets.SymbolSearch, error) { return s, nil }}})
 }
 
 func addStock(t *testing.T, app *testutil.App, user uuid.UUID, symbol string, notes *string) uuid.UUID {

@@ -20,6 +20,7 @@ import (
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
 )
 
@@ -31,18 +32,38 @@ func All() []server.Feature {
 		notifications.Feature{Premium: func(d *server.Deps) notifications.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
-		// Assets search waits for market data (assets.Feature.Search) and
-		// stays on Vapor until wired.
 		activity.Feature{},
 		badges.Feature{},
 		feedback.Feature{},
-		assets.Feature{},
+		assets.Feature{Search: func(d *server.Deps) (assets.SymbolSearch, error) {
+			svc, err := market.SharedService(d)
+			if err != nil {
+				return nil, err
+			}
+			return marketSearch{svc}, nil
+		}},
 		aiplatform.Feature{},
 		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		earnings.Feature{},
 	}
+}
+
+// marketSearch adapts the market data service to assets.SymbolSearch; the
+// result types share fields and tags.
+type marketSearch struct{ svc *marketdata.Service }
+
+func (m marketSearch) Search(ctx context.Context, q string) ([]assets.SearchResult, error) {
+	rs, err := m.svc.Search(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]assets.SearchResult, len(rs))
+	for i, r := range rs {
+		out[i] = assets.SearchResult(r)
+	}
+	return out, nil
 }
 
 // Job is a background loop: one Vapor LifecycleHandler.

@@ -13,7 +13,9 @@ cd "$(dirname "$0")/.."
 norm() { sed -E 's#:[A-Za-z0-9_]+#:p#g; s#\*\*#*#g' | sort -u; }
 
 vapor="$(norm < docs/vapor-routes.txt)"
-v2="$(go run ./cmd/api routes 2>/dev/null | norm)"
+# echo adds RouteNotFound catch-alls for group middleware; the strangler
+# ignores them, so they are not v2 routes.
+v2="$(go run ./cmd/api routes 2>/dev/null | grep -v "^echo_route_not_found " | norm)"
 
 ported="$(comm -12 <(echo "$vapor") <(echo "$v2"))"
 missing="$(comm -23 <(echo "$vapor") <(echo "$v2"))"

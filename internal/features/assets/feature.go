@@ -35,7 +35,7 @@ type SymbolSearch interface {
 // Feature mounts /v1/assets/search once Search is wired; until then the
 // route stays on Vapor.
 type Feature struct {
-	Search func(d *server.Deps) SymbolSearch
+	Search func(d *server.Deps) (SymbolSearch, error)
 }
 
 func (Feature) Name() string { return "assets" }
@@ -44,7 +44,11 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.Search == nil {
 		return nil
 	}
-	h := &handler{d: d, searcher: f.Search(d)}
+	searcher, err := f.Search(d)
+	if err != nil {
+		return err
+	}
+	h := &handler{d: d, searcher: searcher}
 	r.V1.GET("/assets/search", h.search, d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopeMarketRead))
 	return nil
 }

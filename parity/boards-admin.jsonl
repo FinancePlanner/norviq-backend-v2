@@ -1,0 +1,14 @@
+# Admin boards cases, against a Vapor whose NORVIQ_ADMIN_USER_IDS names
+# 0A11CE00-...-001 (on 2026-10-29 the shared 18124 answered "no admin user ids
+# configured", so this ran against an own Vapor on 18144 with only that var
+# and the DB/JWT settings). Start v2 with the same NORVIQ_ADMIN_USER_IDS,
+# reset the fixtures, then:
+#   go run ./cmd/parity -a http://127.0.0.1:18144 -b http://127.0.0.1:18143 -jwt-secret parity-secret -cases parity/boards-admin.jsonl -ignore requestId,id,createdAt
+# The admin has a username but never accepted the guidelines: admins skip
+# that gate (and the daily board cap) but not the username gate.
+{"name":"me-admin","path":"/v1/community/me","as":"0a11ce00-0000-4000-8000-000000000001"}
+{"name":"admin-edit-others-board","method":"PATCH","path":"/v1/boards/parity-etfs","as":"0a11ce00-0000-4000-8000-000000000001","body":{"description":"About ETFs"}}
+{"name":"admin-delete-others-comment-gone","method":"DELETE","path":"/v1/board-comments/b0a4d000-0000-4000-8000-0000000000f2","as":"0a11ce00-0000-4000-8000-000000000001"}
+{"name":"admin-comment","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e2/comments","as":"0a11ce00-0000-4000-8000-000000000001","body":{"body":"Mod note"}}
+{"name":"admin-me-still-banned-user","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000006"}
+{"name":"admin-posts","path":"/v1/boards/parity-etfs/posts?sort=top","as":"0a11ce00-0000-4000-8000-000000000001"}

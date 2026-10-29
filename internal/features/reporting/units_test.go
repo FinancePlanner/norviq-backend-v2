@@ -170,6 +170,9 @@ func TestSwiftFormatting(t *testing.T) {
 	if got := reportFilename("!!!", "xlsx", time.Unix(5, 0)); got != "norviq-report-5.xlsx" {
 		t.Errorf("filename = %q", got)
 	}
+	if got := isoTime(time.Date(2026, 10, 1, 12, 0, 0, 123789000, time.UTC)); got != "2026-10-01T12:00:00.124Z" {
+		t.Errorf("isoTime rounds like Foundation: %q", got)
+	}
 	if _, ok := parseSwiftUUID("0f8fad5bd9cb469fa16570867728950e"); ok {
 		t.Error("bare hex must not parse")
 	}

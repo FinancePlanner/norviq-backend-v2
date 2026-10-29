@@ -208,7 +208,11 @@ type ArtifactDownloadResponse struct {
 // .withFractionalSeconds (milliseconds, UTC).
 const fractionalISO8601 = "2006-01-02T15:04:05.000Z"
 
-func isoTime(t time.Time) string { return t.UTC().Format(fractionalISO8601) }
+// isoTime is formatISODateTime. Foundation rounds to the nearest
+// millisecond (Postgres' .123789 reads .124) where Go's Format truncates.
+func isoTime(t time.Time) string {
+	return t.UTC().Round(time.Millisecond).Format(fractionalISO8601)
+}
 
 func isoPtr(t *time.Time) *string {
 	if t == nil {

@@ -1,12 +1,15 @@
 # Advanced reporting (/v1/reporting/*). Load parity/expenses-reporting-setup.sql
-# first and copy the artifact fixture into the shared storage root (see the
-# port report), then run against a Vapor and a v2 that share
+# first and write the artifact fixture into the shared storage root:
+#   printf '%%PDF-parity-fake' > $ROOT/e5b00000-0000-4000-8000-0000000000e1.pdf
+# then run against a Vapor (a second instance, e.g. :18124) and a v2 that share
 # REPORT_DOWNLOAD_SIGNING_SECRET=parity-report-signing-secret-0123456789abcdef,
 # PUBLIC_API_BASE_URL and ADVANCED_REPORT_STORAGE_PATH:
 #   go run ./cmd/parity -a http://127.0.0.1:18124 -b http://127.0.0.1:18114 -jwt-secret parity-secret \
 #     -cases parity/expenses-reporting.jsonl -ignore requestId,updatedAt \
 #     -headers Content-Type,Content-Disposition,Cache-Control
-# Mutating cases are repeatable through the setup's triggers.
+# Mutating cases are repeatable through the setup's triggers. Against the
+# shared :8081 (development signing secret, no base URL) only artifact-link
+# and the three signed download cases differ.
 {"name": "templates-list", "path": "/v1/reporting/templates", "as": "e5b00000-0000-4000-8000-000000000001"}
 {"name": "templates-list-empty", "path": "/v1/reporting/templates", "as": "e5b00000-0000-4000-8000-000000000002"}
 {"name": "templates-list-unauth", "path": "/v1/reporting/templates"}

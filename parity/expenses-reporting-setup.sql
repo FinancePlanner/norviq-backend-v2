@@ -97,6 +97,11 @@ INSERT INTO advanced_report_deliveries (id, run_id, recipient_user_id, recipient
    'parity-expenses-reporting-1@example.com', 'delivered', 1, '2026-10-05 09:30:08+00', '2026-10-05 09:30:09+00', NULL,
    '2026-10-12 09:30:08+00', '2026-10-05 09:30:07+00', now());
 
+-- b6 reads no portfolio, so user 06's run reaches the daily-limit check.
+UPDATE advanced_report_templates
+SET input_json = replace(input_json, '"E5B00000-0000-4000-8000-0000000000A1"', '')
+WHERE id = 'e5b00000-0000-4000-8000-0000000000b6';
+
 -- User 06 already generated 100 files today (fifty two-format runs).
 INSERT INTO advanced_report_runs (id, template_id, requested_by_user_id, template_revision, template_input_json,
   output_formats_json, recipient_user_ids_json, status, attempt_count, created_at, updated_at)

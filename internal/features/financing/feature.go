@@ -363,3 +363,11 @@ func (h *handlers) unmatch(c *echo.Context) error {
 
 func (r *MatchRequest) validate() error     { return nil }
 func (r *URLImportRequest) validate() error { return nil }
+
+func sessionUser(c *echo.Context) (uuid.UUID, error) {
+	s, err := auth.Require(c)
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+	return s.UserID, nil
+}

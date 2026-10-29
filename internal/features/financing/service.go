@@ -163,7 +163,8 @@ func (s *service) plans(ctx context.Context, userID uuid.UUID) ([]PlanResponse, 
 		return nil, err
 	}
 	out := []PlanResponse{}
-	for _, p := range rows {
+	for i := range rows {
+		p := &rows[i]
 		terms, ok, err := s.latestTerms(ctx, p.ID)
 		if err != nil {
 			return nil, err
@@ -171,7 +172,7 @@ func (s *service) plans(ctx context.Context, userID uuid.UUID) ([]PlanResponse, 
 		if !ok {
 			continue
 		}
-		out = append(out, planResponse(p, terms))
+		out = append(out, planResponse(*p, terms))
 	}
 	return out, nil
 }
@@ -282,8 +283,8 @@ func (s *service) projections(ctx context.Context, userID uuid.UUID, from, to *t
 		return nil, err
 	}
 	out := []Projection{}
-	for _, p := range plans {
-		items, err := s.schedule(ctx, userID, p.ID)
+	for i := range plans {
+		items, err := s.schedule(ctx, userID, plans[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +346,8 @@ func (s *service) matchCandidates(ctx context.Context, userID, expenseID uuid.UU
 		return nil, err
 	}
 	out := []MatchCandidate{}
-	for _, p := range plans {
+	for i := range plans {
+		p := &plans[i]
 		schedule, err := s.schedule(ctx, userID, p.ID)
 		if err != nil {
 			return nil, err
@@ -451,7 +453,8 @@ func (s *service) budgetContext(ctx context.Context, userID uuid.UUID, a Assumpt
 		return budgetContext{}, err
 	}
 	existing := 0.0
-	for _, p := range active {
+	for i := range active {
+		p := &active[i]
 		terms, ok, err := s.latestTerms(ctx, p.ID)
 		if err != nil {
 			return budgetContext{}, err
@@ -522,7 +525,7 @@ func planResponse(p financingdb.FinancingPlan, terms OfferTerms) PlanResponse {
 
 func (s *service) validatePlan(r PlanRequest) error {
 	if strings.TrimSpace(r.Title) == "" ||
-		strings.ToUpper(r.Currency) != marketCurrency[r.Market] ||
+		strings.ToUpper(r.Currency) != marketCurrency[r.Market] || //nolint:gocritic // uppercased() ==, as Swift
 		!(r.UserSharePercent >= 0 && r.UserSharePercent <= 100) {
 		return httpx.BadRequest("Invalid financing plan.")
 	}

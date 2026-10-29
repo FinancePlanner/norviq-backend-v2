@@ -129,8 +129,8 @@ func (c calculator) simulate(req SimulationRequest, assumptions Assumptions, bud
 		return SimulationResponse{}, errInvalidOffer
 	}
 	results := make([]OfferSimulation, 0, len(req.Offers))
-	for _, offer := range req.Offers {
-		r, err := c.simulateOffer(offer, req.Market, req.PurchaseType, currency, assumptions, budget)
+	for i := range req.Offers {
+		r, err := c.simulateOffer(req.Offers[i], req.Market, req.PurchaseType, currency, assumptions, budget)
 		if err != nil {
 			return SimulationResponse{}, err
 		}

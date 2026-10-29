@@ -19,19 +19,19 @@ var (
 	purchaseTypes = []string{"vehicle", "home", "utility", "education", "other"}
 	rateTypes     = []string{"fixed", "variable", "unknown"}
 	cadences      = []string{"one_time", "monthly", "annual"}
-	planStatuses  = []string{"active", "paused", "completed", "cancelled"}
+	planStatuses  = []string{"active", "paused", "completed", "cancelled"} //nolint:misspell // wire value
 	incomeScopes  = []string{"personal", "household"}
 )
 
 const (
 	statusActive    = "active"
-	statusCancelled = "cancelled"
+	statusCancelled = "cancelled" //nolint:misspell // wire value
 
 	installmentProjected = "projected"
 	installmentDue       = "due"
 	installmentOverdue   = "overdue"
 	installmentMatched   = "matched"
-	installmentCancelled = "cancelled"
+	installmentCancelled = "cancelled" //nolint:misspell // wire value
 )
 
 func checkEnum(value string, allowed []string, typ, path string) error {

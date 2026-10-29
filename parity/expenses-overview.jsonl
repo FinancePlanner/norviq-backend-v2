@@ -1,0 +1,11 @@
+# GET /v1/reports/overview. Load parity/expenses-core-setup.sql, then
+# parity/expenses-overview-setup.sql, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18112 -jwt-secret parity-secret \
+#     -cases parity/expenses-overview.jsonl -ignore requestId,generatedAt
+{"name":"overview-free-budget","path":"/v1/reports/overview","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"overview-free-budget-range","path":"/v1/reports/overview?from=2026-07-01&to=2026-08-31","as":"e5d00000-0000-4000-8000-000000000001"}
+{"name":"overview-pro-recurring","path":"/v1/reports/overview","as":"e5d00000-0000-4000-8000-000000000002"}
+{"name":"overview-empty","path":"/v1/reports/overview","as":"e5d00000-0000-4000-8000-000000000003"}
+{"name":"overview-holdings","path":"/v1/reports/overview","as":"e5f00000-0000-4000-8000-000000000001"}
+{"name":"overview-bad-range","path":"/v1/reports/overview?from=garbage&to=2026-13-45","as":"e5f00000-0000-4000-8000-000000000001"}
+{"name":"overview-anonymous","path":"/v1/reports/overview"}

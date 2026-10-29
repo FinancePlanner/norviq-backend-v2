@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
+	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
@@ -51,6 +52,8 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// BudgetingEngineController (drift, reallocations, templates).
+		budgeting.Feature{},
 	}
 }
 

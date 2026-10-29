@@ -1,0 +1,66 @@
+# Budgeting engine (BudgetingEngineController). Load parity/expenses-budgeting-setup.sql first, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18115 -jwt-secret parity-secret \
+#     -cases parity/expenses-budgeting.jsonl -ignore requestId,quoteAsOf
+# Writes are made repeatable by the setup triggers (revisions held at 0,
+# same-named templates replaced, the disposable template restored) or by a
+# fixed requestId (the second backend replays the first one's event).
+# ---- drift
+{"name":"drift-july","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d1/drift","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"drift-usd-empty","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d4/drift","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"drift-free-user-allowed-404","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d1/drift","as":"e5c00000-0000-4000-8000-000000000001"}
+{"name":"drift-bad-uuid","path":"/v1/budget/snapshots/nope/drift","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"drift-unauthenticated","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d1/drift"}
+# ---- discipline
+{"name":"discipline-4","path":"/v1/budget/discipline?through=2026-08-15&months=4","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"discipline-bad-months","path":"/v1/budget/discipline?through=2026-08-15&months=abc","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"discipline-clamped","path":"/v1/budget/discipline?through=2026-07-01&months=99","as":"e5c00000-0000-4000-8000-000000000002"}
+# ---- dca capacity
+{"name":"dca-get-default","path":"/v1/budget/dca-capacity","as":"e5c00000-0000-4000-8000-000000000001"}
+{"name":"dca-put-ok","method":"PUT","path":"/v1/budget/dca-capacity","as":"e5c00000-0000-4000-8000-000000000003","body":{"symbol":" iwda "}}
+{"name":"dca-get-preference","path":"/v1/budget/dca-capacity","as":"e5c00000-0000-4000-8000-000000000003"}
+{"name":"dca-put-invalid","method":"PUT","path":"/v1/budget/dca-capacity","as":"e5c00000-0000-4000-8000-000000000003","body":{"symbol":"nope!"}}
+{"name":"dca-put-missing-key","method":"PUT","path":"/v1/budget/dca-capacity","as":"e5c00000-0000-4000-8000-000000000003","body":{}}
+# ---- alert policy
+{"name":"policy-ok","method":"PUT","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d4/alert-policy","as":"e5c00000-0000-4000-8000-000000000002","body":{"categoryThreshold":22,"totalThreshold":8,"alertsEnabled":false,"alertOnUnbudgeted":true}}
+{"name":"policy-out-of-range","method":"PUT","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d4/alert-policy","as":"e5c00000-0000-4000-8000-000000000002","body":{"categoryThreshold":1001,"totalThreshold":8,"alertsEnabled":false,"alertOnUnbudgeted":true}}
+{"name":"policy-not-found","method":"PUT","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000ff/alert-policy","as":"e5c00000-0000-4000-8000-000000000002","body":{"categoryThreshold":10,"totalThreshold":8,"alertsEnabled":false,"alertOnUnbudgeted":true}}
+{"name":"policy-missing-key","method":"PUT","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000000d4/alert-policy","as":"e5c00000-0000-4000-8000-000000000002","body":{"categoryThreshold":10,"totalThreshold":8,"alertsEnabled":false}}
+# ---- bulk targets (snapshot 3d3, revision held at 0)
+{"name":"bulk-ok","method":"PATCH","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000003d3/items","as":"e5c00000-0000-4000-8000-000000000003","body":{"expectedRevision":0,"items":[{"id":"e5c00000-0000-4000-8000-0000000003e3","plannedAmount":0,"targetType":"percentageIncome","incomePercentage":5,"thresholdOverride":10,"reallocationEligible":true}]}}
+{"name":"bulk-stale-revision","method":"PATCH","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000003d3/items","as":"e5c00000-0000-4000-8000-000000000003","body":{"expectedRevision":7,"items":[]}}
+{"name":"bulk-invalid-item","method":"PATCH","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000003d3/items","as":"e5c00000-0000-4000-8000-000000000003","body":{"expectedRevision":0,"items":[{"id":"e5c00000-0000-4000-8000-0000000000e1","plannedAmount":1,"targetType":"fixed","reallocationEligible":false}]}}
+{"name":"bulk-invalid-percentage","method":"PATCH","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000003d3/items","as":"e5c00000-0000-4000-8000-000000000003","body":{"expectedRevision":0,"items":[{"id":"e5c00000-0000-4000-8000-0000000003e3","plannedAmount":1,"targetType":"percentageIncome","reallocationEligible":false}]}}
+{"name":"bulk-free-user","method":"PATCH","path":"/v1/budget/snapshots/e5c00000-0000-4000-8000-0000000003d3/items","as":"e5c00000-0000-4000-8000-000000000001","body":{"expectedRevision":0,"items":[]}}
+# ---- reallocation preview (pure)
+{"name":"preview-ok","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000000e1","amount":60.555}],"portfolioListId":"e5c00000-0000-4000-8000-0000000000a2"}}
+{"name":"preview-empty","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[]}}
+{"name":"preview-ineligible","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000000e3","amount":10}]}}
+{"name":"preview-stale","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":4,"adjustments":[]}}
+{"name":"preview-bad-portfolio","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000000e1","amount":5}],"portfolioListId":"e5c00000-0000-4000-8000-0000000000a3"}}
+{"name":"preview-bad-goal","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000000e1","amount":5}],"financialGoalId":"not-a-uuid"}}
+{"name":"preview-unknown-snapshot","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000ff","expectedRevision":0,"adjustments":[]}}
+{"name":"preview-missing-key","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000002","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0}}
+{"name":"preview-free-user","method":"POST","path":"/v1/budget/reallocations/preview","as":"e5c00000-0000-4000-8000-000000000001","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000000d1","expectedRevision":0,"adjustments":[]}}
+# ---- reallocation commit + history
+{"name":"commit-ok-then-replay","method":"POST","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000003","body":{"requestId":"e5c00000-0000-4000-8000-000000000301","preview":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d1","expectedRevision":0,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000003e1","amount":50}],"portfolioListId":"e5c00000-0000-4000-8000-0000000000a3"}}}
+{"name":"commit-stale","method":"POST","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000003","body":{"requestId":"e5c00000-0000-4000-8000-000000000302","preview":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d1","expectedRevision":9,"adjustments":[{"planItemId":"e5c00000-0000-4000-8000-0000000003e1","amount":50}]}}}
+{"name":"commit-bad-request-id","method":"POST","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000003","body":{"requestId":"nope","preview":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d1","expectedRevision":0,"adjustments":[]}}}
+{"name":"commit-missing-preview","method":"POST","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000003","body":{"requestId":"e5c00000-0000-4000-8000-000000000303"}}
+{"name":"history-seeded","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"history-after-commit","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000003"}
+{"name":"history-free-user","path":"/v1/budget/reallocations","as":"e5c00000-0000-4000-8000-000000000001"}
+# ---- templates
+{"name":"templates-list","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000002"}
+{"name":"templates-free-user","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000001"}
+{"name":"template-update-ok","method":"PUT","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000000b2","as":"e5c00000-0000-4000-8000-000000000002","body":{"name":" Legacy ","items":[{"title":"Rent","plannedAmount":900,"pillar":"Fundamentals","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-update-not-found","method":"PUT","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000000bf","as":"e5c00000-0000-4000-8000-000000000002","body":{"name":"X","items":[{"title":"Rent","plannedAmount":900,"pillar":"fun","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-create-invalid","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"  ","items":[]}}
+{"name":"template-create-negative","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Neg","items":[{"title":"A","plannedAmount":-1,"pillar":"fun","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-create-bad-enum","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Enum","items":[{"title":"A","plannedAmount":1,"pillar":"fun","targetType":"weekly","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-delete-ok","method":"DELETE","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b2","as":"e5c00000-0000-4000-8000-000000000003"}
+{"name":"template-delete-not-found","method":"DELETE","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003bf","as":"e5c00000-0000-4000-8000-000000000003"}
+{"name":"template-delete-bad-uuid","method":"DELETE","path":"/v1/budget/templates/zzz","as":"e5c00000-0000-4000-8000-000000000003"}
+{"name":"template-apply-conflict","method":"POST","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b1/apply","as":"e5c00000-0000-4000-8000-000000000003","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d2","expectedRevision":0,"replaceExisting":false}}
+{"name":"template-apply-stale","method":"POST","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b1/apply","as":"e5c00000-0000-4000-8000-000000000003","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d2","expectedRevision":3,"replaceExisting":true}}
+{"name":"template-apply-bad-snapshot","method":"POST","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b1/apply","as":"e5c00000-0000-4000-8000-000000000003","body":{"snapshotId":"x","expectedRevision":0,"replaceExisting":true}}
+{"name":"template-apply-missing-key","method":"POST","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b1/apply","as":"e5c00000-0000-4000-8000-000000000003","body":{"snapshotId":"e5c00000-0000-4000-8000-0000000003d2","expectedRevision":0}}

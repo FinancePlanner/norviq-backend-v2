@@ -15,7 +15,9 @@ import (
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
+	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
@@ -36,6 +38,10 @@ func All() []server.Feature {
 		feedback.Feature{},
 		assets.Feature{},
 		aiplatform.Feature{},
+		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
+		earnings.Feature{},
 	}
 }
 
@@ -50,6 +56,7 @@ type Job interface {
 func AllJobs() []Job {
 	return []Job{
 		billing.TrialExpirationJob{},
+		market.HistoryIngestionJob{},
 	}
 }
 

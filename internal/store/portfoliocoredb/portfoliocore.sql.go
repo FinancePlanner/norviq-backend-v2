@@ -58,6 +58,35 @@ func (q *Queries) AccountByUserPortfolioBroker(ctx context.Context, arg AccountB
 	return items, nil
 }
 
+const accountIDsForPortfolioBroker = `-- name: AccountIDsForPortfolioBroker :many
+SELECT id FROM accounts WHERE portfolio_id = $1 AND broker = $2
+`
+
+type AccountIDsForPortfolioBrokerParams struct {
+	PortfolioID *uuid.UUID
+	Broker      string
+}
+
+func (q *Queries) AccountIDsForPortfolioBroker(ctx context.Context, arg AccountIDsForPortfolioBrokerParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, accountIDsForPortfolioBroker, arg.PortfolioID, arg.Broker)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const accountIDsForUser = `-- name: AccountIDsForUser :many
 SELECT id FROM accounts WHERE user_id = $1
 `
@@ -262,6 +291,47 @@ func (q *Queries) DefaultPortfolioList(ctx context.Context, userID uuid.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const deleteAccountByID = `-- name: DeleteAccountByID :exec
+DELETE FROM accounts WHERE id = $1
+`
+
+func (q *Queries) DeleteAccountByID(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAccountByID, id)
+	return err
+}
+
+const deleteCashBalancesForAccountID = `-- name: DeleteCashBalancesForAccountID :exec
+DELETE FROM cash_balances WHERE account_id = $1
+`
+
+func (q *Queries) DeleteCashBalancesForAccountID(ctx context.Context, accountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCashBalancesForAccountID, accountID)
+	return err
+}
+
+const deleteStocksInListBySource = `-- name: DeleteStocksInListBySource :exec
+DELETE FROM stocks WHERE portfolio_list_id = $1 AND source_provider = $2
+`
+
+type DeleteStocksInListBySourceParams struct {
+	PortfolioListID uuid.UUID
+	SourceProvider  *string
+}
+
+func (q *Queries) DeleteStocksInListBySource(ctx context.Context, arg DeleteStocksInListBySourceParams) error {
+	_, err := q.db.Exec(ctx, deleteStocksInListBySource, arg.PortfolioListID, arg.SourceProvider)
+	return err
+}
+
+const deleteTransactionsForAccountID = `-- name: DeleteTransactionsForAccountID :exec
+DELETE FROM transactions WHERE account_id = $1
+`
+
+func (q *Queries) DeleteTransactionsForAccountID(ctx context.Context, accountID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTransactionsForAccountID, accountID)
+	return err
 }
 
 const followedPortfolioListIDs = `-- name: FollowedPortfolioListIDs :many

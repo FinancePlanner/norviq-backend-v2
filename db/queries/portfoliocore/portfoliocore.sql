@@ -84,3 +84,18 @@ INSERT INTO accounts (
     $1, $2, $3, $4, $5, $6, $7, $8, $8
 )
 RETURNING *;
+
+-- name: DeleteStocksInListBySource :exec
+DELETE FROM stocks WHERE portfolio_list_id = $1 AND source_provider = $2;
+
+-- name: AccountIDsForPortfolioBroker :many
+SELECT id FROM accounts WHERE portfolio_id = $1 AND broker = $2;
+
+-- name: DeleteCashBalancesForAccountID :exec
+DELETE FROM cash_balances WHERE account_id = $1;
+
+-- name: DeleteTransactionsForAccountID :exec
+DELETE FROM transactions WHERE account_id = $1;
+
+-- name: DeleteAccountByID :exec
+DELETE FROM accounts WHERE id = $1;

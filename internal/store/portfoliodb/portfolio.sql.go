@@ -194,39 +194,6 @@ func (q *Queries) CountQuotesInRange(ctx context.Context, arg CountQuotesInRange
 	return count, err
 }
 
-const deleteAccount = `-- name: DeleteAccount :exec
-DELETE FROM accounts WHERE id = $1
-`
-
-func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAccount, id)
-	return err
-}
-
-const deleteCashBalancesForAccount = `-- name: DeleteCashBalancesForAccount :exec
-DELETE FROM cash_balances WHERE account_id = $1
-`
-
-func (q *Queries) DeleteCashBalancesForAccount(ctx context.Context, accountID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCashBalancesForAccount, accountID)
-	return err
-}
-
-const deletePilotStocksForPortfolio = `-- name: DeletePilotStocksForPortfolio :exec
-DELETE FROM stocks
-WHERE portfolio_list_id = $1 AND source_provider = $2::text
-`
-
-type DeletePilotStocksForPortfolioParams struct {
-	PortfolioListID uuid.UUID
-	PilotBroker     string
-}
-
-func (q *Queries) DeletePilotStocksForPortfolio(ctx context.Context, arg DeletePilotStocksForPortfolioParams) error {
-	_, err := q.db.Exec(ctx, deletePilotStocksForPortfolio, arg.PortfolioListID, arg.PilotBroker)
-	return err
-}
-
 const deletePortfolioList = `-- name: DeletePortfolioList :exec
 DELETE FROM portfolio_lists WHERE id = $1
 `
@@ -242,15 +209,6 @@ DELETE FROM stocks WHERE id = $1
 
 func (q *Queries) DeleteStock(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteStock, id)
-	return err
-}
-
-const deleteTransactionsForAccount = `-- name: DeleteTransactionsForAccount :exec
-DELETE FROM transactions WHERE account_id = $1
-`
-
-func (q *Queries) DeleteTransactionsForAccount(ctx context.Context, accountID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteTransactionsForAccount, accountID)
 	return err
 }
 
@@ -503,36 +461,6 @@ type MoveStockToListParams struct {
 func (q *Queries) MoveStockToList(ctx context.Context, arg MoveStockToListParams) error {
 	_, err := q.db.Exec(ctx, moveStockToList, arg.ID, arg.PortfolioListID, arg.UpdatedAt)
 	return err
-}
-
-const pilotAccountIDsForPortfolio = `-- name: PilotAccountIDsForPortfolio :many
-SELECT id FROM accounts
-WHERE portfolio_id = $1 AND broker = $2::text
-`
-
-type PilotAccountIDsForPortfolioParams struct {
-	PortfolioID *uuid.UUID
-	PilotBroker string
-}
-
-func (q *Queries) PilotAccountIDsForPortfolio(ctx context.Context, arg PilotAccountIDsForPortfolioParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, pilotAccountIDsForPortfolio, arg.PortfolioID, arg.PilotBroker)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const portfolioListsForUser = `-- name: PortfolioListsForUser :many

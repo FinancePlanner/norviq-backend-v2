@@ -21,12 +21,8 @@ type Querier interface {
 	// MARK: portfolio lists
 	CountPortfolioListsForUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountQuotesInRange(ctx context.Context, arg CountQuotesInRangeParams) (int64, error)
-	DeleteAccount(ctx context.Context, id uuid.UUID) error
-	DeleteCashBalancesForAccount(ctx context.Context, accountID uuid.UUID) error
-	DeletePilotStocksForPortfolio(ctx context.Context, arg DeletePilotStocksForPortfolioParams) error
 	DeletePortfolioList(ctx context.Context, id uuid.UUID) error
 	DeleteStock(ctx context.Context, id uuid.UUID) error
-	DeleteTransactionsForAccount(ctx context.Context, accountID uuid.UUID) error
 	DuplicateStockInList(ctx context.Context, arg DuplicateStockInListParams) ([]Stock, error)
 	InsertShareLink(ctx context.Context, arg InsertShareLinkParams) (PortfolioShareLink, error)
 	InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) error
@@ -36,7 +32,6 @@ type Querier interface {
 	// MARK: ledger reads (/v1/lots)
 	LotsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]Lot, error)
 	MoveStockToList(ctx context.Context, arg MoveStockToListParams) error
-	PilotAccountIDsForPortfolio(ctx context.Context, arg PilotAccountIDsForPortfolioParams) ([]uuid.UUID, error)
 	PortfolioListsForUser(ctx context.Context, userID uuid.UUID) ([]PortfolioList, error)
 	RenamePortfolioList(ctx context.Context, arg RenamePortfolioListParams) (PortfolioList, error)
 	ResearchNotesForSymbols(ctx context.Context, arg ResearchNotesForSymbolsParams) ([]ResearchNote, error)

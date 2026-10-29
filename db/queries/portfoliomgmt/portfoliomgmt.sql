@@ -39,21 +39,6 @@ SELECT count(*) FROM accounts WHERE portfolio_id = $1;
 -- name: CountAccountsInPortfolioExceptBroker :one
 SELECT count(*) FROM accounts WHERE portfolio_id = $1 AND broker <> $2;
 
--- name: AccountIDsInPortfolioByBroker :many
-SELECT id FROM accounts WHERE portfolio_id = $1 AND broker = $2;
-
--- name: DeleteStocksInPortfolioBySource :exec
-DELETE FROM stocks WHERE portfolio_list_id = $1 AND source_provider = $2;
-
--- name: DeleteCashBalancesForAccount :exec
-DELETE FROM cash_balances WHERE account_id = $1;
-
--- name: DeleteTransactionsForAccount :exec
-DELETE FROM transactions WHERE account_id = $1;
-
--- name: DeleteAccount :exec
-DELETE FROM accounts WHERE id = $1;
-
 -- name: AccountsInPortfolio :many
 SELECT * FROM accounts WHERE portfolio_id = $1;
 

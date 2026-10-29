@@ -55,23 +55,6 @@ DELETE FROM portfolio_lists WHERE id = $1;
 SELECT count(*) FROM accounts
 WHERE portfolio_id = $1 AND broker <> sqlc.arg(pilot_broker)::text;
 
--- name: DeletePilotStocksForPortfolio :exec
-DELETE FROM stocks
-WHERE portfolio_list_id = $1 AND source_provider = sqlc.arg(pilot_broker)::text;
-
--- name: PilotAccountIDsForPortfolio :many
-SELECT id FROM accounts
-WHERE portfolio_id = $1 AND broker = sqlc.arg(pilot_broker)::text;
-
--- name: DeleteCashBalancesForAccount :exec
-DELETE FROM cash_balances WHERE account_id = $1;
-
--- name: DeleteTransactionsForAccount :exec
-DELETE FROM transactions WHERE account_id = $1;
-
--- name: DeleteAccount :exec
-DELETE FROM accounts WHERE id = $1;
-
 -- name: DuplicateStockInList :many
 SELECT * FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 AND id <> sqlc.arg(exclude_id)::uuid

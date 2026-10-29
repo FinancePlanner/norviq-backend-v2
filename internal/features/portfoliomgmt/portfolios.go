@@ -421,7 +421,7 @@ func (h *handlers) delete(c *echo.Context) error {
 			return httpx.Conflict("Move connected accounts to another portfolio before deleting this portfolio.")
 		}
 		if !followed {
-			if err := removePilotLeftovers(ctx, q, id); err != nil {
+			if err := portfolios.RemovePilotLeftovers(ctx, tx, id); err != nil {
 				return err
 			}
 		}
@@ -433,30 +433,6 @@ func (h *handlers) delete(c *echo.Context) error {
 		return err
 	}
 	return httpx.NoContent(c)
-}
-
-// removePilotLeftovers is PilotPortfolioLeftovers.remove.
-func removePilotLeftovers(ctx context.Context, q *portfoliomgmtdb.Queries, listID uuid.UUID) error {
-	broker := portfolios.PilotBroker
-	if err := q.DeleteStocksInPortfolioBySource(ctx, portfoliomgmtdb.DeleteStocksInPortfolioBySourceParams{PortfolioListID: listID, SourceProvider: &broker}); err != nil {
-		return err
-	}
-	ids, err := q.AccountIDsInPortfolioByBroker(ctx, portfoliomgmtdb.AccountIDsInPortfolioByBrokerParams{PortfolioID: &listID, Broker: broker})
-	if err != nil {
-		return err
-	}
-	for _, accountID := range ids {
-		if err := q.DeleteCashBalancesForAccount(ctx, accountID); err != nil {
-			return err
-		}
-		if err := q.DeleteTransactionsForAccount(ctx, accountID); err != nil {
-			return err
-		}
-		if err := q.DeleteAccount(ctx, accountID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // POST /v1/portfolios/:portfolioId/clone

@@ -12,7 +12,6 @@ import (
 
 type Querier interface {
 	AcceptInvitation(ctx context.Context, arg AcceptInvitationParams) error
-	AccountIDsInPortfolioByBroker(ctx context.Context, arg AccountIDsInPortfolioByBrokerParams) ([]uuid.UUID, error)
 	AccountsInPortfolio(ctx context.Context, portfolioID *uuid.UUID) ([]Account, error)
 	ActivateMembership(ctx context.Context, arg ActivateMembershipParams) (PortfolioMembership, error)
 	ActiveMembershipByID(ctx context.Context, arg ActiveMembershipByIDParams) ([]PortfolioMembership, error)
@@ -28,12 +27,8 @@ type Querier interface {
 	CountActiveMemberships(ctx context.Context, portfolioID uuid.UUID) (int64, error)
 	CountActiveOwnedPortfolioLists(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountPendingInvitations(ctx context.Context, portfolioID uuid.UUID) (int64, error)
-	DeleteAccount(ctx context.Context, id uuid.UUID) error
-	DeleteCashBalancesForAccount(ctx context.Context, accountID uuid.UUID) error
 	DeleteCashPosition(ctx context.Context, id uuid.UUID) error
 	DeletePortfolioList(ctx context.Context, id uuid.UUID) error
-	DeleteStocksInPortfolioBySource(ctx context.Context, arg DeleteStocksInPortfolioBySourceParams) error
-	DeleteTransactionsForAccount(ctx context.Context, accountID uuid.UUID) error
 	InsertCashPosition(ctx context.Context, arg InsertCashPositionParams) (PortfolioCashPosition, error)
 	InsertInvitation(ctx context.Context, arg InsertInvitationParams) (PortfolioInvitation, error)
 	InsertMembership(ctx context.Context, arg InsertMembershipParams) (PortfolioMembership, error)

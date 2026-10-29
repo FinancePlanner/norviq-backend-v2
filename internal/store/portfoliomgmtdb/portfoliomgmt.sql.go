@@ -26,35 +26,6 @@ func (q *Queries) AcceptInvitation(ctx context.Context, arg AcceptInvitationPara
 	return err
 }
 
-const accountIDsInPortfolioByBroker = `-- name: AccountIDsInPortfolioByBroker :many
-SELECT id FROM accounts WHERE portfolio_id = $1 AND broker = $2
-`
-
-type AccountIDsInPortfolioByBrokerParams struct {
-	PortfolioID *uuid.UUID
-	Broker      string
-}
-
-func (q *Queries) AccountIDsInPortfolioByBroker(ctx context.Context, arg AccountIDsInPortfolioByBrokerParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, accountIDsInPortfolioByBroker, arg.PortfolioID, arg.Broker)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const accountsInPortfolio = `-- name: AccountsInPortfolio :many
 SELECT id, user_id, external_id, broker, display_name, base_currency, created_at, updated_at, tax_wrapper, tax_jurisdiction, tax_owner_member_id, lot_selection_method, portfolio_id FROM accounts WHERE portfolio_id = $1
 `
@@ -460,24 +431,6 @@ func (q *Queries) CountPendingInvitations(ctx context.Context, portfolioID uuid.
 	return count, err
 }
 
-const deleteAccount = `-- name: DeleteAccount :exec
-DELETE FROM accounts WHERE id = $1
-`
-
-func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAccount, id)
-	return err
-}
-
-const deleteCashBalancesForAccount = `-- name: DeleteCashBalancesForAccount :exec
-DELETE FROM cash_balances WHERE account_id = $1
-`
-
-func (q *Queries) DeleteCashBalancesForAccount(ctx context.Context, accountID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCashBalancesForAccount, accountID)
-	return err
-}
-
 const deleteCashPosition = `-- name: DeleteCashPosition :exec
 DELETE FROM portfolio_cash_positions WHERE id = $1
 `
@@ -493,29 +446,6 @@ DELETE FROM portfolio_lists WHERE id = $1
 
 func (q *Queries) DeletePortfolioList(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deletePortfolioList, id)
-	return err
-}
-
-const deleteStocksInPortfolioBySource = `-- name: DeleteStocksInPortfolioBySource :exec
-DELETE FROM stocks WHERE portfolio_list_id = $1 AND source_provider = $2
-`
-
-type DeleteStocksInPortfolioBySourceParams struct {
-	PortfolioListID uuid.UUID
-	SourceProvider  *string
-}
-
-func (q *Queries) DeleteStocksInPortfolioBySource(ctx context.Context, arg DeleteStocksInPortfolioBySourceParams) error {
-	_, err := q.db.Exec(ctx, deleteStocksInPortfolioBySource, arg.PortfolioListID, arg.SourceProvider)
-	return err
-}
-
-const deleteTransactionsForAccount = `-- name: DeleteTransactionsForAccount :exec
-DELETE FROM transactions WHERE account_id = $1
-`
-
-func (q *Queries) DeleteTransactionsForAccount(ctx context.Context, accountID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteTransactionsForAccount, accountID)
 	return err
 }
 

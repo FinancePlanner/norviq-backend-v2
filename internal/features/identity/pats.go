@@ -141,7 +141,8 @@ func (s *service) listPATs(c *echo.Context) error {
 		return err
 	}
 	items := make([]patSummary, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		scopes := r.Scopes
 		if scopes == nil {
 			scopes = []string{}

@@ -423,7 +423,7 @@ func (s *service) generateOAuthUsername(ctx context.Context, suggested *string, 
 	for attempt := range 10 {
 		candidate := base
 		if attempt > 0 {
-			suffix := fmt.Sprintf("%d", 1000+rand.IntN(9000))
+			suffix := fmt.Sprintf("%d", 1000+rand.IntN(9000)) //nolint:gosec // username suffix, not a secret (Vapor: Int.random)
 			candidate = runePrefix(base, max(4, 30-len(suffix))) + suffix
 		}
 		u, err := s.users.ByUsername(ctx, nil, candidate)

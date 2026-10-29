@@ -331,13 +331,13 @@ func (h *harness) svcPII() (*crypto.PII, error) {
 
 // startFlow runs /oauth/:provider/start (or link/start with a token) and
 // primes the stub with the flow's nonce. It returns the flow id and state.
-func (h *harness) startFlow(provider, redirect, token string) (flowID, state string) {
+func (h *harness) startFlow(provider, token string) (flowID, state string) {
 	h.t.Helper()
 	path := "/v1/auth/oauth/" + provider + "/start"
 	if token != "" {
 		path = "/v1/auth/oauth/" + provider + "/link/start"
 	}
-	r := h.req("POST", path, token, map[string]any{"redirectURI": redirect}, nil)
+	r := h.req("POST", path, token, map[string]any{"redirectURI": nativeRedirect}, nil)
 	if r.Status != 200 {
 		h.t.Fatalf("start: %d %s", r.Status, r.Body)
 	}
@@ -356,13 +356,13 @@ func (h *harness) startFlow(provider, redirect, token string) (flowID, state str
 	return out.FlowID, state
 }
 
-func (h *harness) exchange(provider, flowID, state, redirect, token string, headers map[string]string) *testutil.Response {
+func (h *harness) exchange(provider, flowID, state, token string, headers map[string]string) *testutil.Response {
 	h.t.Helper()
 	path := "/v1/auth/oauth/" + provider + "/exchange"
 	if token != "" {
 		path = "/v1/auth/oauth/" + provider + "/link/exchange"
 	}
 	return h.req("POST", path, token, map[string]any{
-		"flowId": flowID, "code": "auth-code", "state": state, "redirectURI": redirect,
+		"flowId": flowID, "code": "auth-code", "state": state, "redirectURI": nativeRedirect,
 	}, headers)
 }

@@ -62,7 +62,6 @@ type Settings struct {
 	IntrospectionSecret string // MCP_INTROSPECTION_SECRET
 	IssuerURL           string // OAUTH_ISSUER_URL
 	ConsentURL          string // OAUTH_CONSENT_URL
-
 }
 
 func envInt(key string, def int) int {
@@ -74,7 +73,7 @@ func envInt(key string, def int) int {
 
 func envTrimmed(key string) string { return strings.TrimSpace(os.Getenv(key)) }
 
-// envBoolDefault is Vapor's envBool: unset or unrecognised keeps the default.
+// envBoolDefault is Vapor's envBool: unset or unrecognized keeps the default.
 func envBoolDefault(key string, def bool) bool {
 	raw, ok := os.LookupEnv(key)
 	if !ok {

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -46,7 +47,7 @@ type mfaResendRequest struct {
 var sixDigits = regexp.MustCompile(`^[0-9]{6}$`)
 
 func (s *service) testFlightApplies(email string) bool {
-	return s.cfg.TestFlightBypass && strings.ToLower(email) == testFlightEmail
+	return s.cfg.TestFlightBypass && strings.EqualFold(email, testFlightEmail)
 }
 
 func (s *service) mfaVerify(c *echo.Context) error {
@@ -141,7 +142,7 @@ func (s *service) mfaResend(c *echo.Context) error {
 
 func (s *service) activeChallenge(ctx context.Context, q *identitydb.Queries, id uuid.UUID, now time.Time) (identitydb.MfaChallenge, error) {
 	ch, err := q.MFAChallengeByID(ctx, id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ch, unauthorized("Invalid or expired verification challenge.")
 	}
 	if err != nil {

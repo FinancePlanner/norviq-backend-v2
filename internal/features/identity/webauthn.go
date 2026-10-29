@@ -196,12 +196,12 @@ func (s *service) webAuthnLoginVerify(c *echo.Context) error {
 		return err
 	}
 	newCount := parsed.Response.AuthenticatorData.Counter
-	current := uint32(stored.SignCount)
+	current := uint32(stored.SignCount) //nolint:gosec // stored counts are never negative
 	if (newCount > 0 || current > 0) && newCount <= current {
 		return errors.New("potentialReplayAttack")
 	}
 	now := s.now()
-	if err := q.SetWebAuthnSignCount(ctx, identitydb.SetWebAuthnSignCountParams{ID: stored.ID, SignCount: int32(newCount), UpdatedAt: &now}); err != nil {
+	if err := q.SetWebAuthnSignCount(ctx, identitydb.SetWebAuthnSignCountParams{ID: stored.ID, SignCount: int32(newCount), UpdatedAt: &now}); err != nil { //nolint:gosec // int4 column, as Vapor
 		return err
 	}
 	if err := q.DeleteWebAuthnLoginChallenge(ctx, row.ID); err != nil {
@@ -318,7 +318,7 @@ func (s *service) webAuthnRegisterVerify(c *echo.Context) error {
 	now := s.now()
 	if err := q.InsertWebAuthnCredential(ctx, identitydb.InsertWebAuthnCredentialParams{
 		ID: uuid.New(), UserID: u.ID, CredentialID: credentialID, PublicKey: att.AttData.CredentialPublicKey,
-		SignCount: int32(att.Counter), CreatedAt: now,
+		SignCount: int32(att.Counter), CreatedAt: now, //nolint:gosec // int4 column, as Vapor
 	}); err != nil {
 		return err
 	}

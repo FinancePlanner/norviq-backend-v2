@@ -105,8 +105,10 @@ func (h *harness) oauthClient(redirect string) string {
 
 func (h *harness) authorize(clientID, redirect, challenge, scope string) string {
 	h.t.Helper()
-	q := url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {redirect},
-		"scope": {scope}, "state": {"st8"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+	q := url.Values{
+		"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {redirect},
+		"scope": {scope}, "state": {"st8"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"},
+	}
 	r := h.req("GET", "/v1/oauth/authorize?"+q.Encode(), "", nil, nil)
 	if r.Status != 303 {
 		h.t.Fatalf("authorize: %d %s", r.Status, r.Body)
@@ -179,8 +181,10 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	r = h.Do("POST", "/v1/oauth/flows/"+flowID+"/approve", a.Token, nil)
 	r.JSON(t, &appr)
 	loc, _ = url.Parse(appr.RedirectURL)
-	r = h.Do("POST", "/v1/oauth/token", "", map[string]any{"grant_type": "authorization_code", "code": loc.Query().Get("code"),
-		"redirect_uri": redirect, "client_id": client, "code_verifier": verifier})
+	r = h.Do("POST", "/v1/oauth/token", "", map[string]any{
+		"grant_type": "authorization_code", "code": loc.Query().Get("code"),
+		"redirect_uri": redirect, "client_id": client, "code_verifier": verifier,
+	})
 	var tok oauthTokenResponse
 	r.JSON(t, &tok)
 	if r.Header.Get("Cache-Control") != "no-store" || tok.TokenType != "Bearer" || tok.ExpiresIn != 3600 ||
@@ -221,8 +225,10 @@ func TestApprovedCodeDiesWithRevocation(t *testing.T) {
 	var fp forgotPasswordResponse
 	r.JSON(t, &fp)
 	expect(t, h.Do("POST", "/v1/auth/reset-password", "", map[string]any{"email": "revoked@example.com", "code": *fp.ResetCode, "newPassword": "N3w!Password"}), 204, "")
-	expect(t, h.Do("POST", "/v1/oauth/token", "", map[string]any{"grant_type": "authorization_code", "code": loc.Query().Get("code"),
-		"redirect_uri": redirect, "client_id": client, "code_verifier": verifier}), 400, "invalid_grant")
+	expect(t, h.Do("POST", "/v1/oauth/token", "", map[string]any{
+		"grant_type": "authorization_code", "code": loc.Query().Get("code"),
+		"redirect_uri": redirect, "client_id": client, "code_verifier": verifier,
+	}), 400, "invalid_grant")
 }
 
 func TestAuthorizeAndConsentErrors(t *testing.T) {
@@ -231,8 +237,10 @@ func TestAuthorizeAndConsentErrors(t *testing.T) {
 	redirect := "https://client.example/cb"
 	client := h.oauthClient(redirect)
 	base := func() url.Values {
-		return url.Values{"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect},
-			"scope": {"market:read"}, "code_challenge": {"c"}, "code_challenge_method": {"S256"}}
+		return url.Values{
+			"response_type": {"code"}, "client_id": {client}, "redirect_uri": {redirect},
+			"scope": {"market:read"}, "code_challenge": {"c"}, "code_challenge_method": {"S256"},
+		}
 	}
 	try := func(mut func(url.Values), status int, why string) {
 		t.Helper()

@@ -62,10 +62,10 @@ func TestOAuthStartConfigurationErrors(t *testing.T) {
 
 func TestOAuthNewUserGoogle(t *testing.T) {
 	h := newHarness(t, withSettings(func(s *Settings) { s.MFA.Enabled = true }))
-	flow, state := h.startFlow("google", nativeRedirect, "")
+	flow, state := h.startFlow("google", "")
 	h.stub.set("google", map[string]any{"sub": "g-1", "email": "Fresh@Example.com", "email_verified": "true", "given_name": "Fresh Person"})
 	// OAuth never triggers MFA, even for a capable client with MFA on.
-	r := h.exchange("google", flow, state, nativeRedirect, "", map[string]string{"X-StockPlan-Client-Capabilities": "mfa-auth-v1"})
+	r := h.exchange("google", flow, state, "", map[string]string{"X-StockPlan-Client-Capabilities": "mfa-auth-v1"})
 	expect(t, r, 200, "")
 	var out AuthLoginOutcome
 	r.JSON(t, &out)
@@ -83,11 +83,11 @@ func TestOAuthNewUserGoogle(t *testing.T) {
 		t.Fatalf("token form %s", h.stub.forms[0])
 	}
 	// The flow is single-use.
-	expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 401, "OAuth flow is invalid or expired")
+	expect(t, h.exchange("google", flow, state, "", nil), 401, "OAuth flow is invalid or expired")
 
 	// Signing in again with the same identity reaches the same account.
-	flow, state = h.startFlow("google", nativeRedirect, "")
-	r = h.exchange("google", flow, state, nativeRedirect, "", nil)
+	flow, state = h.startFlow("google", "")
+	r = h.exchange("google", flow, state, "", nil)
 	var again AuthResponse
 	r.JSON(t, &again)
 	if again.UserID != out.Auth.UserID {
@@ -102,7 +102,7 @@ func TestOAuthNewUserGoogle(t *testing.T) {
 
 func TestOAuthExchangeChecks(t *testing.T) {
 	h := newHarness(t)
-	flow, state := h.startFlow("google", nativeRedirect, "")
+	flow, state := h.startFlow("google", "")
 	bad := func(body map[string]any, status int, why string) {
 		t.Helper()
 		expect(t, h.req("POST", "/v1/auth/oauth/google/exchange", "", body, nil), status, why)
@@ -112,10 +112,10 @@ func TestOAuthExchangeChecks(t *testing.T) {
 	bad(map[string]any{"flowId": flow, "code": "c", "state": "", "redirectURI": nativeRedirect}, 400, "OAuth state is required")
 	bad(map[string]any{"flowId": flow, "code": "c", "state": "wrong", "redirectURI": nativeRedirect}, 401, "OAuth state mismatch")
 	bad(map[string]any{"flowId": flow, "code": "c", "state": state, "redirectURI": "norviqa://other"}, 401, "OAuth redirect URI mismatch")
-	expect(t, h.exchange("apple", flow, state, nativeRedirect, "", nil), 401, "OAuth flow is invalid or expired")
+	expect(t, h.exchange("apple", flow, state, "", nil), 401, "OAuth flow is invalid or expired")
 
 	h.stub.set("google", map[string]any{"sub": "g-2", "email": "a@example.com", "email_verified": false})
-	expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 401, "Google account email must be verified")
+	expect(t, h.exchange("google", flow, state, "", nil), 401, "Google account email must be verified")
 	cases := []struct {
 		claims map[string]any
 		why    string
@@ -130,15 +130,15 @@ func TestOAuthExchangeChecks(t *testing.T) {
 		{map[string]any{"sub": "g", "email": " "}, "Google account did not return a usable email"},
 	}
 	for _, c := range cases {
-		flow, state := h.startFlow("google", nativeRedirect, "")
+		flow, state := h.startFlow("google", "")
 		h.stub.set("google", c.claims)
-		expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 401, c.why)
+		expect(t, h.exchange("google", flow, state, "", nil), 401, c.why)
 	}
-	flow, state = h.startFlow("google", nativeRedirect, "")
+	flow, state = h.startFlow("google", "")
 	h.stub.mu.Lock()
 	h.stub.tokenStatus = 400
 	h.stub.mu.Unlock()
-	expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 502, "Google token exchange failed (400)")
+	expect(t, h.exchange("google", flow, state, "", nil), 502, "Google token exchange failed (400)")
 }
 
 func TestOAuthLinksVerifiedEmailToExistingAccount(t *testing.T) {
@@ -150,9 +150,9 @@ func TestOAuthLinksVerifiedEmailToExistingAccount(t *testing.T) {
 			if _, err := h.Deps.DB.Exec(context.Background(), `UPDATE users SET email_verified_at = now() WHERE email='owner@example.com'`); err != nil {
 				t.Fatal(err)
 			}
-			flow, state := h.startFlow(provider, nativeRedirect, "")
+			flow, state := h.startFlow(provider, "")
 			h.stub.set(provider, map[string]any{"sub": provider + "-1", "email": "OWNER@example.com", "email_verified": true})
-			r := h.exchange(provider, flow, state, nativeRedirect, "", nil)
+			r := h.exchange(provider, flow, state, "", nil)
 			expect(t, r, 200, "")
 			var b AuthResponse
 			r.JSON(t, &b)
@@ -172,9 +172,9 @@ func TestOAuthSecuresUnverifiedSquatterAccount(t *testing.T) {
 	if _, err := h.Deps.DB.Exec(ctx, `INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, sign_count, created_at) VALUES (gen_random_uuid(), $1, 'cred', '\x00', 0, now())`, squatter.UserID.Std()); err != nil {
 		t.Fatal(err)
 	}
-	flow, state := h.startFlow("google", nativeRedirect, "")
+	flow, state := h.startFlow("google", "")
 	h.stub.set("google", map[string]any{"sub": "victim", "email": "victim@example.com", "email_verified": true})
-	expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 200, "")
+	expect(t, h.exchange("google", flow, state, "", nil), 200, "")
 	expect(t, h.Do("POST", "/v1/auth/login", "", map[string]any{"email": "victim@example.com", "password": goodPassword}), 401, "Invalid email or password")
 	expect(t, h.Do("GET", "/v1/auth/me", squatter.Token, nil), 401, "")
 	expect(t, h.Do("POST", "/v1/auth/refresh", "", map[string]any{"refreshToken": squatter.RefreshToken}), 401, "Invalid refresh token")
@@ -192,18 +192,18 @@ func TestOAuthSecuresUnverifiedSquatterAccount(t *testing.T) {
 func TestOAuthUnverifiedProviderEmail(t *testing.T) {
 	h := newHarness(t)
 	h.register("existing", "taken@example.com")
-	flow, state := h.startFlow("apple", nativeRedirect, "")
+	flow, state := h.startFlow("apple", "")
 	h.stub.set("apple", map[string]any{"sub": "a-1", "email": "taken@example.com", "email_verified": "false"})
-	expect(t, h.exchange("apple", flow, state, nativeRedirect, "", nil), 409, "ACCOUNT_EXISTS_LINK_REQUIRED")
-	flow, state = h.startFlow("apple", nativeRedirect, "")
+	expect(t, h.exchange("apple", flow, state, "", nil), 409, "ACCOUNT_EXISTS_LINK_REQUIRED")
+	flow, state = h.startFlow("apple", "")
 	h.stub.set("apple", map[string]any{"sub": "a-2", "email": "brandnew@example.com", "email_verified": false})
-	expect(t, h.exchange("apple", flow, state, nativeRedirect, "", nil), 409, "ACCOUNT_EXISTS_LINK_REQUIRED")
+	expect(t, h.exchange("apple", flow, state, "", nil), 409, "ACCOUNT_EXISTS_LINK_REQUIRED")
 	// No email at all (Apple private relay withheld, or X): a synthetic address.
-	flow, state = h.startFlow("x", nativeRedirect, "")
+	flow, state = h.startFlow("x", "")
 	h.stub.mu.Lock()
 	h.stub.xUser = map[string]any{"id": "X.42", "username": "xer"}
 	h.stub.mu.Unlock()
-	r := h.exchange("x", flow, state, nativeRedirect, "", nil)
+	r := h.exchange("x", flow, state, "", nil)
 	expect(t, r, 200, "")
 	var a AuthResponse
 	r.JSON(t, &a)
@@ -221,41 +221,41 @@ func TestOAuthLink(t *testing.T) {
 	b := h.register("other", "other@example.com")
 	expect(t, h.req("POST", "/v1/auth/oauth/google/link/start", "", map[string]any{"redirectURI": nativeRedirect}, nil), 401, "")
 
-	flow, state := h.startFlow("google", nativeRedirect, a.Token)
+	flow, state := h.startFlow("google", a.Token)
 	// A link flow cannot sign in, and belongs to its user.
-	expect(t, h.exchange("google", flow, state, nativeRedirect, "", nil), 401, "OAuth flow is not valid for sign in")
-	expect(t, h.exchange("google", flow, state, nativeRedirect, b.Token, nil), 401, "OAuth flow is not valid for this account")
+	expect(t, h.exchange("google", flow, state, "", nil), 401, "OAuth flow is not valid for sign in")
+	expect(t, h.exchange("google", flow, state, b.Token, nil), 401, "OAuth flow is not valid for this account")
 
 	h.stub.set("google", map[string]any{"sub": "g-link", "email": "someoneelse@example.com", "email_verified": true})
-	expect(t, h.exchange("google", flow, state, nativeRedirect, a.Token, nil), 409, "Provider email must match your account email")
+	expect(t, h.exchange("google", flow, state, a.Token, nil), 409, "Provider email must match your account email")
 
-	flow, state = h.startFlow("google", nativeRedirect, a.Token)
+	flow, state = h.startFlow("google", a.Token)
 	h.stub.set("google", map[string]any{"sub": "g-link", "email": "linker@example.com", "email_verified": true})
-	r := h.exchange("google", flow, state, nativeRedirect, a.Token, nil)
+	r := h.exchange("google", flow, state, a.Token, nil)
 	if r.Status != 200 || string(r.Body) != `{"provider":"google","connected":true,"email":"linker@example.com","message":"Connected account linked."}` {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	if h.userByEmail("linker@example.com").EmailVerifiedAt == nil {
 		t.Fatal("linking proves the mailbox")
 	}
-	flow, state = h.startFlow("google", nativeRedirect, a.Token)
-	r = h.exchange("google", flow, state, nativeRedirect, a.Token, nil)
+	flow, state = h.startFlow("google", a.Token)
+	r = h.exchange("google", flow, state, a.Token, nil)
 	if !strings.Contains(string(r.Body), "Connected account is already linked.") {
 		t.Fatalf("%s", r.Body)
 	}
-	flow, state = h.startFlow("google", nativeRedirect, a.Token)
+	flow, state = h.startFlow("google", a.Token)
 	h.stub.set("google", map[string]any{"sub": "g-second", "email": "linker@example.com", "email_verified": true})
-	expect(t, h.exchange("google", flow, state, nativeRedirect, a.Token, nil), 409, "Your account already has a different identity for this provider")
+	expect(t, h.exchange("google", flow, state, a.Token, nil), 409, "Your account already has a different identity for this provider")
 
-	flow, state = h.startFlow("google", nativeRedirect, b.Token)
+	flow, state = h.startFlow("google", b.Token)
 	h.stub.set("google", map[string]any{"sub": "g-link", "email": "other@example.com", "email_verified": true})
-	expect(t, h.exchange("google", flow, state, nativeRedirect, b.Token, nil), 409, "Provider identity is already linked to a different account")
+	expect(t, h.exchange("google", flow, state, b.Token, nil), 409, "Provider identity is already linked to a different account")
 
-	flow, state = h.startFlow("x", nativeRedirect, b.Token)
+	flow, state = h.startFlow("x", b.Token)
 	h.stub.mu.Lock()
 	h.stub.xUser = map[string]any{"id": "1"}
 	h.stub.mu.Unlock()
-	expect(t, h.exchange("x", flow, state, nativeRedirect, b.Token, nil), 409, "Provider did not return a verified email for linking")
+	expect(t, h.exchange("x", flow, state, b.Token, nil), 409, "Provider did not return a verified email for linking")
 }
 
 func TestOAuthCallbackBridges(t *testing.T) {

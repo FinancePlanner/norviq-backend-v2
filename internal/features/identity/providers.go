@@ -234,7 +234,7 @@ func (b *flexBool) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	b.v = strings.ToLower(s) == "true"
+	b.v = strings.EqualFold(s, "true")
 	return nil
 }
 
@@ -340,7 +340,7 @@ func validateJWTHeader(token, label string) (string, error) {
 	for k, v := range parsed {
 		header[strings.ToLower(k)] = v
 	}
-	if alg, _ := header["alg"].(string); strings.ToUpper(alg) != "RS256" {
+	if alg, _ := header["alg"].(string); !strings.EqualFold(alg, "RS256") {
 		return "", unauthorized(label + " id_token algorithm is invalid")
 	}
 	kid, _ := header["kid"].(string)
@@ -430,10 +430,16 @@ type googleProvider struct {
 
 func (g *googleProvider) AuthorizationURL(ac authContext) string {
 	return buildURL(g.ep.GoogleAuth, []queryItem{
-		{"client_id", g.cfg.ClientID}, {"redirect_uri", ac.RedirectURI}, {"response_type", "code"},
-		{"scope", "openid email profile"}, {"state", ac.State}, {"nonce", ac.Nonce},
-		{"code_challenge", ac.CodeChallenge}, {"code_challenge_method", "S256"},
-		{"prompt", "select_account"}, {"access_type", "offline"},
+		{"client_id", g.cfg.ClientID},
+		{"redirect_uri", ac.RedirectURI},
+		{"response_type", "code"},
+		{"scope", "openid email profile"},
+		{"state", ac.State},
+		{"nonce", ac.Nonce},
+		{"code_challenge", ac.CodeChallenge},
+		{"code_challenge_method", "S256"},
+		{"prompt", "select_account"},
+		{"access_type", "offline"},
 	})
 }
 
@@ -496,9 +502,15 @@ type appleProvider struct {
 
 func (a *appleProvider) AuthorizationURL(ac authContext) string {
 	return buildURL(a.ep.AppleAuth, []queryItem{
-		{"client_id", a.cfg.ClientID}, {"redirect_uri", ac.RedirectURI}, {"response_type", "code"},
-		{"response_mode", "form_post"}, {"scope", "name email"}, {"state", ac.State}, {"nonce", ac.Nonce},
-		{"code_challenge", ac.CodeChallenge}, {"code_challenge_method", "S256"},
+		{"client_id", a.cfg.ClientID},
+		{"redirect_uri", ac.RedirectURI},
+		{"response_type", "code"},
+		{"response_mode", "form_post"},
+		{"scope", "name email"},
+		{"state", ac.State},
+		{"nonce", ac.Nonce},
+		{"code_challenge", ac.CodeChallenge},
+		{"code_challenge_method", "S256"},
 	})
 }
 
@@ -586,8 +598,12 @@ type xProvider struct {
 
 func (x *xProvider) AuthorizationURL(ac authContext) string {
 	return buildURL(x.ep.XAuth, []queryItem{
-		{"response_type", "code"}, {"client_id", x.cfg.ClientID}, {"redirect_uri", ac.RedirectURI},
-		{"scope", x.scopes}, {"state", ac.State}, {"code_challenge", ac.CodeChallenge},
+		{"response_type", "code"},
+		{"client_id", x.cfg.ClientID},
+		{"redirect_uri", ac.RedirectURI},
+		{"scope", x.scopes},
+		{"state", ac.State},
+		{"code_challenge", ac.CodeChallenge},
 		{"code_challenge_method", "S256"},
 	})
 }

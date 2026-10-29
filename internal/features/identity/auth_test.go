@@ -39,11 +39,11 @@ func TestRegistration(t *testing.T) {
 		{"bad username", with("username", "ab"), 400, "Username must be 4-30 characters (letters, numbers, underscore)"},
 		{"reserved username", with("username", "norviq"), 400, "That username is reserved."},
 		{"invalid email", with("email", "nope"), 400, "Invalid email"},
-		{"short password", with("password", "Ab1!").with2("confirmPassword", "Ab1!"), 400, "Password must be at least 8 characters long"},
-		{"no upper", with("password", "abcdefg1!").with2("confirmPassword", "abcdefg1!"), 400, "Password must contain at least one uppercase letter"},
-		{"no lower", with("password", "ABCDEFG1!").with2("confirmPassword", "ABCDEFG1!"), 400, "Password must contain at least one lowercase letter"},
-		{"no digit", with("password", "Abcdefgh!").with2("confirmPassword", "Abcdefgh!"), 400, "Password must contain at least one number"},
-		{"no symbol", with("password", "Abcdefgh1").with2("confirmPassword", "Abcdefgh1"), 400, "Password must contain at least one special character"},
+		{"short password", with("password", "Ab1!").confirm("Ab1!"), 400, "Password must be at least 8 characters long"},
+		{"no upper", with("password", "abcdefg1!").confirm("abcdefg1!"), 400, "Password must contain at least one uppercase letter"},
+		{"no lower", with("password", "ABCDEFG1!").confirm("ABCDEFG1!"), 400, "Password must contain at least one lowercase letter"},
+		{"no digit", with("password", "Abcdefgh!").confirm("Abcdefgh!"), 400, "Password must contain at least one number"},
+		{"no symbol", with("password", "Abcdefgh1").confirm("Abcdefgh1"), 400, "Password must contain at least one special character"},
 		{"future dob", with("dateOfBirth", time.Now().Add(48*time.Hour).UTC().Format(time.RFC3339)), 400, "Date of birth cannot be in the future"},
 		{"missing username", with("username", nil), 400, `No such key 'username' at path ''. No value associated with key CodingKeys(stringValue: "username", intValue: nil) ("username").`},
 		{"missing confirm", with("confirmPassword", nil), 400, "No such key 'confirmPassword' at path ''. Missing confirmPassword."},
@@ -86,10 +86,10 @@ func TestRegistration(t *testing.T) {
 	expect(t, h.Do("POST", "/v1/auth/register", "", with("username", "another")), 409, "Email already registered")
 }
 
-// with2 lets a case override two keys.
+// body is a register payload; confirm sets confirmPassword too.
 type body map[string]any
 
-func (m body) with2(k string, v any) body { m[k] = v; return m }
+func (m body) confirm(v any) body { m["confirmPassword"] = v; return m }
 
 func TestLoginAndLockout(t *testing.T) {
 	h := newHarness(t)

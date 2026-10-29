@@ -118,7 +118,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		return err
 	}
 	session := []echoMW{d.Auth.Session(), auth.Guard()}
-	firstParty := append(session[:2:2], auth.FirstPartyOnly())
+	firstParty := []echoMW{session[0], session[1], auth.FirstPartyOnly()}
 	scoped := []echoMW{d.Auth.Scoped(), auth.Guard()}
 	lim := d.Limiter.Limit
 

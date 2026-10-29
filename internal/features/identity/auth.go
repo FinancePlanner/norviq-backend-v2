@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -63,7 +64,7 @@ const resetSentMessage = "If the account exists, a reset code has been sent."
 
 // keyNotFound reproduces the reason Vapor gives for a missing required key.
 func keyNotFound(key string) *httpx.Error {
-	return keyNotFoundDesc(key, fmt.Sprintf(`No value associated with key CodingKeys(stringValue: "%s", intValue: nil) ("%s")`, key, key))
+	return keyNotFoundDesc(key, fmt.Sprintf(`No value associated with key CodingKeys(stringValue: %q, intValue: nil) (%q)`, key, key))
 }
 
 // keyNotFoundDesc is keyNotFound for DTOs that throw their own description.
@@ -472,7 +473,7 @@ func (s *service) refresh(c *echo.Context) error {
 	now := s.now()
 	q := identitydb.New(s.d.DB)
 	stored, err := q.ValidRefreshToken(ctx, identitydb.ValidRefreshTokenParams{TokenHash: users.HashToken(*p.RefreshToken), ExpiresAt: now})
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return unauthorized("Invalid refresh token")
 	}
 	if err != nil {
@@ -588,7 +589,7 @@ func (s *service) resetPassword(c *echo.Context) error {
 	now := s.now()
 	q := identitydb.New(s.d.DB)
 	tok, err := q.LatestActivePasswordResetToken(ctx, identitydb.LatestActivePasswordResetTokenParams{UserID: u.ID, ExpiresAt: now})
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return unauthorized(invalid)
 	}
 	if err != nil {

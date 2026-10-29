@@ -27,3 +27,10 @@ SELECT trading_date, ai_topic, tags FROM board_posts
 WHERE ai_generated = true AND trading_date < $1 AND deleted_at IS NULL
 ORDER BY trading_date DESC
 LIMIT 60;
+
+-- name: DailyEveningBrief :many
+-- MarketBriefRepository.find(tradingDate:slot: .evening, language: "en"),
+-- which DailyBoardPostJob.waitingForBrief reads.
+SELECT payload FROM market_briefs
+WHERE trading_date = $1 AND slot = 'evening' AND language = 'en'
+LIMIT 1;

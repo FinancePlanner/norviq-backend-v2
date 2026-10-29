@@ -204,6 +204,8 @@ func AllJobs() []Job {
 		news.NotificationJob{},
 		// MacroRefreshJob.
 		macro.RefreshJob{},
+		// DailyBoardPostJob (also needs DAILY_BOARD_POST_ENABLED, as in Vapor).
+		boards.DailyPostJob{},
 	}
 }
 

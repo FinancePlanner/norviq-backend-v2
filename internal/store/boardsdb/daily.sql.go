@@ -21,6 +21,34 @@ func (q *Queries) DailyDeleteRun(ctx context.Context, tradingDate string) error 
 	return err
 }
 
+const dailyEveningBrief = `-- name: DailyEveningBrief :many
+SELECT payload FROM market_briefs
+WHERE trading_date = $1 AND slot = 'evening' AND language = 'en'
+LIMIT 1
+`
+
+// MarketBriefRepository.find(tradingDate:slot: .evening, language: "en"),
+// which DailyBoardPostJob.waitingForBrief reads.
+func (q *Queries) DailyEveningBrief(ctx context.Context, tradingDate string) ([]string, error) {
+	rows, err := q.db.Query(ctx, dailyEveningBrief, tradingDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		items = append(items, payload)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dailyHistory = `-- name: DailyHistory :many
 SELECT trading_date, ai_topic, tags FROM board_posts
 WHERE ai_generated = true AND trading_date < $1 AND deleted_at IS NULL

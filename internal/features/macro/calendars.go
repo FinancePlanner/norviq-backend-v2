@@ -266,3 +266,9 @@ func WorldEvents(from, through string) []WorldEvent {
 	})
 	return out
 }
+
+// HICPFlashDates is WorldMacroCalendar.hicpFlash (a copy).
+func HICPFlashDates() []string { return append([]string{}, hicpFlash...) }
+
+// ECBDecisionDates is WorldMacroCalendar.ecbDecisions (a copy).
+func ECBDecisionDates() []string { return append([]string{}, ecbDecisions...) }

@@ -680,6 +680,27 @@ func TestNewServiceFromSettings(t *testing.T) {
 	if !svc.AllowStubFallback || svc.FREDHub != nil || svc.Registry.IsEnabled(US) || !svc.Registry.IsEnabled(PT) {
 		t.Fatalf("%+v", svc)
 	}
+	if svc.FREDHub != nil || svc.BCBHub.BaseURL != BCBBaseURL {
+		t.Fatal("defaults")
+	}
+	withKey := NewService(Settings{FREDAPIKey: "k"}, d, http.DefaultClient)
+	if withKey.FREDHub.BaseURL != "https://api.stlouisfed.org" || withKey.FREDHub.BLS.URL != BLSCalendarURL {
+		t.Fatalf("%+v", withKey.FREDHub)
+	}
+	pt, _ := withKey.Registry.Providers(PT)
+	if pt.Primary.(*Eurostat).BaseURL != EurostatBaseURL || pt.Enrichments[0].(*ECB).BaseURL != ECBBaseURL {
+		t.Fatal("eurostat/ecb defaults")
+	}
+	over := NewService(Settings{
+		FREDAPIKey: "k", FREDBaseURL: "http://f", EurostatBaseURL: "http://e", IBGEBaseURL: "http://i",
+		BCBBaseURL: "http://b", ECBBaseURL: "http://c", BLSCalendarURL: "http://l",
+	}, d, http.DefaultClient)
+	pt, _ = over.Registry.Providers(PT)
+	br, _ := over.Registry.Providers(BR)
+	if over.FREDHub.BaseURL != "http://f" || over.FREDHub.BLS.URL != "http://l" || over.BCBHub.BaseURL != "http://b" ||
+		pt.Primary.(*Eurostat).BaseURL != "http://e" || pt.Enrichments[0].(*ECB).BaseURL != "http://c" || br.Primary.(*IBGE).BaseURL != "http://i" {
+		t.Fatal("overrides")
+	}
 	d.Config.Environment = "production"
 	svc = NewService(Settings{MacroEnabled: "off", FREDAPIKey: " k "}, d, http.DefaultClient)
 	if svc.AllowStubFallback || len(svc.Registry.EnabledCountries()) != 0 || svc.FREDHub == nil {

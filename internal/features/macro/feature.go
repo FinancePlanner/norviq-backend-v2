@@ -31,6 +31,23 @@ type Settings struct {
 	RefreshIntervalSeconds string `env:"MACRO_REFRESH_INTERVAL_SECONDS"`
 	USRefreshSeconds       string `env:"MACRO_US_REFRESH_SECONDS"`
 	IntlRefreshSeconds     string `env:"MACRO_INTL_REFRESH_SECONDS"`
+
+	// v2-only overrides for test stubs and parity. Vapor hard-coded these;
+	// unset means the real APIs.
+	FREDBaseURL     string `env:"FRED_BASE_URL"`
+	EurostatBaseURL string `env:"EUROSTAT_BASE_URL"`
+	IBGEBaseURL     string `env:"IBGE_BASE_URL"`
+	BCBBaseURL      string `env:"BCB_BASE_URL"`
+	ECBBaseURL      string `env:"ECB_BASE_URL"`
+	BLSCalendarURL  string `env:"BLS_CALENDAR_URL"`
+}
+
+// orDefault is v when set, else def.
+func orDefault(v, def string) string {
+	if v = strings.TrimSpace(v); v != "" {
+		return v
+	}
+	return def
 }
 
 // NewService wires the service exactly as configure.swift did.
@@ -46,16 +63,18 @@ func NewService(s Settings, d *server.Deps, client *http.Client) *Service {
 	var fred *FRED
 	if fredKey != "" {
 		fred = &FRED{
-			APIKey: fredKey, BaseURL: FREDBaseURL, Client: client, Logger: logger,
-			BLS: BLSCalendar{URL: BLSCalendarURL, Client: client, Logger: logger},
+			APIKey: fredKey, BaseURL: orDefault(s.FREDBaseURL, FREDBaseURL), Client: client, Logger: logger,
+			BLS: BLSCalendar{URL: orDefault(s.BLSCalendarURL, BLSCalendarURL), Client: client, Logger: logger},
 		}
 	}
+	ecb := NewECB(client, logger)
+	ecb.BaseURL = orDefault(s.ECBBaseURL, ECBBaseURL)
 	registry := BuildRegistry(plan, Concrete{
 		FRED:       fred,
-		Eurostat:   &Eurostat{BaseURL: EurostatBaseURL, Client: client, Logger: logger},
-		IBGE:       &IBGE{BaseURL: IBGEBaseURL, Client: client},
+		Eurostat:   &Eurostat{BaseURL: orDefault(s.EurostatBaseURL, EurostatBaseURL), Client: client, Logger: logger},
+		IBGE:       &IBGE{BaseURL: orDefault(s.IBGEBaseURL, IBGEBaseURL), Client: client},
 		Nowflation: nowflation,
-		ECB:        NewECB(client, logger),
+		ECB:        ecb,
 		Extra: []Enrichment{
 			SeekingAlphaEnrichment(config.Bool(s.SeekingAlphaEnabled, false), logger),
 			InvestingComEnrichment(config.Bool(s.InvestingEnabled, false), logger),
@@ -66,7 +85,7 @@ func NewService(s Settings, d *server.Deps, client *http.Client) *Service {
 		Registry:          registry,
 		AllowStubFallback: config.Bool(s.AllowStubFallback, !d.Config.IsProduction()),
 		FREDHub:           fred,
-		BCBHub:            &BCB{BaseURL: BCBBaseURL, Client: client},
+		BCBHub:            &BCB{BaseURL: orDefault(s.BCBBaseURL, BCBBaseURL), Client: client},
 		Redis:             d.Redis,
 		Logger:            logger,
 	}

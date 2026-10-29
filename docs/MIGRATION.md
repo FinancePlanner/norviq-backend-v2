@@ -62,7 +62,8 @@ client release. Then archive the Vapor repo.
 ## Deliberate deviations from Vapor
 
 Vapor bugs are ported faithfully unless listed here. Each fix is v2-only;
-Vapor is archived after cutover, not patched.
+Vapor is archived after cutover, not patched. **No line of code is added to
+the Vapor repo.** The faithfully ported bugs are fixed in Go, after cutover.
 
 - **RevenueCat decoding** (billing): Vapor's `JSONDecoder.backendAPI`
   rewrote RevenueCat's snake_case keys to camelCase, so every snake_case

@@ -20,6 +20,8 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/crypto"
+	"norviq-api/internal/features/dashboard"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
@@ -134,6 +136,10 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// DashboardController (dashboard, insights, why-moved).
+		dashboard.Feature{},
+		// CryptoController (/v1/crypto/*, incl. the markets view).
+		crypto.Feature{},
 	}
 }
 
@@ -194,6 +200,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// Crypto markets snapshot (CoinGecko + FMP YTD bases).
+		crypto.RefreshJob{},
 	}
 }
 

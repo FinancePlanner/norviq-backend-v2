@@ -20,6 +20,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -51,6 +52,9 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// Portfolio management: /v1/portfolios CRUD, members,
+		// invitations, cash positions, account assignment.
+		portfoliomgmt.Feature{},
 	}
 }
 

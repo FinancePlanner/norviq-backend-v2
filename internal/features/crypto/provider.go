@@ -236,7 +236,9 @@ func (MockProvider) News(_ context.Context, symbol *string, _, _ *int, _, _ *str
 	}
 	out := []NewsItem{}
 	for _, n := range all {
-		if n.Symbol != nil && strings.ToUpper(*n.Symbol) == strings.ToUpper(*symbol) {
+		// Swift compared uppercased() values; EqualFold differs on some
+		// Unicode case mappings (ß, final sigma), so keep the exact form.
+		if n.Symbol != nil && strings.ToUpper(*n.Symbol) == strings.ToUpper(*symbol) { //nolint:gocritic // Swift uppercased() parity.
 			out = append(out, n)
 		}
 	}

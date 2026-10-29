@@ -92,8 +92,8 @@ func assemble(coins []MarketCoin, tf Timeframe, limit int) MarketsResponse {
 
 func ids(cs []MarketCoin) []string {
 	out := []string{}
-	for _, c := range cs {
-		out = append(out, c.ID)
+	for i := range cs {
+		out = append(out, cs[i].ID)
 	}
 	return out
 }

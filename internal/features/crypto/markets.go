@@ -173,8 +173,9 @@ func (s *MarketsService) RefreshSnapshot(ctx context.Context, ytdFillBudget int)
 	sort.SliceStable(sorted, func(i, j int) bool { return deref(sorted[i].MarketCap) > deref(sorted[j].MarketCap) })
 	seen := map[string]bool{}
 	coins := []MarketCoin{}
-	for _, c := range sorted {
-		if _, ok := excluded[c.ID]; ok || LooksPegged(c) {
+	for i := range sorted {
+		c := &sorted[i]
+		if _, ok := excluded[c.ID]; ok || LooksPegged(*c) {
 			continue
 		}
 		// Tickers are not unique; the larger coin keeps the symbol.
@@ -189,20 +190,20 @@ func (s *MarketsService) RefreshSnapshot(ctx context.Context, ytdFillBudget int)
 			c.FmpSymbol = nil
 		}
 		c.Sector = SectorFor(c.ID)
-		coins = append(coins, c)
+		coins = append(coins, *c)
 	}
 	coins = s.applyYearToDate(ctx, coins, ytdFillBudget)
 
 	var total float64
 	var btcCap *float64
-	for _, c := range universe {
-		if c.MarketCap != nil {
-			total += *c.MarketCap
+	for i := range universe {
+		if universe[i].MarketCap != nil {
+			total += *universe[i].MarketCap
 		}
 	}
-	for _, c := range universe {
-		if c.ID == "bitcoin" {
-			btcCap = c.MarketCap
+	for i := range universe {
+		if universe[i].ID == "bitcoin" {
+			btcCap = universe[i].MarketCap
 			break
 		}
 	}
@@ -322,7 +323,8 @@ func (s *MarketsService) applyYearToDate(ctx context.Context, coins []MarketCoin
 
 	if s.reference != nil && fillBudget > 0 && !s.ytdFillIsPaused(ctx) {
 		var missing []string
-		for _, c := range coins[:min(s.ytdCover, len(coins))] {
+		for i := range coins[:min(s.ytdCover, len(coins))] {
+			c := &coins[i]
 			if c.FmpSymbol == nil {
 				continue
 			}
@@ -356,7 +358,8 @@ func (s *MarketsService) applyYearToDate(ctx context.Context, coins []MarketCoin
 	}
 
 	out := make([]MarketCoin, len(coins))
-	for i, c := range coins {
+	for i := range coins {
+		c := coins[i]
 		if c.FmpSymbol != nil {
 			if base, ok := bases[*c.FmpSymbol]; ok && base > 0 {
 				c.Returns.YearToDate = f64((c.Price/base - 1) * 100)

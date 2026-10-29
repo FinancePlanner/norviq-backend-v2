@@ -44,17 +44,17 @@ func prefixCoins(s []MarketCoin, n int) []MarketCoin {
 
 func reversedCoins(s []MarketCoin) []MarketCoin {
 	out := make([]MarketCoin, len(s))
-	for i, c := range s {
-		out[len(s)-1-i] = c
+	for i := range s {
+		out[len(s)-1-i] = s[i]
 	}
 	return out
 }
 
 func filterCoins(s []MarketCoin, keep func(MarketCoin) bool) []MarketCoin {
 	out := []MarketCoin{}
-	for _, c := range s {
-		if keep(c) {
-			out = append(out, c)
+	for i := range s {
+		if keep(s[i]) {
+			out = append(out, s[i])
 		}
 	}
 	return out
@@ -64,7 +64,8 @@ func filterCoins(s []MarketCoin, keep func(MarketCoin) bool) []MarketCoin {
 // snapshot onto one timeframe.
 func Assemble(snapshot MarketSnapshot, timeframe Timeframe, limit int, isStale bool, filter MarketsFilter, now time.Time) MarketsResponse {
 	projected := make([]MarketCoin, len(snapshot.Coins))
-	for i, c := range snapshot.Coins {
+	for i := range snapshot.Coins {
+		c := snapshot.Coins[i]
 		c.ChangePct = ChangePct(c, timeframe)
 		projected[i] = c
 	}
@@ -131,8 +132,8 @@ func ColorScale(t Timeframe) (ColorMode, float64) {
 func SupportedTimeframes(coins []MarketCoin) []Timeframe {
 	out := []Timeframe{}
 	for _, t := range AllTimeframes {
-		for _, c := range coins {
-			if ChangePct(c, t) != nil {
+		for i := range coins {
+			if ChangePct(coins[i], t) != nil {
 				out = append(out, t)
 				break
 			}
@@ -162,8 +163,8 @@ func summarize(coins []MarketCoin, snapshot MarketSnapshot, timeframe Timeframe)
 		window = OneDay
 	}
 	s := MarketsSummary{TotalMarketCap: snapshot.TotalMarketCap, BtcDominancePct: snapshot.BtcDominancePct}
-	for _, c := range coins {
-		v := ChangePct(c, window)
+	for i := range coins {
+		v := ChangePct(coins[i], window)
 		if v == nil {
 			continue
 		}
@@ -186,7 +187,8 @@ func athBoard(coins []MarketCoin, listSize int, now time.Time) AthBoard {
 		at   time.Time
 	}
 	var recent []dated
-	for _, c := range withAth {
+	for i := range withAth {
+		c := &withAth[i]
 		if c.AthDate == nil {
 			continue
 		}
@@ -194,12 +196,12 @@ func athBoard(coins []MarketCoin, listSize int, now time.Time) AthBoard {
 		if !ok || now.Sub(at) > recentAthWindow {
 			continue
 		}
-		recent = append(recent, dated{c, at})
+		recent = append(recent, dated{*c, at})
 	}
 	sort.SliceStable(recent, func(i, j int) bool { return recent[i].at.After(recent[j].at) })
 	recentCoins := make([]MarketCoin, len(recent))
-	for i, r := range recent {
-		recentCoins[i] = r.coin
+	for i := range recent {
+		recentCoins[i] = recent[i].coin
 	}
 	return AthBoard{
 		RecentAths:       prefixCoins(recentCoins, listSize),

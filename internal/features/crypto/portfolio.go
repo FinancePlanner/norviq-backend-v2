@@ -160,7 +160,8 @@ func decodePortfolioRequest(c *echo.Context) (PortfolioItemRequest, error) {
 	switch mt {
 	case "application/x-www-form-urlencoded", "multipart/form-data":
 	default:
-		return p, swiftjson.DecodeRequest(c, &p)
+		err := swiftjson.DecodeRequest(c, &p)
+		return p, err
 	}
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {

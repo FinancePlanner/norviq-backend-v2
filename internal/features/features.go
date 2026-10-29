@@ -26,6 +26,7 @@ import (
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/pilots"
@@ -79,6 +80,8 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		earnings.Feature{},
+		// MacroController (/v1/macro/*).
+		macro.Feature{},
 		// Watchlist, lists, CSV import, price targets, smart screens and
 		// holding risk profiles.
 		watchlist.Feature{},
@@ -194,6 +197,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// MacroRefreshJob.
+		macro.RefreshJob{},
 	}
 }
 

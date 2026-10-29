@@ -12,6 +12,7 @@ import (
 
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
+	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
@@ -51,6 +52,8 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// User-published articles; behind ARTICLES_ENABLED.
+		articles.Feature{},
 	}
 }
 

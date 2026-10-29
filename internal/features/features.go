@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
@@ -134,6 +135,9 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// AI assistant, memos, action catalog, AI chat/insights/view
+		// summaries.
+		assistant.Feature{},
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/pilots"
+	"norviq-api/internal/features/planning"
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
@@ -140,6 +141,8 @@ func All() []server.Feature {
 		recaps.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// TerminalPositionsController's /v1/autobuys routes.
 		autobuys.Feature{},
+		// PlanningController (/v1/planning).
+		planning.Feature{},
 	}
 }
 

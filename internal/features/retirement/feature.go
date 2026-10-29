@@ -301,3 +301,7 @@ func decodeInput(raw string) (PlanInput, error) {
 func formatISO(t time.Time) string {
 	return portfolios.FormatISODateTime(t.Round(time.Millisecond))
 }
+
+// DecodeInput decodes a stored retirement_plans.input_json document the way
+// JSONDecoder.backendAPI decodes RetirementPlanInput.
+func DecodeInput(raw string) (PlanInput, error) { return decodeInput(raw) }

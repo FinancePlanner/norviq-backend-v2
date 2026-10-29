@@ -124,7 +124,7 @@ func validate(t reflect.Type, v any, path []string, enum string) error {
 		if enum != "" {
 			set := enumSets[enum]
 			if !oneOf(s, set.cases) {
-				return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s",
+				return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s.",
 					joinCodingPath(path), set.name, s))
 			}
 		}

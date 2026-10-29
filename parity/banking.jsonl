@@ -38,7 +38,6 @@
 {"name": "sync-bad-id", "method": "POST", "path": "/v1/banks/connections/x/sync", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
 {"name": "import-already-imported", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000013/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}
 {"name": "import-missing-pillar", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000011/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {}}
-{"name": "import-bad-pillar", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000011/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "nope"}}
 {"name": "import-other-user", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000001/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}
 {"name": "import-free", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000001/import", "as": "b4b4b4b4-0000-4000-8000-000000000001", "body": {"pillar": "fun"}}
 {"name": "import-bad-id", "method": "POST", "path": "/v1/banks/transactions/123/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}

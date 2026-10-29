@@ -1,0 +1,24 @@
+# Insights admin writes (POST /v1/insights/sync, /sentiment/sync,
+# /sentiment/seed-index) succeeding. Needs a flagged Vapor and a v2 started
+# with the same env, both pointed at the Hermes stub, no DeepAPI, no AI keys:
+#   go run parity/insights-hermes-stub.go -addr 127.0.0.1:18137 &
+#   ENV: NORVIQ_ADMIN_USER_IDS=1b5e0000-0000-4000-8000-000000000003
+#        HERMES_BASE_URL=http://127.0.0.1:18137 HERMES_TRACKED_TICKERS=PRTYA
+#        HERMES_TRACKED_TICKERS_LIMIT=1 SENTIMENT_USER_TIER_LIMIT=1
+#        SENTIMENT_TRENDING_TIER_LIMIT=0   (and DEEPAPI_API_KEY unset)
+#   Vapor: StockPlanBackend serve --port 18127; v2: PORT=18117 ... serve
+# Seed parity/insights-setup.sql first. The stub only returns ids the seed
+# already holds, so both syncs insert nothing and report the same counts.
+# The sentiment sync demotes every other user-tier universe row to
+# trending (Vapor's replaceTier): snapshot sentiment_universe_symbols tiers
+# before and restore them after on a shared database.
+# Main-error cases (non-admin 403) are in parity/insights.jsonl.
+{"name": "admin-sync-unauthenticated", "method": "POST", "path": "/v1/insights/sync"}
+{"name": "admin-sync-non-admin", "method": "POST", "path": "/v1/insights/sync", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "admin-sync", "method": "POST", "path": "/v1/insights/sync", "as": "1b5e0000-0000-4000-8000-000000000003"}
+{"name": "admin-sentiment-sync-non-admin", "method": "POST", "path": "/v1/insights/sentiment/sync", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "admin-sentiment-sync", "method": "POST", "path": "/v1/insights/sentiment/sync", "as": "1b5e0000-0000-4000-8000-000000000003"}
+{"name": "admin-seed-index-non-admin", "method": "POST", "path": "/v1/insights/sentiment/seed-index", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "admin-seed-index-unconfigured", "method": "POST", "path": "/v1/insights/sentiment/seed-index", "as": "1b5e0000-0000-4000-8000-000000000003"}
+{"name": "admin-after-sync-sentiment", "method": "GET", "path": "/v1/insights/sentiment?topic=parity-insights", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "admin-after-sync-batch", "method": "GET", "path": "/v1/insights/sentiment/symbols?symbols=PRTYA", "as": "1b5e0000-0000-4000-8000-000000000002"}

@@ -289,6 +289,10 @@ func (h *handlers) downloadReport(c *echo.Context) error {
 func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	req := c.Request()
 	hdr := c.Response().Header()
+	// The controller sets these before FileIO runs, so even its 400 for a
+	// bad Range carries them.
+	hdr.Set(echo.HeaderContentType, contentType)
+	hdr.Set("Content-Disposition", disposition)
 	info, err := os.Stat(path)
 	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
@@ -310,8 +314,6 @@ func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	}
 	hdr.Set("Last-Modified", modified.UTC().Format(http.TimeFormat))
 	hdr.Set("ETag", etag)
-	hdr.Set(echo.HeaderContentType, contentType)
-	hdr.Set("Content-Disposition", disposition)
 	if etag == req.Header.Get("If-None-Match") {
 		hdr.Set(echo.HeaderContentLength, strconv.FormatInt(size, 10))
 		return c.NoContent(http.StatusNotModified)

@@ -649,6 +649,16 @@ func TestReportLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusPartialContent || string(part) != "\uFEFF\n" || !strings.HasSuffix(resp.Header.Get("Content-Range"), "/"+jsonNumber(len(body))) {
 		t.Fatalf("range %d %q %v", resp.StatusCode, part, resp.Header)
 	}
+	// An unsatisfiable range is Vapor's bare 400, still with the controller's headers.
+	req.Header.Set("Range", "bytes=50000-60000")
+	resp, err = a.Server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || resp.Header.Get("Content-Type") != "text/csv; charset=utf-8" || resp.Header.Get("ETag") != "" {
+		t.Fatalf("bad range %d %v", resp.StatusCode, resp.Header)
+	}
 	req.Header.Del("Range")
 	req.Header.Set("If-None-Match", d.Header.Get("ETag"))
 	resp, err = a.Server.Client().Do(req)

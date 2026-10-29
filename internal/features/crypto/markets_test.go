@@ -52,13 +52,13 @@ func TestSelectProvider(t *testing.T) {
 var assemblerNow = time.Unix(1_790_000_000, 0) // 2026-09-21
 
 type coinOpts struct {
-	marketCap, volume  float64
-	day, week, ytd     *float64
-	athChange          *float64
-	athDate            *string
-	price              float64
-	month              *float64
-	symbol             string
+	marketCap, volume float64
+	day, week, ytd    *float64
+	athChange         *float64
+	athDate           *string
+	price             float64
+	month             *float64
+	symbol            string
 }
 
 func mkCoin(id string, rank int, o coinOpts) MarketCoin {
@@ -238,8 +238,8 @@ type stubMarkets struct {
 	calls    int
 }
 
-func (*stubMarkets) Name() string          { return "stub" }
-func (*stubMarkets) Attribution() *string  { return str("Stub data") }
+func (*stubMarkets) Name() string         { return "stub" }
+func (*stubMarkets) Attribution() *string { return str("Stub data") }
 func (s *stubMarkets) universeCalls() int { s.mu.Lock(); defer s.mu.Unlock(); return s.calls }
 
 func (s *stubMarkets) FetchUniverse(context.Context, int) ([]MarketCoin, error) {
@@ -264,7 +264,9 @@ type stubReference struct {
 	yearStart map[string]float64
 }
 
-func (r stubReference) KnownSymbols(context.Context) (map[string]struct{}, error) { return r.symbols, nil }
+func (r stubReference) KnownSymbols(context.Context) (map[string]struct{}, error) {
+	return r.symbols, nil
+}
 
 func (r stubReference) YearStartPrice(_ context.Context, symbol string, _ int) (*float64, error) {
 	if v, ok := r.yearStart[symbol]; ok {

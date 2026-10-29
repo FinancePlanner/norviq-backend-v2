@@ -2,12 +2,12 @@ package dashboard
 
 // Response is StockPlanShared.DashboardResponse.
 type Response struct {
-	TotalValue         float64          `json:"totalValue"`
-	DailyChange        float64          `json:"dailyChange"`
-	DailyChangePercent float64          `json:"dailyChangePercent"`
-	TopPerformers      []PerformerDTO   `json:"topPerformers"`
-	BottomPerformers   []PerformerDTO   `json:"bottomPerformers"`
-	SectorAllocation   []AllocationDTO  `json:"sectorAllocation"`
+	TotalValue         float64         `json:"totalValue"`
+	DailyChange        float64         `json:"dailyChange"`
+	DailyChangePercent float64         `json:"dailyChangePercent"`
+	TopPerformers      []PerformerDTO  `json:"topPerformers"`
+	BottomPerformers   []PerformerDTO  `json:"bottomPerformers"`
+	SectorAllocation   []AllocationDTO `json:"sectorAllocation"`
 }
 
 // PerformerDTO is StockPlanShared.DashboardPerformerDTO.
@@ -55,12 +55,12 @@ type InsightsResponse struct {
 
 // WhyMovedResponse is WhyMovedResponse.
 type WhyMovedResponse struct {
-	AsOf                   string                  `json:"asOf"`
-	PortfolioChangePercent *float64                `json:"portfolioChangePercent,omitempty"`
-	PortfolioChangeValue   *float64                `json:"portfolioChangeValue,omitempty"`
-	Movers                 []WhyMovedMover         `json:"movers"`
-	Context                WhyMovedContext         `json:"context"`
-	AISummary              *WhyMovedAISummary      `json:"aiSummary,omitempty"`
+	AsOf                   string                   `json:"asOf"`
+	PortfolioChangePercent *float64                 `json:"portfolioChangePercent,omitempty"`
+	PortfolioChangeValue   *float64                 `json:"portfolioChangeValue,omitempty"`
+	Movers                 []WhyMovedMover          `json:"movers"`
+	Context                WhyMovedContext          `json:"context"`
+	AISummary              *WhyMovedAISummary       `json:"aiSummary,omitempty"`
 	SentimentSource        *WhyMovedSentimentSource `json:"sentimentSource,omitempty"`
 }
 

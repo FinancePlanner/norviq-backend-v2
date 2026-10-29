@@ -1,7 +1,8 @@
 package articles
 
 import (
-	"math/rand/v2"
+	"crypto/rand"
+	"math/big"
 	"net/http"
 	"regexp"
 	"strings"
@@ -184,7 +185,11 @@ func wordCount(markdown string) int {
 func makeCode() string {
 	b := make([]byte, 8)
 	for i := range b {
-		b[i] = codeAlphabet[rand.IntN(len(codeAlphabet))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(codeAlphabet))))
+		if err != nil {
+			panic(err) // crypto/rand never fails on supported platforms
+		}
+		b[i] = codeAlphabet[n.Int64()]
 	}
 	return string(b)
 }

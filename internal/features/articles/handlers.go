@@ -3,7 +3,6 @@ package articles
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -144,10 +143,10 @@ func (h *handler) summaries(ctx context.Context, page []articlesdb.Article) ([]a
 	}
 	seen := map[uuid.UUID]bool{}
 	ids := []uuid.UUID{}
-	for _, a := range page {
-		if !seen[a.AuthorID] {
-			seen[a.AuthorID] = true
-			ids = append(ids, a.AuthorID)
+	for i := range page {
+		if id := page[i].AuthorID; !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
 	rows, err := h.q.ArticleAuthors(ctx, ids)
@@ -158,8 +157,8 @@ func (h *handler) summaries(ctx context.Context, page []articlesdb.Article) ([]a
 	for _, r := range rows {
 		byID[r.ID] = &authorRow{Username: r.Username, AvatarURL: r.AvatarUrl}
 	}
-	for _, a := range page {
-		out = append(out, summary(a, byID[a.AuthorID]))
+	for i := range page {
+		out = append(out, summary(page[i], byID[page[i].AuthorID]))
 	}
 	return out, nil
 }
@@ -735,7 +734,7 @@ func (h *handler) report(c *echo.Context) error {
 	h.d.Logger.Info("articles.report filed", "code", a.Code, "reason", body.Reason)
 
 	excerpt := a.Code + " · " + a.Title
-	text := fmt.Sprintf("🚩 Article report (%s):\n```%s```", body.Reason, graphemePrefix(excerpt, 300))
+	text := "🚩 Article report (" + body.Reason + "):\n```" + graphemePrefix(excerpt, 300) + "```"
 	go func(ctx context.Context) {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -759,7 +758,7 @@ func (h *handler) uploadImage(c *echo.Context) error {
 		return err
 	}
 	if len(body) >= uploadMaxBody {
-		return httpx.Abort(http.StatusRequestEntityTooLarge, "")
+		return httpx.Abort(http.StatusRequestEntityTooLarge, "Payload Too Large")
 	}
 	viewer, err := community.FromContext(c)
 	if err != nil {
@@ -799,4 +798,3 @@ func (h *handler) uploadImage(c *echo.Context) error {
 	}
 	return httpx.OK(c, imageUploadResponse{ID: apijson.NewUUID(id)})
 }
-

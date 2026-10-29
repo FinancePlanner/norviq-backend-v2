@@ -3,6 +3,8 @@ package assistant
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
+	"strings"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
@@ -141,7 +143,7 @@ func (h *handlers) listMemos(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	params := assistantdb.ListMemosParams{UserID: userID, Bookmarked: httpx.QueryOptionalBool(c, "bookmarked")}
+	params := assistantdb.ListMemosParams{UserID: userID, Bookmarked: queryBoolAbsentFalse(c, "bookmarked")}
 	if raw := httpx.QueryString(c, "conversationId"); raw != nil {
 		if id, ok := portfolios.ParseSwiftUUID(*raw); ok {
 			params.ConversationID = &id
@@ -165,6 +167,24 @@ func (h *handlers) listMemos(c *echo.Context) error {
 		})
 	}
 	return httpx.OK(c, out)
+}
+
+// queryBoolAbsentFalse is `req.query[Bool.self, at: name]` as Vapor's
+// URL-encoded decoder actually answered it: a key that is absent altogether
+// decodes as false (flag semantics), so GET /v1/ai/memos with no filter lists
+// only unbookmarked memos. A present but malformed value is nil (no filter).
+func queryBoolAbsentFalse(c *echo.Context, name string) *bool {
+	if v := httpx.QueryOptionalBool(c, name); v != nil {
+		return v
+	}
+	for _, part := range strings.Split(c.Request().URL.RawQuery, "&") {
+		key, _, _ := strings.Cut(part, "=")
+		if k, err := url.QueryUnescape(key); err == nil && k == name {
+			return nil
+		}
+	}
+	f := false
+	return &f
 }
 
 // memoID reads the :id the memo routes take; a bad one is a bare 400.

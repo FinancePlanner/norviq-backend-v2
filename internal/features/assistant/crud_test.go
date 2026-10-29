@@ -339,6 +339,14 @@ func TestMemoRoutes(t *testing.T) {
 	if !strings.Contains(string(r.Body), `"bookmarked":true`) || !strings.Contains(string(r.Body), `"symbol":"ASML"`) {
 		t.Fatalf("%s", r.Body)
 	}
+	// Vapor quirk: an absent Bool query decodes as false, so the unfiltered
+	// list hides bookmarked memos; an empty value is no filter at all.
+	if r = h.Do("GET", "/v1/ai/memos", tok, nil); string(r.Body) != "[]" {
+		t.Fatalf("unfiltered list %s", r.Body)
+	}
+	if r = h.Do("GET", "/v1/ai/memos?bookmarked=", tok, nil); !strings.Contains(string(r.Body), "ASML") {
+		t.Fatalf("empty filter %s", r.Body)
+	}
 	expectStatus(t, h.Do("GET", "/v1/ai/memos/bad", tok, nil), 400)
 	expectStatus(t, h.Do("GET", "/v1/ai/memos/"+uuid.NewString(), tok, nil), 404)
 	expectStatus(t, h.Do("DELETE", "/v1/ai/memos/"+id.String(), tok, nil), 204)

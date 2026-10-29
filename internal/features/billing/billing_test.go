@@ -467,21 +467,27 @@ func TestManagementURLFlows(t *testing.T) {
 		return r.Status, string(r.Body)
 	}
 
+	// RevenueCat's own management URL wins over the App Store fallback.
 	stub.handlers[subsPath] = jsonReply(200, `{"items":[
 		{"id":"sub_old","store":"play_store","status":"expired"},
-		{"id":"sub_app","store":"APP_STORE","status":"active","gives_access":true,"management_url":"https://ignored"}]}`)
-	if s, b := call(); s != 200 || b != `{"managementUrl":"https://apps.apple.com/account/subscriptions","provider":"app_store","source":"apple_subscriptions"}` {
+		{"id":"sub_app","store":"APP_STORE","status":"active","gives_access":true,"management_url":"https://rc/manage"}]}`)
+	if s, b := call(); s != 200 || b != `{"managementUrl":"https://rc/manage","provider":"APP_STORE","source":"revenuecat_management_url"}` {
 		t.Fatal(s, b)
 	}
 	if stub.auth[0] != "Bearer v2-key" || !strings.HasSuffix(stub.paths[0], "?limit=20") {
 		t.Fatal(stub.paths, stub.auth)
 	}
 
-	// Web billing: the portal URL is requested, but Vapor's key rewrite
-	// drops management_url from every RevenueCat body, so it falls through.
+	// Without one, an App Store subscription points at Apple's page.
+	stub.handlers[subsPath] = jsonReply(200, `{"items":[{"id":"sub_app","store":"app_store","status":"active","gives_access":true}]}`)
+	if s, b := call(); s != 200 || b != `{"managementUrl":"https://apps.apple.com/account/subscriptions","provider":"app_store","source":"apple_subscriptions"}` {
+		t.Fatal(s, b)
+	}
+
+	// Web billing: the authenticated customer portal URL.
 	stub.handlers[subsPath] = jsonReply(200, `{"items":[{"id":"sub_web","store":"rc_billing","status":"active","management_url":"https://x"}]}`)
 	stub.handlers["/v2/projects/proj%201/subscriptions/sub_web/authenticated_management_url"] = jsonReply(200, `{"management_url":"https://portal"}`)
-	if s, b := call(); s != 404 || !strings.Contains(b, "No subscription management URL is available.") {
+	if s, b := call(); s != 200 || b != `{"managementUrl":"https://portal","provider":"rc_billing","source":"revenuecat_customer_portal"}` {
 		t.Fatal(s, b)
 	}
 	if last := stub.paths[len(stub.paths)-1]; last != "/v2/projects/proj%201/subscriptions/sub_web/authenticated_management_url" {
@@ -581,10 +587,10 @@ func TestRestoreSyncStatuses(t *testing.T) {
 	}
 }
 
-// Through HTTP, a real-looking RevenueCat body syncs as expired/free: Vapor's
-// client decoder rewrote expires_date etc. to camelCase, so no date ever
-// decoded. Ported as-is; see the port report.
-func TestRestoreOverHTTPReproducesVaporDecoding(t *testing.T) {
+// Through HTTP, a real RevenueCat body keeps a paying user on Pro. Vapor's
+// decoder rewrote expires_date etc. to camelCase, so no date decoded and
+// restore downgraded the user to free; v2 fixes that.
+func TestRestoreOverHTTPKeepsActiveSubscription(t *testing.T) {
 	stub, srv := newRCStub(t)
 	app := newApp(t, func(f *Feature) {
 		f.Settings = &Settings{WebhookSecret: testSecret, APIKey: "rc-key"}
@@ -603,10 +609,11 @@ func TestRestoreOverHTTPReproducesVaporDecoding(t *testing.T) {
 		t.Fatal(stub.auth)
 	}
 	s, e := app.subscriptionOf(user), app.entitlementOf(user)
-	if s.ProductID != "pro_yearly" || s.Status != "expired" || *s.Store != "app_store" || s.PeriodEndsAt != nil || e.Level != "free" {
+	if s.ProductID != "pro_yearly" || s.Status != "active" || *s.Store != "app_store" || s.PeriodEndsAt == nil ||
+		s.PeriodEndsAt.UTC().Format(time.RFC3339) != future || e.Level != "pro" || e.SubscriptionID == nil || *e.SubscriptionID != s.ID {
 		t.Fatalf("sub=%+v ent=%+v", s, e)
 	}
-	if !strings.Contains(string(r.Body), `"entitlementLevel":"free"`) {
+	if !strings.Contains(string(r.Body), `"entitlementLevel":"pro"`) {
 		t.Fatal(string(r.Body))
 	}
 

@@ -10,11 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
+	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
+	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
@@ -23,12 +27,24 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/pilots"
+	"norviq-api/internal/features/portfolio"
+	"norviq-api/internal/features/portfoliomgmt"
+	"norviq-api/internal/features/rebalancing"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
+	"norviq-api/internal/features/retirement"
+	"norviq-api/internal/features/scenarios"
+	"norviq-api/internal/features/simulations"
+	"norviq-api/internal/features/social"
 	"norviq-api/internal/features/statistics"
+	"norviq-api/internal/features/stocks"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
+
+	"github.com/google/uuid"
 )
 
 // All returns every ported feature, in Vapor's registration order where it
@@ -40,7 +56,13 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		activity.Feature{},
-		badges.Feature{},
+		// BadgeService records each new tier as a legacy achievement
+		// (AchievementService.recordLegacyBadge).
+		badges.Feature{OnEarned: func(d *server.Deps) badges.EarnedHook {
+			return func(ctx context.Context, userID uuid.UUID, badgeType, tier string, earnedAt time.Time) {
+				achievements.RecordLegacyBadge(ctx, d.DB, d.Logger, userID, badgeType, tier, earnedAt)
+			}
+		}},
 		feedback.Feature{},
 		assets.Feature{Search: func(d *server.Deps) (assets.SymbolSearch, error) {
 			svc, err := market.SharedService(d)
@@ -73,6 +95,35 @@ func All() []server.Feature {
 		// Spreadsheet import and receipts (throttled groups in routes.swift).
 		expenseimport.Feature{},
 		receipts.Feature{},
+		// PortfolioController, PortfolioShareController (authenticated
+		// routes).
+		portfolio.Feature{},
+		// Portfolio management: /v1/portfolios CRUD, members,
+		// invitations, cash positions, account assignment.
+		portfoliomgmt.Feature{},
+		// Portfolio rebalancing (portfolio-scoped routes) and simulations.
+		rebalancing.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		simulations.Feature{},
+		// Holdings, manual transactions and the stock share page.
+		stocks.Feature{},
+		// RetirementController portfolio routes.
+		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		// ScenarioController portfolio snapshot routes.
+		scenarios.Feature{},
+		// WealthAutomationController rebalancing-policy routes.
+		automation.Feature{},
+		// Community boards (BoardsController).
+		boards.Feature{},
+		// Social graph, discovery and gamification (SocialController,
+		// GamificationController).
+		social.Feature{},
+		// Achievements and the friends' activity feed; installs the
+		// achievementhooks evaluator.
+		achievements.Feature{},
+		// User-published articles; behind ARTICLES_ENABLED.
+		articles.Feature{},
+		// Pilot follows (PILOTS_ENABLED, checked per request).
+		pilots.Feature{},
 	}
 }
 
@@ -104,6 +155,9 @@ func (m marketSearch) Search(ctx context.Context, q string) ([]assets.SearchResu
 	return out, nil
 }
 
+// scheduleAchievementCheck is req.scheduleAchievementCheck(for:).
+func scheduleAchievementCheck(userID uuid.UUID) { achievementhooks.Schedule(userID) }
+
 // Job is a background loop: one Vapor LifecycleHandler.
 type Job interface {
 	Name() string
@@ -120,6 +174,10 @@ func AllJobs() []Job {
 		reporting.WorkerJob{},
 		reporting.RetentionJob{},
 		expenseimport.RetentionJob{},
+		portfolio.SnapshotJob{},
+		achievements.SweepJob{},
+		pilots.IngestionJob{},
+		pilots.MirrorJob{},
 	}
 }
 

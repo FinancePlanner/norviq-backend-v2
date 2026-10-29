@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/badgesdb"
@@ -247,5 +248,34 @@ func TestBadgesRequireAuthentication(t *testing.T) {
 	app, _, _ := setup(t)
 	if r := app.Do("GET", "/v1/badges", "", nil); r.Status != 401 {
 		t.Fatalf("%d", r.Status)
+	}
+}
+
+// BadgeService records each newly earned tier as a legacy achievement
+// (AchievementService.recordLegacyBadge), exactly once per tier.
+func TestNewTiersRecordLegacyAchievements(t *testing.T) {
+	feature := badges.Feature{OnEarned: func(d *server.Deps) badges.EarnedHook {
+		return func(ctx context.Context, userID uuid.UUID, badgeType, tier string, earnedAt time.Time) {
+			achievements.RecordLegacyBadge(ctx, d.DB, d.Logger, userID, badgeType, tier, earnedAt)
+		}
+	}}
+	app := testutil.NewApp(t, []server.Feature{feature})
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	token := app.Token(user)
+	f := fixtures{t: t, app: app, user: user}
+	for _, s := range []string{"A", "B", "C", "D", "E"} {
+		f.holding(s, nil, nil)
+	}
+	get(t, app, token)
+	get(t, app, token)
+	var n int
+	var keys string
+	if err := app.Deps.DB.QueryRow(context.Background(),
+		`SELECT count(*), string_agg(achievement_key || ':' || tier || ':' || source, ',' ORDER BY achievement_key)
+		 FROM user_achievements WHERE user_id = $1 AND seen_at = unlocked_at`, user).Scan(&n, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 || keys != "legacy.first_purchase:bronze:legacy_badge,legacy.investor:bronze:legacy_badge" {
+		t.Fatalf("legacy rows %d %q", n, keys)
 	}
 }

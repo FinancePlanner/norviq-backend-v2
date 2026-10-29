@@ -1,0 +1,96 @@
+# Achievements + social feed (AchievementController, SocialFeedController).
+# Seed first (resets the slice's rows, re-run before every run):
+#   psql "postgres://pg:pg@127.0.0.1:55499/norviq" -f parity/achievements-setup.sql
+# Both backends need SOCIAL_ENABLED=1 SOCIAL_ACTIVITY_FEED_ENABLED=1
+# ACHIEVEMENTS_ENABLED=1 (the flagged Vapor on :18124), then:
+#   go run ./cmd/parity -a http://127.0.0.1:18124 -b http://127.0.0.1:18149 -jwt-secret parity-secret \
+#     -cases parity/achievements.jsonl
+# Flag-off 404s are parity/achievements-flagoff.jsonl (Vapor :8081, v2 without the flags).
+# Writes run on A first, then B on the same rows: seen, showcase and congrats
+# are idempotent, so both answer the same.
+{"name": "list-unauthenticated", "method": "GET", "path": "/v1/achievements"}
+{"name": "list-viewer", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "list-viewer-pt", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a1", "headers": {"Accept-Language": "pt-PT,en;q=0.8"}}
+{"name": "list-empty-user", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "list-suspended-user", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a4"}
+{"name": "unseen-viewer", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "unseen-viewer-pt", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a1", "headers": {"Accept-Language": "pt"}}
+{"name": "unseen-empty", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "seen-missing-ids", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {}}
+{"name": "seen-ids-not-array", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"ids": "nope"}}
+{"name": "seen-invalid-uuid", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"ids": ["not-a-uuid"]}}
+{"name": "seen-empty-list", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"ids": []}}
+{"name": "seen-other-users-row", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": ["5a000000-0000-4000-8000-00000000a101"]}}
+{"name": "unseen-after-foreign-seen", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "seen-one", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"ids": ["5A000000-0000-4000-8000-00000000A101"]}}
+{"name": "unseen-after-seen", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "showcase-missing-items", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {}}
+{"name": "showcase-item-missing-key", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"tier": ""}]}}
+{"name": "showcase-item-missing-tier", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "start.first_holding", "tier": ""}, {"key": "start.first_budget"}]}}
+{"name": "showcase-too-many", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "start.first_holding", "tier": ""}, {"key": "start.first_budget", "tier": ""}, {"key": "start.first_goal", "tier": ""}, {"key": "discipline.check_in", "tier": "bronze"}]}}
+{"name": "showcase-duplicate", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "start.first_holding", "tier": ""}, {"key": "start.first_holding", "tier": ""}]}}
+{"name": "showcase-not-earned", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "discipline.check_in", "tier": "gold"}]}}
+{"name": "showcase-hidden-opaque-key", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "hidden.1", "tier": ""}]}}
+{"name": "showcase-set", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": [{"key": "start.first_budget", "tier": ""}, {"key": "legacy.saver", "tier": "gold"}]}}
+{"name": "showcase-clear", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a6", "body": {"items": []}}
+# Decoding errors (Foundation wording), query Int parsing, UUID strictness. As a3,
+# who has no rows, so the few that succeed change nothing.
+{"name": "decode-items-null", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": null}}
+{"name": "decode-items-string", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": "x"}}
+{"name": "decode-item-not-object", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": [3]}}
+{"name": "decode-key-number", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": [{"key": 3, "tier": ""}]}}
+{"name": "decode-tier-null", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": [{"key": "a", "tier": null}]}}
+{"name": "decode-body-array", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": []}
+{"name": "decode-body-invalid", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": "nope"}
+{"name": "decode-ids-null", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": null}}
+{"name": "decode-ids-number-elem", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": [1]}}
+{"name": "decode-ids-second-bad", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": ["5a000000-0000-4000-8000-00000000a101", "x"]}}
+{"name": "decode-ids-obj", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": {}}}
+{"name": "decode-seen-nobody", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-limit-float", "method": "GET", "path": "/v1/social/feed?limit=1.5", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-limit-empty", "method": "GET", "path": "/v1/social/feed?limit=", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-limit-dup", "method": "GET", "path": "/v1/social/feed?limit=1&limit=abc", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-limit-neg", "method": "GET", "path": "/v1/social/feed?limit=-3", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-limit-plus", "method": "GET", "path": "/v1/social/feed?limit=+3", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-ids-null-elem", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": [null]}}
+{"name": "decode-item-null", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": [null]}}
+{"name": "decode-body-null", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": null}
+{"name": "decode-limit-bare", "method": "GET", "path": "/v1/social/feed?limit", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "decode-uuid-braces", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": ["{5a000000-0000-4000-8000-00000000a101}"]}}
+{"name": "decode-uuid-nohyphen", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"ids": ["5a00000000004000800000000000a101"]}}
+{"name": "decode-snake", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a3", "body": {"items": [{"key": "a", "tier": "", "showcase_rank": 1}]}}
+{"name": "friend-achievements", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a2/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-pt", "method": "GET", "path": "/v1/social/users/5A000000-0000-4000-8000-0000000000A2/achievements", "as": "5a000000-0000-4000-8000-0000000000a1", "headers": {"Accept-Language": "pt-BR"}}
+{"name": "friend-achievements-self", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a1/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-stranger", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a3/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-blocked", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a5/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-hidden-by-settings", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a6/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-unknown-user", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-00000000ffff/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-invalid-uuid", "method": "GET", "path": "/v1/social/users/nope/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "friend-achievements-suspended-caller", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a1/achievements", "as": "5a000000-0000-4000-8000-0000000000a4"}
+{"name": "friend-achievements-unauthenticated", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a1/achievements"}
+{"name": "feed-viewer", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-friend", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a2"}
+{"name": "feed-stranger", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "feed-limit-1", "method": "GET", "path": "/v1/social/feed?limit=1", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-limit-0", "method": "GET", "path": "/v1/social/feed?limit=0", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-limit-500", "method": "GET", "path": "/v1/social/feed?limit=500", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-limit-malformed", "method": "GET", "path": "/v1/social/feed?limit=abc", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-cursor-opaque", "method": "GET", "path": "/v1/social/feed?limit=1&cursor=djF8NDc0MDExODE3NTcwMDQ4NDA5Nnw1QTAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwQUMyMDI", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-cursor-iso", "method": "GET", "path": "/v1/social/feed?cursor=2026-10-27T10:30:00.000Z", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-cursor-invalid", "method": "GET", "path": "/v1/social/feed?cursor=garbage", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-cursor-empty", "method": "GET", "path": "/v1/social/feed?cursor=", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-pt", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a1", "headers": {"Accept-Language": "pt"}}
+{"name": "feed-suspended-caller", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a4"}
+{"name": "feed-unauthenticated", "method": "GET", "path": "/v1/social/feed"}
+{"name": "congrats-self", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac201/congrats", "as": "5a000000-0000-4000-8000-0000000000a2"}
+{"name": "congrats-unknown", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-00000000ffff/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "congrats-invalid-uuid", "method": "POST", "path": "/v1/social/feed/nope/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "congrats-not-visible-stranger", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac201/congrats", "as": "5a000000-0000-4000-8000-0000000000a3"}
+{"name": "congrats-hidden-performance", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac203/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "congrats-blocked-actor", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac501/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "congrats-suspended-caller", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac201/congrats", "as": "5a000000-0000-4000-8000-0000000000a4"}
+{"name": "congrats-ok", "method": "POST", "path": "/v1/social/feed/5A000000-0000-4000-8000-0000000AC201/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-after-congrats", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "feed-friend-sees-nothing-of-own", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a2"}
+{"name": "list-after-showcase", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}

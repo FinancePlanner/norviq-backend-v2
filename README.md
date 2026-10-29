@@ -40,3 +40,4 @@ in parallel and take milliseconds to set up.
 | `internal/platform/<name>` | services shared across domains |
 | `db/migrations` | goose migrations (00001 = Vapor's schema) |
 | `db/queries/<domain>` | sqlc queries → `internal/store/<domain>db` |
+# norviq-backend-v2

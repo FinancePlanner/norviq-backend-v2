@@ -1,0 +1,15 @@
+# Achievements + social feed with the flags off: every route is a 404, and
+# the session check still runs first (401 without a token).
+# Seed parity/achievements-setup.sql, then compare the unflagged Vapor with a
+# v2 started without SOCIAL_ENABLED / SOCIAL_ACTIVITY_FEED_ENABLED / ACHIEVEMENTS_ENABLED:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18149 -jwt-secret parity-secret \
+#     -cases parity/achievements-flagoff.jsonl
+{"name": "off-list", "method": "GET", "path": "/v1/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "off-list-unauthenticated", "method": "GET", "path": "/v1/achievements"}
+{"name": "off-unseen", "method": "GET", "path": "/v1/achievements/unseen", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "off-seen", "method": "POST", "path": "/v1/achievements/seen", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"ids": []}}
+{"name": "off-showcase", "method": "PUT", "path": "/v1/achievements/showcase", "as": "5a000000-0000-4000-8000-0000000000a1", "body": {"items": []}}
+{"name": "off-friend-achievements", "method": "GET", "path": "/v1/social/users/5a000000-0000-4000-8000-0000000000a2/achievements", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "off-feed", "method": "GET", "path": "/v1/social/feed", "as": "5a000000-0000-4000-8000-0000000000a1"}
+{"name": "off-feed-unauthenticated", "method": "GET", "path": "/v1/social/feed"}
+{"name": "off-congrats", "method": "POST", "path": "/v1/social/feed/5a000000-0000-4000-8000-0000000ac201/congrats", "as": "5a000000-0000-4000-8000-0000000000a1"}

@@ -16,11 +16,13 @@ import (
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
+	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -55,6 +57,8 @@ func All() []server.Feature {
 		// Expenses, budget snapshots/items and reports. Drift and the
 		// reports overview are wired once budgeting and statistics land.
 		expenses.Feature{},
+		// Spreadsheet import and receipts (throttled groups in routes.swift).
+		expenseimport.Feature{}, receipts.Feature{},
 	}
 }
 
@@ -87,6 +91,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		expenseimport.RetentionJob{},
 	}
 }
 

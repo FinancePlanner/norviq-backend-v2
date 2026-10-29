@@ -167,3 +167,8 @@ func pivotYear(v int, now time.Time) int {
 func daysIn(year, month int) int {
 	return time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day()
 }
+
+// ParseICUDate is icuParse for other features porting DateFormatter parses.
+func ParseICUDate(pattern, text string, now time.Time) (time.Time, bool) {
+	return icuParse(pattern, text, now)
+}

@@ -13,6 +13,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/store/brokersdb"
@@ -54,8 +55,8 @@ type service struct {
 	env      func(string) string
 	now      func() time.Time
 	sleep    func(ctx context.Context, d time.Duration) error
-	sodHTTP  *http.Client
-	sodRetry int
+	entitlements *entitlements.Service
+	extractor    Extractor
 }
 
 func (s *service) q() *brokersdb.Queries { return brokersdb.New(s.db) }

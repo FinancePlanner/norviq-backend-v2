@@ -16,6 +16,7 @@ import (
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
+	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
@@ -51,6 +52,9 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// Expenses, budget snapshots/items and reports. Drift and the
+		// reports overview are wired once budgeting and statistics land.
+		expenses.Feature{},
 	}
 }
 

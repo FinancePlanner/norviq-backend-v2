@@ -36,8 +36,8 @@ type feedResp struct {
 
 func (f feedResp) ids() []string {
 	out := make([]string, len(f.Items))
-	for i, it := range f.Items {
-		out[i] = it.ID
+	for i := range f.Items {
+		out[i] = f.Items[i].ID
 	}
 	return out
 }

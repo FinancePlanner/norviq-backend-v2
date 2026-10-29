@@ -22,6 +22,8 @@ import (
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
+	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/features/simulations"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
@@ -59,6 +61,10 @@ func All() []server.Feature {
 		// Portfolio management: /v1/portfolios CRUD, members,
 		// invitations, cash positions, account assignment.
 		portfoliomgmt.Feature{},
+		// Portfolio rebalancing (portfolio-scoped routes) and simulations.
+		// TODO(merge): set ScheduleAchievementCheck to achievementhooks.Schedule.
+		rebalancing.Feature{},
+		simulations.Feature{},
 	}
 }
 

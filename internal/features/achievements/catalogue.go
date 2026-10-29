@@ -159,8 +159,8 @@ var (
 	hidden    = defFlags{hidden: true}
 )
 
-// Catalogue is AchievementCatalogue.all, in order.
-var Catalogue = []Definition{
+// Catalog is AchievementCatalogue.all, in order.
+var Catalog = []Definition{
 	def("start.first_holding", CatGettingStarted, "chart.pie.fill", single(1, 25), plain,
 		[2]string{"First Holding", "Add your first holding."}, [2]string{"Primeira posição", "Adiciona a tua primeira posição."}),
 	def("start.first_budget", CatGettingStarted, "wallet.pass.fill", single(1, 25), plain,
@@ -184,7 +184,7 @@ var Catalogue = []Definition{
 	def("discipline.recap_regular", CatDiscipline, "doc.text.fill", single(3, 25), plain,
 		[2]string{"Reflective", "Open your monthly recap three months in a row."}, [2]string{"Reflexivo", "Abre o teu resumo mensal três meses seguidos."}),
 	def("craft.thesis", CatCraft, "pencil.and.outline", tiered(1, 10, 50), plain,
-		[2]string{"Thesis Writer", "Write down your investment thesis."}, [2]string{"Autor de teses", "Escreve a tua tese de investimento."}),
+		[2]string{"Thesis Writer", "Write down your investment thesis."}, [2]string{"Autor de teses", "Escreve a tua tese de investimento."}), //nolint:misspell // Portuguese copy
 	def("craft.memo_saved", CatCraft, "bookmark.fill", single(1, 25), plain,
 		[2]string{"Memo Keeper", "Bookmark a position memo."}, [2]string{"Guardião de notas", "Guarda uma nota de posição nos favoritos."}),
 	def("craft.watchlist_review", CatCraft, "eye.fill", tiered(1, 10, 50), plain,
@@ -220,7 +220,7 @@ var Catalogue = []Definition{
 	def("social.first_post", CatCommunity, "text.bubble.fill", single(1, 25), plain,
 		[2]string{"First Words", "Write your first board post."}, [2]string{"Primeiras palavras", "Escreve a tua primeira publicação."}),
 	def("social.popular_post", CatCommunity, "hand.thumbsup.fill", single(10, 25), plain,
-		[2]string{"Crowd Favourite", "Get a post to a score of 10."}, [2]string{"Favorito da comunidade", "Leva uma publicação a uma pontuação de 10."}),
+		[2]string{"Crowd Favourite", "Get a post to a score of 10."}, [2]string{"Favorito da comunidade", "Leva uma publicação a uma pontuação de 10."}), //nolint:misspell // Vapor copy, verbatim
 	def("social.group", CatCommunity, "person.3.fill", single(1, 25), plain,
 		[2]string{"Part of Something", "Join a group."}, [2]string{"Parte de algo", "Junta-te a um grupo."}),
 	def("social.inviter", CatCommunity, "person.badge.plus", tiered(1, 3, 10), plain,
@@ -236,25 +236,25 @@ var Catalogue = []Definition{
 }
 
 var byKey = func() map[string]*Definition {
-	m := make(map[string]*Definition, len(Catalogue))
-	for i := range Catalogue {
-		m[Catalogue[i].Key] = &Catalogue[i]
+	m := make(map[string]*Definition, len(Catalog))
+	for i := range Catalog {
+		m[Catalog[i].Key] = &Catalog[i]
 	}
 	return m
 }()
 
-// Lookup is AchievementCatalogue.definition(_:): catalogue keys only.
+// Lookup is AchievementCatalogue.definition(_:): catalog keys only.
 func Lookup(key string) *Definition { return byKey[key] }
 
 // legacyPT is AchievementCatalogue.legacyPT.
 var legacyPT = map[string][2]string{
-	"first_purchase":  {"Primeira compra", "Compra a tua primeira ação"},
-	"news_reader":     {"Leitor de notícias", "Mantém-te informado lendo notícias de ações"},
-	"investor":        {"Investidor", "Constrói a tua carteira com investimentos regulares"},
-	"saver":           {"Poupador", "Mantém uma taxa de poupança positiva todos os meses"},
-	"frugal_fun":      {"Diversão frugal", "Fica abaixo do orçamento de lazer"},
-	"spending_detox":  {"Detox de gastos", "Passa dias seguidos sem gastar"},
-	"growth_mindset":  {"Mentalidade de crescimento", "Poupa mais dinheiro de mês para mês"},
+	"first_purchase": {"Primeira compra", "Compra a tua primeira ação"},
+	"news_reader":    {"Leitor de notícias", "Mantém-te informado lendo notícias de ações"},
+	"investor":       {"Investidor", "Constrói a tua carteira com investimentos regulares"}, //nolint:misspell // Portuguese copy
+	"saver":          {"Poupador", "Mantém uma taxa de poupança positiva todos os meses"},
+	"frugal_fun":     {"Diversão frugal", "Fica abaixo do orçamento de lazer"},
+	"spending_detox": {"Detox de gastos", "Passa dias seguidos sem gastar"},
+	"growth_mindset": {"Mentalidade de crescimento", "Poupa mais dinheiro de mês para mês"},
 }
 
 // legacyDefinitions is BadgeType.allCases.map(legacyDefinition(for:)).
@@ -298,18 +298,18 @@ func lookupWithLegacy(key string) *Definition {
 // performanceKeys is AchievementCatalogue.all.filter(\.isPerformance).
 func performanceKeys() []string {
 	var out []string
-	for _, d := range Catalogue {
-		if d.IsPerformance {
-			out = append(out, d.Key)
+	for i := range Catalog {
+		if Catalog[i].IsPerformance {
+			out = append(out, Catalog[i].Key)
 		}
 	}
 	return out
 }
 
-func catalogueKeys() []string {
-	out := make([]string, len(Catalogue))
-	for i, d := range Catalogue {
-		out[i] = d.Key
+func catalogKeys() []string {
+	out := make([]string, len(Catalog))
+	for i := range Catalog {
+		out[i] = Catalog[i].Key
 	}
 	return out
 }

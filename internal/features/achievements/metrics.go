@@ -167,7 +167,7 @@ func isolated[T any](ctx context.Context, e evalDB, logger *slog.Logger, keys []
 	return v, true
 }
 
-// measure is AchievementMetrics.measurement: a value per catalogue key in
+// measure is AchievementMetrics.measurement: a value per catalog key in
 // scope. Keys it doesn't know are left out; missing data measures 0. Each
 // metric is isolated, so one that fails can't block the others.
 func measure(ctx context.Context, e evalDB, logger *slog.Logger, userID uuid.UUID, keys map[string]bool, now time.Time) measurement {

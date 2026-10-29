@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
@@ -51,6 +52,9 @@ func All() []server.Feature {
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
+		// Achievements and the friends' activity feed; installs the
+		// achievementhooks evaluator.
+		achievements.Feature{},
 	}
 }
 
@@ -83,6 +87,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		achievements.SweepJob{},
 	}
 }
 

@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net/url"
 
+	"norviq-api/internal/platform/achievementhooks"
+
 	"norviq-api/internal/auth"
 	"norviq-api/internal/features/activity"
 	"norviq-api/internal/features/badges"
@@ -127,12 +129,12 @@ func (h *handlers) recordActivity(ctx context.Context, db activitydb.DBTX, rec a
 }
 
 // reconcileBadges is Request.reconcileBadges: evaluate badges, log a
-// failure. (Vapor also queued a live achievement check here; v2 has no
-// achievements engine yet.)
+// failure, then queue a live achievement check.
 func (h *handlers) reconcileBadges(ctx context.Context, userID uuid.UUID) {
 	if _, err := h.badges.Evaluate(ctx, userID); err != nil {
 		h.logger.Warn("badge reconciliation failed", "user", userID.String(), "error", err)
 	}
+	achievementhooks.Schedule(userID)
 }
 
 // latchHolding is Request.latchOnboarding(.holding, ...).

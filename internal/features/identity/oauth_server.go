@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/store/identitydb"
 
 	"github.com/google/uuid"
@@ -347,7 +348,12 @@ func (s *service) exchangeCode(ctx context.Context, p tokenRequest) (*issuedToke
 	if scopes == nil {
 		scopes = []string{}
 	}
-	return s.issueOAuthTokens(ctx, q, flow.ClientID, *flow.UserID, scopes)
+	issued, err := s.issueOAuthTokens(ctx, q, flow.ClientID, *flow.UserID, scopes)
+	if err != nil {
+		return nil, err
+	}
+	achievementhooks.Schedule(*flow.UserID)
+	return issued, nil
 }
 
 func (s *service) issueOAuthTokens(ctx context.Context, q *identitydb.Queries, clientID string, userID uuid.UUID, scopes []string) (*issuedTokens, error) {

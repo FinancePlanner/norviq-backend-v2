@@ -1,0 +1,39 @@
+# Pilot write cases (PILOTS_ENABLED=1). Mutating: run once against a freshly
+# seeded pair of DB copies (see parity/pilots.jsonl), in file order:
+#   go run ./cmd/parity -a http://127.0.0.1:18148 -b http://127.0.0.1:18147 -jwt-secret parity-secret \
+#     -cases parity/pilots-writes.jsonl -ignore requestId,id,watchlistListId,portfolioListId,createdAt
+# Ignored keys are random ids and creation times of the rows each backend creates.
+{"name":"create-missing-slug","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"targetKind":"watchlist"}}
+{"name":"create-missing-kind","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi"}}
+{"name":"create-bad-kind","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"fund"}}
+{"name":"create-unknown-pilot","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nobody","targetKind":"watchlist"}}
+{"name":"create-no-book","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"ro-khanna","targetKind":"watchlist"}}
+{"name":"create-watchlist-followed-list","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist","watchlistListId":"91107000-0000-4000-8000-0000000000a1"}}
+{"name":"create-watchlist-default-list","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist","watchlistListId":"91107000-0000-4000-8000-0000000000a2"}}
+{"name":"create-watchlist-missing-list","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist","watchlistListId":"91107000-0000-4000-8000-0000000000af"}}
+{"name":"create-portfolio-no-capital","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio"}}
+{"name":"create-portfolio-too-much","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":10000001}}
+{"name":"create-portfolio-actual","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":5000,"portfolioListId":"91107000-0000-4000-8000-0000000000c2"}}
+{"name":"create-portfolio-busy","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":5000,"portfolioListId":"91107000-0000-4000-8000-0000000000c3"}}
+{"name":"create-portfolio-followed","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":5000,"portfolioListId":"91107000-0000-4000-8000-0000000000c1"}}
+{"name":"create-portfolio-missing","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":5000,"portfolioListId":"nope"}}
+{"name":"create-watchlist-new","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist"}}
+{"name":"create-portfolio-into-empty","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilot_slug":"nancy-pelosi","target_kind":"portfolio","starting_capital":5000,"portfolio_list_id":"91107000-0000-4000-8000-0000000000c4"}}
+{"name":"create-portfolio-new","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"dan-crenshaw","targetKind":"portfolio","startingCapital":12345.67}}
+{"name":"create-free-portfolio","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000002","body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":1000}}
+{"name":"create-free-watchlist","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000002","body":{"pilotSlug":"dan-crenshaw","targetKind":"watchlist","watchlistListId":"91107000-0000-4000-8000-0000000000a3"}}
+{"name":"create-free-over-limit","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000002","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist"}}
+{"name":"pat-portfolio-only-watchlist","method":"POST","path":"/v1/pilot-follows","headers":{"Authorization":"Bearer nvq_pat_parity_pilots_portfolio_only"},"body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist"}}
+{"name":"pat-portfolio-only-portfolio","method":"POST","path":"/v1/pilot-follows","headers":{"Authorization":"Bearer nvq_pat_parity_pilots_portfolio_only"},"body":{"pilotSlug":"nancy-pelosi","targetKind":"portfolio","startingCapital":100}}
+{"name":"pat-read-cannot-write","method":"POST","path":"/v1/pilot-follows","headers":{"Authorization":"Bearer nvq_pat_parity_pilots_read"},"body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist"}}
+{"name":"pat-watch-creates","method":"POST","path":"/v1/pilot-follows","headers":{"Authorization":"Bearer nvq_pat_parity_pilots_watch"},"body":{"pilotSlug":"dan-crenshaw","targetKind":"watchlist"}}
+{"name":"follows-after-creates","method":"GET","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"patch-bad-status","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000f02","as":"91107000-0000-4000-8000-000000000001","body":{"status":"gone"}}
+{"name":"patch-missing-status","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000f02","as":"91107000-0000-4000-8000-000000000001","body":{}}
+{"name":"patch-other-user","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000f02","as":"91107000-0000-4000-8000-000000000003","body":{"status":"active"}}
+{"name":"patch-resume","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000f02","as":"91107000-0000-4000-8000-000000000001","body":{"status":"active"}}
+{"name":"patch-unchanged","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000f02","as":"91107000-0000-4000-8000-000000000001","body":{"status":"active"}}
+{"name":"delete-other-user","method":"DELETE","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000003"}
+{"name":"delete","method":"DELETE","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"delete-again","method":"DELETE","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"events-after-delete","method":"GET","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01/events","as":"91107000-0000-4000-8000-000000000001"}

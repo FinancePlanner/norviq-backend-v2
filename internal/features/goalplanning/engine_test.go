@@ -135,3 +135,23 @@ func TestParseDate(t *testing.T) {
 		}
 	}
 }
+
+// pow is correctly rounded: these expected values are the nearest doubles to
+// x^y computed with 60-digit decimals (math.Pow and Darwin's libm both miss
+// some of them by one ULP).
+func TestPowIsCorrectlyRounded(t *testing.T) {
+	cases := []struct{ x, y, want float64 }{
+		{1.0229382804661402, 57.25, 3.663362800479048},
+		{1.0054938397763848, 834, 96.47870134471117},
+		{1.0087496165626522, 34.166666666666664, 1.346683608005619},
+		{2, 10, 1024},
+		{4, 0.5, 2},
+		{1.06, 0, 1},
+		{1, 1e9, 1},
+	}
+	for _, c := range cases {
+		if got := pow(c.x, c.y); got != c.want {
+			t.Errorf("pow(%v, %v) = %v, want %v", c.x, c.y, got, c.want)
+		}
+	}
+}

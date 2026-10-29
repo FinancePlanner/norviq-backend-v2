@@ -12,7 +12,7 @@ import (
 // results agree to the last bit wherever pow does.
 
 func monthlyRate(annualRate float64) float64 {
-	return math.Pow(1+annualRate, 1.0/12.0) - 1
+	return pow(1+annualRate, 1.0/12.0) - 1
 }
 
 // futureValue is PlanningEngine.futureValue.
@@ -23,18 +23,18 @@ func futureValue(principal, monthlyContribution, annualRate float64, months int,
 	rate := monthlyRate(annualRate)
 	if math.Abs(annualContributionGrowthRate) <= 0.000_000_001 {
 		if math.Abs(rate) <= 0.000_000_001 {
-			return principal + monthlyContribution*float64(months)
+			return principal + float64(monthlyContribution*float64(months))
 		}
-		growth := math.Pow(1+rate, float64(months))
-		return principal*growth + monthlyContribution*((growth-1)/rate)
+		growth := pow(1+rate, float64(months))
+		return float64(principal*growth) + float64(monthlyContribution*((growth-1)/rate))
 	}
 	balance := principal
 	contribution := monthlyContribution
 	for month := 1; month <= months; month++ {
-		balance *= 1 + rate
+		balance = float64(balance * (1 + rate))
 		balance += contribution
 		if month%12 == 0 {
-			contribution *= 1 + annualContributionGrowthRate
+			contribution = float64(contribution * (1 + annualContributionGrowthRate))
 		}
 	}
 	return balance
@@ -45,7 +45,7 @@ func inflatedTarget(target, annualInflationRate float64, months int) float64 {
 	if months <= 0 || math.Abs(annualInflationRate) <= 0.000_000_001 {
 		return target
 	}
-	return target * math.Pow(1+annualInflationRate, float64(months)/12)
+	return float64(target * pow(1+annualInflationRate, float64(months)/12))
 }
 
 // errInvalidHorizon is GoalPlanningValidationError.invalidHorizon.
@@ -58,7 +58,7 @@ func requiredMonthlyContribution(principal, target, annualRate float64, months i
 	}
 	goal := inflatedTarget(target, annualInflationRate, months)
 	rate := monthlyRate(annualRate)
-	grown := principal * math.Pow(1+rate, float64(months))
+	grown := float64(principal * pow(1+rate, float64(months)))
 	factor := futureValue(0, 1, annualRate, months, annualContributionGrowthRate)
 	if factor <= 0.000_000_001 {
 		return 0, nil

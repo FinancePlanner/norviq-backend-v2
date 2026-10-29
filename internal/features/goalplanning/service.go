@@ -201,7 +201,7 @@ func driftState(current, target, targetAtDate, projected float64, driftMonths *i
 		return driftInsufficientData
 	}
 	dm := *driftMonths
-	if math.Abs(projected-targetAtDate) <= targetAtDate*0.01 || abs(dm) <= 1 {
+	if math.Abs(projected-targetAtDate) <= float64(targetAtDate*0.01) || abs(dm) <= 1 {
 		return driftOnTrack
 	}
 	if dm < 0 {
@@ -253,9 +253,9 @@ func (s *service) currentValue(ctx context.Context, allocations []goalplanningdb
 			} else {
 				price = quote.CurrentPrice
 			}
-			portfolioValue += h.Shares * price
+			portfolioValue += float64(h.Shares * price)
 		}
-		total += portfolioValue * a.AllocationPercentage / 100
+		total += float64(portfolioValue*a.AllocationPercentage) / 100
 	}
 	if total == 0 && fallback > 0 {
 		warnings = append(warnings, "Linked portfolios have no valued holdings; starting capital is used.")

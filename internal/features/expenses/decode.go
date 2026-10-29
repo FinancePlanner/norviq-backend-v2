@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
@@ -45,7 +46,11 @@ func readBody(c *echo.Context) (body, error) {
 	out := body{}
 	snake := map[string]bool{}
 	for k, v := range obj {
-		n := apijson.NormalizeSnakeCaseKey(k)
+		// convertFromSnakeCase leaves keys without an underscore untouched.
+		n := k
+		if strings.Contains(k, "_") {
+			n = apijson.NormalizeSnakeCaseKey(k)
+		}
 		isSnake := n != k
 		if _, exists := out[n]; exists && snake[n] && !isSnake {
 			continue

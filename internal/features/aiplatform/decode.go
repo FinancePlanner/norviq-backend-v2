@@ -40,7 +40,7 @@ func decodeObject(c *echo.Context, fields []fieldSpec) (map[string]any, error) {
 		return nil, err
 	}
 	var obj map[string]json.RawMessage
-	if err := apijson.Unmarshal(raw, &obj); err != nil {
+	if err := apijson.UnmarshalKeyed(raw, &obj); err != nil {
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) > 0 && json.Valid(trimmed) {
 			return nil, httpx.BadRequest(fmt.Sprintf(

@@ -99,6 +99,11 @@ func validateObject(raw []byte, spec []field, path []string, typeName string) er
 					f.name, pathString(path), f.name, f.name))
 			}
 			t := swiftTypeName(f)
+			if f.kind == kindObject {
+				return httpx.BadRequest(fmt.Sprintf(
+					"No value found (expected type '%s') at path '%s'. Cannot get keyed decoding container -- found null value instead.",
+					t, pathString(fieldPath)))
+			}
 			return httpx.BadRequest(fmt.Sprintf(
 				"No value found (expected type '%s') at path '%s'. Cannot get value of type %s -- found null value instead.",
 				t, pathString(fieldPath), t))
@@ -139,7 +144,7 @@ func validateValue(v []byte, f field, path []string) error {
 					return nil
 				}
 			}
-			return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s",
+			return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s.",
 				pathString(path), f.typeName, s))
 		}
 	case kindDouble:
@@ -162,8 +167,8 @@ func validateValue(v []byte, f field, path []string) error {
 			itemPath := append(append([]string{}, path...), fmt.Sprintf("Index %d", i))
 			if bytes.Equal(item, []byte("null")) {
 				return httpx.BadRequest(fmt.Sprintf(
-					"No value found (expected type '%s') at path '%s'. Cannot get keyed decoding container -- found null value instead.",
-					f.typeName, pathString(itemPath)))
+					"No value found (expected type 'Dictionary<String, Any>') at path '%s'. Cannot get keyed decoding container -- found null value instead.",
+					pathString(itemPath)))
 			}
 			if err := validateObject(item, f.fields, itemPath, f.typeName); err != nil {
 				return err

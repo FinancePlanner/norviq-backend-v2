@@ -249,7 +249,7 @@ func queryDecodeInt(c *echo.Context, name string) (*int, error) {
 	}
 	v, err := strconv.Atoi(*raw)
 	if err != nil {
-		return nil, httpx.BadRequest("Data corrupted at path '" + name + "'. Unable to convert value to Int")
+		return nil, httpx.BadRequest("Value was not of type 'Int' at path '" + name + "'. Data found at '" + name + "' was not Int.")
 	}
 	return &v, nil
 }

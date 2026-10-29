@@ -399,14 +399,16 @@ func (h *handlers) bulkCreateStocks(c *echo.Context) error {
 }
 
 // localizedDescription is `error.localizedDescription` for the errors a
-// per-item create throws. Vapor's Abort is a DebuggableError, so its
-// localized description is its reason.
+// per-item create throws: Vapor's Abort describes itself as
+// "Abort.<code>: <reason>". Anything else (a database error) is Foundation's
+// generic text, which names the Swift error type; v2 cannot reproduce that
+// name, so it uses the same shape with a generic type.
 func localizedDescription(err error) string {
 	var he *httpx.Error
 	if errors.As(err, &he) {
-		return he.Reason
+		return fmt.Sprintf("Abort.%d: %s", he.Status, he.Reason)
 	}
-	return "The operation couldn’t be completed."
+	return "The operation couldn’t be completed. (PostgresNIO.PSQLError error 1.)"
 }
 
 // ---- GET/PUT/DELETE /v1/stocks/id/:stockId ---------------------------------------

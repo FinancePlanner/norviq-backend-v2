@@ -42,6 +42,19 @@ type Deps struct {
 type Routes struct {
 	Root *echo.Group
 	V1   *echo.Group
+
+	bodyLimits map[string]int64 // "METHOD /path" -> bytes; see AllowLargeBody
+}
+
+// AllowLargeBody lifts the global 10 MB body cap for one route to limit
+// bytes: Vapor's `body: .collect(maxSize:)` above defaultMaxBodySize. path
+// is the full route path ("/v1/receipts/scan"). The handler still enforces
+// its own limit, after its middleware, as Vapor's collect did. Register-time
+// only; a no-op on Routes not built by New.
+func (r *Routes) AllowLargeBody(method, path string, limit int64) {
+	if r.bodyLimits != nil {
+		r.bodyLimits[method+" "+path] = limit
+	}
 }
 
 // Feature is one ported Vapor controller (or a few related ones).
@@ -71,6 +84,7 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		OnAddRoute:       st.mirror,
 	})
 
+	bodyLimits := map[string]int64{}
 	origins, err := allowedOrigins(d.Config.AllowedOrigins, d.Config.IsProduction())
 	if err != nil {
 		return nil, err
@@ -85,11 +99,11 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		middleware.SecurityHeaders(d.Config.IsProduction()),
 		echomw.GzipWithConfig(echomw.GzipConfig{MinLength: 1024}),
 		middleware.RequestLog(d.Logger),
-		echomw.BodyLimit(10*1024*1024),
+		bodyLimit(10*1024*1024, bodyLimits),
 		echomw.Recover(),
 	)
 
-	routes := &Routes{Root: e.Group(""), V1: e.Group("/v1")}
+	routes := &Routes{Root: e.Group(""), V1: e.Group("/v1"), bodyLimits: bodyLimits}
 	registerHealth(d, routes)
 	for _, f := range features {
 		if err := f.Register(d, routes); err != nil {
@@ -216,4 +230,20 @@ func registerHealth(d *Deps, r *Routes) {
 	})
 	r.V1.GET("", func(c *echo.Context) error { return c.String(http.StatusOK, "It works!") })
 	r.V1.GET("/hello", func(c *echo.Context) error { return c.String(http.StatusOK, "Hello, world!") })
+}
+
+// bodyLimit is echo's BodyLimit at def bytes, except on routes given their
+// own cap with AllowLargeBody. Echo routes before global middleware, so
+// c.Path() is the matched route here. limits is only written before serving.
+func bodyLimit(def int64, limits map[string]int64) echo.MiddlewareFunc {
+	std := echomw.BodyLimit(def)
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		dflt := std(next)
+		return func(c *echo.Context) error {
+			if n, ok := limits[c.Request().Method+" "+c.Path()]; ok {
+				return echomw.BodyLimit(n)(next)(c)
+			}
+			return dflt(c)
+		}
+	}
 }

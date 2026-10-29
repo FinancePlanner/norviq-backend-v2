@@ -1,0 +1,31 @@
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="0.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="1.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="2.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="3.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="4.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB
+Content-Disposition: form-data; name="files[]"; filename="5.jpg"
+Content-Type: image/jpeg
+
+ÿØÿÙ
+--PARITYB--

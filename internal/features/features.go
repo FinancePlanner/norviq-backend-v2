@@ -17,11 +17,13 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
+	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/platform/entitlements"
@@ -68,6 +70,9 @@ func All() []server.Feature {
 				return expenses.StatisticsOverview{}
 			},
 		},
+		// Spreadsheet import and receipts (throttled groups in routes.swift).
+		expenseimport.Feature{},
+		receipts.Feature{},
 	}
 }
 
@@ -114,6 +119,7 @@ func AllJobs() []Job {
 		market.HistoryIngestionJob{},
 		reporting.WorkerJob{},
 		reporting.RetentionJob{},
+		expenseimport.RetentionJob{},
 	}
 }
 

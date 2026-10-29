@@ -182,6 +182,9 @@ func keyNotFound(key, path string) *httpx.Error {
 }
 
 func dataCorrupted(path, desc string) *httpx.Error {
+	if !strings.HasSuffix(desc, ".") {
+		desc += "."
+	}
 	return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. %s", path, desc))
 }
 

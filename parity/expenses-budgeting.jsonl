@@ -52,11 +52,12 @@
 # ---- templates
 {"name":"templates-list","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000002"}
 {"name":"templates-free-user","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000001"}
-{"name":"template-update-ok","method":"PUT","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000000b2","as":"e5c00000-0000-4000-8000-000000000002","body":{"name":" Legacy ","items":[{"title":"Rent","plannedAmount":900,"pillar":"Fundamentals","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
 {"name":"template-update-not-found","method":"PUT","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000000bf","as":"e5c00000-0000-4000-8000-000000000002","body":{"name":"X","items":[{"title":"Rent","plannedAmount":900,"pillar":"fun","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
 {"name":"template-create-invalid","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"  ","items":[]}}
 {"name":"template-create-negative","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Neg","items":[{"title":"A","plannedAmount":-1,"pillar":"fun","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
 {"name":"template-create-bad-enum","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Enum","items":[{"title":"A","plannedAmount":1,"pillar":"fun","targetType":"weekly","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-create-bad-pillar","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Pillar","items":[{"title":"A","plannedAmount":1,"pillar":"  ","targetType":"fixed","allocationKind":"expense","reallocationEligible":false}]}}
+{"name":"template-create-missing-item-key","method":"POST","path":"/v1/budget/templates","as":"e5c00000-0000-4000-8000-000000000003","body":{"name":"Missing","items":[{"title":"A","plannedAmount":1,"pillar":"fun","targetType":"fixed","allocationKind":"expense"}]}}
 {"name":"template-delete-ok","method":"DELETE","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003b2","as":"e5c00000-0000-4000-8000-000000000003"}
 {"name":"template-delete-not-found","method":"DELETE","path":"/v1/budget/templates/e5c00000-0000-4000-8000-0000000003bf","as":"e5c00000-0000-4000-8000-000000000003"}
 {"name":"template-delete-bad-uuid","method":"DELETE","path":"/v1/budget/templates/zzz","as":"e5c00000-0000-4000-8000-000000000003"}

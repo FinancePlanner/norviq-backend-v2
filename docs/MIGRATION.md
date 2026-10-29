@@ -59,6 +59,19 @@ client release. Then archive the Vapor repo.
   verify a zero-line diff, and regenerate `docs/vapor-routes.txt` with every
   `*_ENABLED` flag on.
 
+## Deliberate deviations from Vapor
+
+Vapor bugs are ported faithfully unless listed here. Each fix is v2-only;
+Vapor is archived after cutover, not patched.
+
+- **RevenueCat decoding** (billing): Vapor's `JSONDecoder.backendAPI`
+  rewrote RevenueCat's snake_case keys to camelCase, so every snake_case
+  field decoded as nil. `/v1/billing/restore` downgraded paying users to
+  free, and `/v1/billing/management-url` never returned RevenueCat's URL or
+  the web-billing portal. v2 decodes RevenueCat bodies with plain
+  `encoding/json` (`internal/features/billing/revenuecat.go`). Until cutover
+  a user restoring through a route still served by Vapor gets the old result.
+
 ## Order
 
 | Wave | Domains | Why first |

@@ -2,25 +2,24 @@ package billing
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
-	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
 )
 
 // revenueCat is the REST client BillingController used through req.client.
 //
-// Vapor decoded these responses with the global JSONDecoder.backendAPI,
-// whose key strategy rewrites every snake_case key to camelCase before the
-// CodingKeys lookup. The structs below map snake_case names, so every
-// snake_case field decodes as nil in Vapor (dictionary keys such as
-// "pro_access" are left alone). v2 reproduces that by decoding with
-// apijson.Unmarshal, which applies the same strategy. This is a Vapor bug, ported on
-// purpose and listed in the port report.
+// RevenueCat answers in snake_case, so its bodies are decoded with plain
+// encoding/json against the snake_case tags below. Vapor decoded them with
+// JSONDecoder.backendAPI, whose key strategy rewrote every key to camelCase
+// first, so every snake_case field came back nil: /billing/restore downgraded
+// paying users and the management URL was usually missing. v2 deliberately
+// fixes that bug instead of porting it.
 type revenueCat struct {
 	base   string
 	client *http.Client
@@ -122,7 +121,7 @@ func (rc *revenueCat) subscriptions(ctx context.Context, projectID, userID, apiK
 	}
 	invalid := httpx.Abort(http.StatusBadGateway, "RevenueCat subscription list response was invalid.")
 	var list v2SubscriptionList
-	if err := apijson.Unmarshal(body, &list); err != nil || list.Items == nil {
+	if err := json.Unmarshal(body, &list); err != nil || list.Items == nil {
 		return nil, invalid
 	}
 	for _, s := range *list.Items {
@@ -150,7 +149,7 @@ func managementURLFrom(status int, body []byte) *string {
 		return nil
 	}
 	var out authenticatedManagementURL
-	if apijson.Unmarshal(body, &out) != nil {
+	if json.Unmarshal(body, &out) != nil {
 		return nil
 	}
 	return out.ManagementURL
@@ -167,7 +166,7 @@ func (rc *revenueCat) subscriber(ctx context.Context, userID, apiKey string) (*s
 		return nil, httpx.Abort(http.StatusBadGateway, fmt.Sprintf("RevenueCat subscriber lookup failed with status %d.", status))
 	}
 	var resp subscriberResponse
-	if err := apijson.Unmarshal(body, &resp); err != nil || resp.Subscriber == nil ||
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Subscriber == nil ||
 		resp.Subscriber.Entitlements == nil || resp.Subscriber.Subscriptions == nil {
 		return nil, httpx.Abort(http.StatusBadGateway, "RevenueCat subscriber response was invalid.")
 	}

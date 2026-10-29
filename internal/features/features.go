@@ -24,6 +24,7 @@ import (
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
@@ -39,6 +40,8 @@ import (
 	"norviq-api/internal/features/social"
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/features/stocks"
+	"norviq-api/internal/features/tax"
+	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
@@ -76,6 +79,11 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		earnings.Feature{},
+		// Watchlist, lists, CSV import, price targets, smart screens and
+		// holding risk profiles.
+		watchlist.Feature{},
+		// TaxController (/v1/tax/*).
+		tax.Feature{},
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
@@ -124,6 +132,8 @@ func All() []server.Feature {
 		articles.Feature{},
 		// Pilot follows (PILOTS_ENABLED, checked per request).
 		pilots.Feature{},
+		// FinancingController (/v1/financing/*).
+		financing.Feature{},
 	}
 }
 
@@ -178,6 +188,12 @@ func AllJobs() []Job {
 		achievements.SweepJob{},
 		pilots.IngestionJob{},
 		pilots.MirrorJob{},
+		watchlist.TargetAlertJob{},
+		watchlist.EarningsReminderJob{},
+		// Tax: report queue, report expiry, daily projections.
+		tax.ReportGenerationJob{},
+		tax.ReportCleanupJob{},
+		tax.ProjectionJob{},
 	}
 }
 

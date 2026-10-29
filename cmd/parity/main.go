@@ -45,8 +45,10 @@ type testCase struct {
 	As      string            `json:"as"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
-	// RawBody is sent verbatim instead of Body (CSV uploads); set its
-	// Content-Type in Headers.
+	// Raw (alias rawBody), when set, is sent verbatim instead of Body,
+	// with only the Content-Type the case sets in Headers (CSV, multipart,
+	// form and malformed bodies).
+	Raw     *string `json:"raw"`
 	RawBody *string `json:"rawBody"`
 	// BodyFile is sent verbatim instead of Body.
 	BodyFile string `json:"bodyFile"`
@@ -130,25 +132,28 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 	if method == "" {
 		method = http.MethodGet
 	}
+	raw := tc.Raw
+	if raw == nil {
+		raw = tc.RawBody
+	}
 	var body io.Reader
 	switch {
-	case tc.RawBody != nil:
-		body = strings.NewReader(*tc.RawBody)
-	case len(tc.Body) > 0:
-		body = bytes.NewReader(tc.Body)
-	}
-	if tc.BodyFile != "" {
+	case raw != nil:
+		body = strings.NewReader(*raw)
+	case tc.BodyFile != "":
 		data, err := os.ReadFile(tc.BodyFile)
 		if err != nil {
 			return nil, err
 		}
 		body = bytes.NewReader(data)
+	case len(tc.Body) > 0:
+		body = bytes.NewReader(tc.Body)
 	}
 	req, err := http.NewRequest(method, base+tc.Path, body) //nolint:noctx // CLI tool, client has a timeout
 	if err != nil {
 		return nil, err
 	}
-	if len(tc.Body) > 0 && tc.RawBody == nil {
+	if len(tc.Body) > 0 && raw == nil && tc.BodyFile == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range tc.Headers {

@@ -1,0 +1,38 @@
+{
+  "version": "2026.1",
+  "effectiveFrom": "2026-01-01",
+  "entries": [
+    {
+      "assetClass": "stock",
+      "expectedYield": 0.018,
+      "ordinaryIncomeShare": 0.20,
+      "turnover": 0.05,
+      "reviewedAt": "2026-01-01",
+      "reviewReference": "tax-policy:asset-class-defaults:2026.1"
+    },
+    {
+      "assetClass": "etf",
+      "expectedYield": 0.022,
+      "ordinaryIncomeShare": 0.25,
+      "turnover": 0.08,
+      "reviewedAt": "2026-01-01",
+      "reviewReference": "tax-policy:asset-class-defaults:2026.1"
+    },
+    {
+      "assetClass": "bond",
+      "expectedYield": 0.04,
+      "ordinaryIncomeShare": 1.0,
+      "turnover": 0.0,
+      "reviewedAt": "2026-01-01",
+      "reviewReference": "tax-policy:asset-class-defaults:2026.1"
+    },
+    {
+      "assetClass": "cash",
+      "expectedYield": 0.03,
+      "ordinaryIncomeShare": 1.0,
+      "turnover": 0.0,
+      "reviewedAt": "2026-01-01",
+      "reviewReference": "tax-policy:asset-class-defaults:2026.1"
+    }
+  ]
+}

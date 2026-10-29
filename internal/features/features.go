@@ -26,6 +26,8 @@ import (
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
+
+	"github.com/google/uuid"
 )
 
 // All returns every ported feature, in Vapor's registration order where it
@@ -37,7 +39,13 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		activity.Feature{},
-		badges.Feature{},
+		// BadgeService records each new tier as a legacy achievement
+		// (AchievementService.recordLegacyBadge).
+		badges.Feature{OnEarned: func(d *server.Deps) badges.EarnedHook {
+			return func(ctx context.Context, userID uuid.UUID, badgeType, tier string, earnedAt time.Time) {
+				achievements.RecordLegacyBadge(ctx, d.DB, d.Logger, userID, badgeType, tier, earnedAt)
+			}
+		}},
 		feedback.Feature{},
 		assets.Feature{Search: func(d *server.Deps) (assets.SymbolSearch, error) {
 			svc, err := market.SharedService(d)

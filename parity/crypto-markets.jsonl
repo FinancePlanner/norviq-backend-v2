@@ -1,0 +1,8 @@
+# /v1/crypto/markets success: both backends fetch CoinGecko's keyless public
+# API live (no Redis, so each keeps its own snapshot), so values can drift
+# between the two calls. Compare with -ignore requestId,asOf; any remaining
+# diffs are market moves, not code.
+{"name":"markets-default","path":"/v1/crypto/markets","as":"c7d00000-0000-4000-8000-000000000001"}
+{"name":"markets-1w-limit","path":"/v1/crypto/markets?timeframe=1W&limit=5","as":"c7d00000-0000-4000-8000-000000000001"}
+{"name":"markets-all","path":"/v1/crypto/markets?timeframe=all&limit=0","as":"c7d00000-0000-4000-8000-000000000001"}
+{"name":"markets-ytd","path":"/v1/crypto/markets?timeframe=ytd&limit=999","as":"c7d00000-0000-4000-8000-000000000001"}

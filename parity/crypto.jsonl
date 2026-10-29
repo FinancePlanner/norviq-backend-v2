@@ -1,0 +1,44 @@
+# Crypto: /v1/crypto/*. Load parity/crypto-dashboard-setup.sql first. Vapor runs
+# in development without FMP_API_KEY, so both serve MockCryptoDataProvider.
+{"name": "list-unauth", "path": "/v1/crypto/list"}
+{"name": "list-free", "path": "/v1/crypto/list", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "list", "path": "/v1/crypto/list", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "quote-free", "path": "/v1/crypto/quote/BTC", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "quote-short", "path": "/v1/crypto/quote-short/eth", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "quote-short-query-symbol", "path": "/v1/crypto/quote-short/eth?symbol=%20sol%20", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "batch-quotes", "path": "/v1/crypto/batch-quotes?short=true", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "batch-quotes-garbage", "path": "/v1/crypto/batch-quotes?short=maybe", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-1min", "path": "/v1/crypto/history/1min/BTCUSD", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-5min", "path": "/v1/crypto/history/5min/BTCUSD?from=2025-01-01&to=2025-02-01", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-1hour", "path": "/v1/crypto/history/1hour/btcusd", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-light", "path": "/v1/crypto/history/light/btcusd", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-full", "path": "/v1/crypto/history/full/ethusd", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-bad-resolution", "path": "/v1/crypto/history/1day/BTCUSD", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "history-free", "path": "/v1/crypto/history/1day/BTCUSD", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "news", "path": "/v1/crypto/news?page=1&limit=x", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "news-symbol", "path": "/v1/crypto/news/ethusd", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "news-symbol-none", "path": "/v1/crypto/news/DOGE", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "news-free", "path": "/v1/crypto/news", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "markets-bad-timeframe", "path": "/v1/crypto/markets?timeframe=2w", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "markets-free", "path": "/v1/crypto/markets", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "portfolio-list", "path": "/v1/crypto/portfolio", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-list-empty", "path": "/v1/crypto/portfolio", "as": "c7d00000-0000-4000-8000-000000000003"}
+{"name": "portfolio-list-free", "path": "/v1/crypto/portfolio", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "portfolio-post-json", "method": "POST", "path": "/v1/crypto/portfolio", "body": {"symbol": "ada", "name": "Cardano", "quantity": 1, "average_buy_price": 0.5}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-json-camel", "method": "POST", "path": "/v1/crypto/portfolio", "body": {"symbol": "ada", "name": "Cardano", "quantity": 1, "averageBuyPrice": 0.5}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-json-missing-name", "method": "POST", "path": "/v1/crypto/portfolio", "body": {"symbol": "ada", "quantity": 1}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-json-bad-qty", "method": "POST", "path": "/v1/crypto/portfolio", "body": {"symbol": "ada", "name": "x", "quantity": "1"}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-empty-body", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "application/json"}, "raw": "", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-free", "method": "POST", "path": "/v1/crypto/portfolio", "body": {"symbol": "ada", "name": "Cardano", "quantity": 1, "averageBuyPrice": 0.5}, "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "portfolio-post-form-merge", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "raw": "symbol=%20ethusd%20&name=%20Ether%20&quantity=0&average_buy_price=999", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-form-missing", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "raw": "symbol=ada&name=Cardano&quantity=1", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-post-form-bad-number", "method": "POST", "path": "/v1/crypto/portfolio", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "raw": "symbol=ada&name=Cardano&quantity=abc&average_buy_price=1", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-put-json", "method": "PUT", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c01", "body": {"symbol": "btcusd", "name": "Bitcoin", "quantity": 1, "averageBuyPrice": 1}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-put-form", "method": "PUT", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c01", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "raw": "symbol=%20btcusd&name=%20Bitcoin%20&quantity=0.75&average_buy_price=61000.5", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-put-form-not-found", "method": "PUT", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c04", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "raw": "symbol=btc&name=b&quantity=1&average_buy_price=1", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-put-bad-id", "method": "PUT", "path": "/v1/crypto/portfolio/not-a-uuid", "body": {"symbol": "x"}, "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-delete", "method": "DELETE", "path": "/v1/crypto/portfolio/C7D00000-0000-4000-8000-000000000C03", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-delete-not-found", "method": "DELETE", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c04", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-delete-bad-id", "method": "DELETE", "path": "/v1/crypto/portfolio/123", "as": "c7d00000-0000-4000-8000-000000000001"}
+{"name": "portfolio-delete-free", "method": "DELETE", "path": "/v1/crypto/portfolio/c7d00000-0000-4000-8000-000000000c04", "as": "c7d00000-0000-4000-8000-000000000002"}
+{"name": "portfolio-list-after", "path": "/v1/crypto/portfolio", "as": "c7d00000-0000-4000-8000-000000000001"}

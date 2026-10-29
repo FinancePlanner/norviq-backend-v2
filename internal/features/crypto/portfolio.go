@@ -198,7 +198,7 @@ func decodePortfolioRequest(c *echo.Context) (PortfolioItemRequest, error) {
 		}
 		n, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
-			return 0, httpx.BadRequest(fmt.Sprintf("Could not convert value at '%s' to Double.", name))
+			return 0, httpx.BadRequest(fmt.Sprintf("Value was not of type 'Double' at path '%s'. Data found at '%s' was not Double.", name, name))
 		}
 		return n, nil
 	}

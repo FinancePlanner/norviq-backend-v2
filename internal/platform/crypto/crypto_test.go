@@ -21,7 +21,7 @@ const (
 
 func devPII(t *testing.T) *PII {
 	t.Helper()
-	p, err := piiFromLookup(false, nil, func(string) string { return "" })
+	p, err := PIIFromLookup(false, nil, func(string) string { return "" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestKeyRotation(t *testing.T) {
 		"USER_PII_ENCRYPTION_ACTIVE_KEY":    base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)),
 		"USER_PII_ENCRYPTION_PREVIOUS_KEYS": " v1:" + b64 + " ,",
 	}
-	rotated, err := piiFromLookup(true, nil, func(k string) string { return env[k] })
+	rotated, err := PIIFromLookup(true, nil, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestKeyRotation(t *testing.T) {
 }
 
 func TestConfigErrors(t *testing.T) {
-	if _, err := piiFromLookup(true, nil, func(string) string { return "" }); !errors.Is(err, ErrMissingConfig) {
+	if _, err := PIIFromLookup(true, nil, func(string) string { return "" }); !errors.Is(err, ErrMissingConfig) {
 		t.Errorf("production without key: %v", err)
 	}
 	env := map[string]string{"USER_PII_ENCRYPTION_ACTIVE_KEY_ID": "a", "USER_PII_ENCRYPTION_ACTIVE_KEY": "c2hvcnQ="}
-	if _, err := piiFromLookup(false, nil, func(k string) string { return env[k] }); !errors.Is(err, ErrMalformedConfig) {
+	if _, err := PIIFromLookup(false, nil, func(k string) string { return env[k] }); !errors.Is(err, ErrMalformedConfig) {
 		t.Errorf("short key: %v", err)
 	}
 }

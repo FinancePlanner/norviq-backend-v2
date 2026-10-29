@@ -174,10 +174,11 @@ func (p *PII) open(payload []byte, version int, aad []byte) (string, error) {
 // UserPIIEncryptionBootstrap does. Outside production a missing key falls
 // back to Vapor's fixed development key, so both processes agree locally.
 func PIIFromEnv(isProduction bool, logger *slog.Logger) (*PII, error) {
-	return piiFromLookup(isProduction, logger, os.Getenv)
+	return PIIFromLookup(isProduction, logger, os.Getenv)
 }
 
-func piiFromLookup(isProduction bool, logger *slog.Logger, get func(string) string) (*PII, error) {
+// PIIFromLookup is PIIFromEnv over an arbitrary variable lookup.
+func PIIFromLookup(isProduction bool, logger *slog.Logger, get func(string) string) (*PII, error) {
 	keyID := strings.TrimSpace(get("USER_PII_ENCRYPTION_ACTIVE_KEY_ID"))
 	keyRaw := strings.TrimSpace(get("USER_PII_ENCRYPTION_ACTIVE_KEY"))
 	if keyID == "" || keyRaw == "" {

@@ -7,6 +7,9 @@
 //
 //	{"name":"me","method":"GET","path":"/v1/users/me","as":"<user uuid>","body":{...}}
 //
+// "rawBody" (a string) is sent verbatim in place of "body", for non-JSON
+// uploads.
+//
 // "as" signs a SessionToken for that user with -jwt-secret, so both backends
 // see the same caller. Volatile fields (requestId, timestamps listed with
 // -ignore) are dropped before comparing. Only use against databases you own:
@@ -39,6 +42,9 @@ type testCase struct {
 	As      string            `json:"as"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
+	// RawBody is sent verbatim instead of Body (CSV uploads); set its
+	// Content-Type in Headers.
+	RawBody *string `json:"rawBody"`
 }
 
 type result struct {
@@ -120,14 +126,17 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 		method = http.MethodGet
 	}
 	var body io.Reader
-	if len(tc.Body) > 0 {
+	switch {
+	case tc.RawBody != nil:
+		body = strings.NewReader(*tc.RawBody)
+	case len(tc.Body) > 0:
 		body = bytes.NewReader(tc.Body)
 	}
 	req, err := http.NewRequest(method, base+tc.Path, body) //nolint:noctx // CLI tool, client has a timeout
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
+	if len(tc.Body) > 0 && tc.RawBody == nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range tc.Headers {

@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
+	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
@@ -58,7 +59,28 @@ func All() []server.Feature {
 		// BudgetingEngineController (drift, reallocations, templates).
 		budgeting.Feature{},
 		reporting.Feature{},
+		// Expenses, budget snapshots/items and reports. Expense writes run
+		// the budgeting engine's drift evaluator, as DefaultExpensesService
+		// did; the reports overview reads the statistics overview.
+		expenses.Feature{
+			Drift: budgetDrift,
+			Overview: func(*server.Deps) expenses.OverviewSource {
+				return expenses.StatisticsOverview{}
+			},
+		},
 	}
+}
+
+// budgetDrift is the budgeting engine's BudgetDriftEvaluator, which
+// ExpensesService and the bulk importers call after writes. A config error
+// disables drift evaluation (it is best effort in Vapor too).
+func budgetDrift(d *server.Deps) expenses.DriftEvaluator {
+	e, err := budgeting.NewEngine(d)
+	if err != nil || e.Evaluator == nil {
+		d.Logger.Error("budget drift evaluator unavailable", "error", err)
+		return nil
+	}
+	return e.Evaluator
 }
 
 // marketSearch adapts the market data service to assets.SymbolSearch; the

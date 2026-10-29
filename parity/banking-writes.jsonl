@@ -1,0 +1,5 @@
+# Import success: each run creates a new expense, so ids and timestamps differ.
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18116 -jwt-secret parity-secret \
+#     -cases parity/banking-writes.jsonl -ignore requestId,id,createdAt,updatedAt
+{"name": "import", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000011/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "Essentials", "title_override": "  Groceries  "}}
+{"name": "import-default-title", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000011/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}

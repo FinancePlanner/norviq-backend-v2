@@ -193,7 +193,7 @@ func (g *gatewayClient) checkAuthStatus(ctx context.Context) (bool, error) {
 	if raw, ok := obj["authenticated"]; ok && !isJSONNull(raw) {
 		var b bool
 		if json.Unmarshal(raw, &b) != nil {
-			return false, nil
+			return false, nil //nolint:nilerr // a mistyped field fails the decode, which reads as unauthenticated
 		}
 		authenticated = &b
 	}
@@ -267,7 +267,7 @@ func (g *gatewayClient) fetchListingExchange(ctx context.Context, conid string) 
 	}
 	v, err := optString(obj, "listingExchange")
 	if err != nil {
-		return nil, false, nil
+		return nil, false, nil //nolint:nilerr // an undecodable contract answers "no info", as try? did
 	}
 	return v, true, nil
 }
@@ -320,7 +320,7 @@ func (g *gatewayClient) fetchCashBalances(ctx context.Context, accountID string)
 			}
 			l, err := parseLossy(v)
 			if err != nil {
-				return []ibkrCashBalance{}, nil
+				return []ibkrCashBalance{}, nil //nolint:nilerr // an undecodable ledger is no balances, as Vapor's try? was
 			}
 			m[k] = l
 		}
@@ -364,7 +364,8 @@ func (g *gatewayClient) fetchDividendsAndWithholdings(ctx context.Context, accou
 	}
 	dividends := []ibkrDividend{}
 	withholdings := []withholdingRow{}
-	for _, t := range txs {
+	for idx := range txs {
+		t := &txs[idx]
 		switch {
 		case t.Type == "DIV" || t.Type == "DIVIDEND":
 			id := t.ExternalID

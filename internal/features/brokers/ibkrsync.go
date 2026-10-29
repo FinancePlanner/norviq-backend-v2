@@ -74,7 +74,8 @@ func (x ibkrSyncService) sync(ctx context.Context, c *conn, userID uuid.UUID) (S
 		return SyncResponse{}, err
 	}
 	existingSymbols := map[string]bool{}
-	for _, st := range existing {
+	for ix := range existing {
+		st := existing[ix]
 		existingSymbols[st.Symbol] = true
 	}
 
@@ -356,9 +357,10 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 		return err
 	}
 	var transactions []ibkrTransaction
-	for _, t := range fetched {
+	for idx := range fetched {
+		t := &fetched[idx]
 		if !isUnsupportedAssetClass(t.AssetClass) {
-			transactions = append(transactions, t)
+			transactions = append(transactions, *t)
 		}
 	}
 	sort.SliceStable(transactions, func(i, j int) bool {
@@ -370,7 +372,8 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 
 	q := x.s.q()
 	var canonical []brokersdb.Transaction
-	for _, it := range transactions {
+	for idx := range transactions {
+		it := &transactions[idx]
 		typ := mapTransactionType(it.Type)
 		externalID := it.ExternalID
 		existing, err := q.TransactionByExternal(ctx, brokersdb.TransactionByExternalParams{AccountID: sourceAccountID, ExternalID: &externalID})
@@ -432,18 +435,20 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 	accounting := lotAccounting{now: x.s.now}
 	plans := planReconciler{now: x.s.now}
 	windowIDs := map[uuid.UUID]bool{}
-	for _, t := range canonical {
+	for ix := range canonical {
+		t := canonical[ix]
 		windowIDs[t.ID] = true
 	}
 	rebuilt, err := x.rebuildDamagedLots(ctx, sourceAccountID, windowIDs, accounting)
 	if err != nil {
 		return err
 	}
-	for _, t := range canonical {
+	for ix := range canonical {
+		t := canonical[ix]
 		if t.Type != "BUY" {
 			continue
 		}
-		if _, err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
+		if err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
 			return err
 		}
 		m, err := plans.match(ctx, x.s.db, t, userID)
@@ -489,7 +494,8 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 	}
 
 	var sales []brokersdb.Transaction
-	for _, t := range canonical {
+	for ix := range canonical {
+		t := canonical[ix]
 		if t.Type == "SELL" {
 			sales = append(sales, t)
 		}
@@ -503,7 +509,8 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 		if err != nil {
 			return err
 		}
-		for _, t := range replayed {
+		for ix := range replayed {
+			t := replayed[ix]
 			if !windowIDs[t.ID] {
 				sales = append(sales, t)
 			}
@@ -511,7 +518,8 @@ func (x ibkrSyncService) syncTransactions(ctx context.Context, accountID string,
 	}
 	sort.SliceStable(sales, func(i, j int) bool { return tradeLess(sales[i], sales[j]) })
 
-	for _, t := range sales {
+	for ix := range sales {
+		t := sales[ix]
 		planned := windowIDs[t.ID]
 		err := func() error {
 			var m *planMatch
@@ -582,7 +590,8 @@ func (x ibkrSyncService) rebuildDamagedLots(ctx context.Context, accountID uuid.
 		return nil, err
 	}
 	var acquisitions []brokersdb.Transaction
-	for _, t := range all {
+	for ix := range all {
+		t := all[ix]
 		qty, price := 0.0, -1.0
 		if t.Quantity != nil {
 			qty = *t.Quantity
@@ -596,14 +605,16 @@ func (x ibkrSyncService) rebuildDamagedLots(ctx context.Context, accountID uuid.
 	}
 	openedByLot := map[uuid.UUID]bool{}
 	damaged := map[uuid.UUID]bool{}
-	for _, l := range lots {
+	for idx := range lots {
+		l := &lots[idx]
 		if l.OpenTransactionID != nil {
 			openedByLot[*l.OpenTransactionID] = true
 		} else {
 			damaged[l.InstrumentID] = true
 		}
 	}
-	for _, t := range acquisitions {
+	for ix := range acquisitions {
+		t := acquisitions[ix]
 		if !windowIDs[t.ID] && !openedByLot[t.ID] {
 			damaged[t.InstrumentID] = true
 		}
@@ -611,7 +622,8 @@ func (x ibkrSyncService) rebuildDamagedLots(ctx context.Context, accountID uuid.
 	if len(damaged) == 0 {
 		return nil, nil
 	}
-	for _, l := range lots {
+	for idx := range lots {
+		l := &lots[idx]
 		if damaged[l.InstrumentID] {
 			if err := q.DeleteLot(ctx, l.ID); err != nil {
 				return nil, err
@@ -619,14 +631,16 @@ func (x ibkrSyncService) rebuildDamagedLots(ctx context.Context, accountID uuid.
 		}
 	}
 	var replay []brokersdb.Transaction
-	for _, t := range acquisitions {
+	for ix := range acquisitions {
+		t := acquisitions[ix]
 		if damaged[t.InstrumentID] {
 			replay = append(replay, t)
 		}
 	}
 	sort.SliceStable(replay, func(i, j int) bool { return tradeLess(replay[i], replay[j]) })
-	for _, t := range replay {
-		if _, err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
+	for ix := range replay {
+		t := replay[ix]
+		if err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
 			return nil, err
 		}
 	}
@@ -666,7 +680,8 @@ func (x ibkrSyncService) reconcileOpeningLots(ctx context.Context, positions []i
 			return err
 		}
 		bought, sold := 0.0, 0.0
-		for _, t := range trades {
+		for ix := range trades {
+			t := trades[ix]
 			if t.Quantity == nil {
 				continue
 			}
@@ -683,7 +698,8 @@ func (x ibkrSyncService) reconcileOpeningLots(ctx context.Context, positions []i
 		}
 		externalID := "ibkr:opening:" + accountID + ":" + uuidString(instrument.ID)
 		handled := false
-		for _, t := range trades {
+		for ix := range trades {
+			t := trades[ix]
 			if t.ExternalID == nil || *t.ExternalID != externalID {
 				continue
 			}
@@ -717,7 +733,8 @@ func (x ibkrSyncService) reconcileOpeningLots(ctx context.Context, positions []i
 			continue
 		}
 		inferred := x.s.now()
-		for i, t := range trades {
+		for i := range trades {
+			t := trades[i]
 			if i == 0 || t.TradeDate.Before(inferred) {
 				inferred = t.TradeDate
 			}
@@ -735,7 +752,7 @@ func (x ibkrSyncService) reconcileOpeningLots(ctx context.Context, positions []i
 		if err != nil {
 			return err
 		}
-		if _, err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
+		if err := accounting.recordAcquisition(ctx, x.s.db, t); err != nil {
 			return err
 		}
 		x.s.logger.Info("broker.ibkr inferred_opening_lot_created", "external_id", externalID,

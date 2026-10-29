@@ -99,7 +99,7 @@ func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
 // lowercased.
 func normalizeCSVHeader(raw string) string {
 	var b strings.Builder
-	for _, r := range strings.ReplaceAll(raw, "﻿", "") {
+	for _, r := range strings.ReplaceAll(raw, "\uFEFF", "") {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) {
 			b.WriteRune(r)
 		}
@@ -273,7 +273,8 @@ func (s *service) existingStockKinds(ctx context.Context, userID uuid.UUID) (map
 		return nil, err
 	}
 	manual, imported := map[string]bool{}, map[string]bool{}
-	for _, st := range rows {
+	for idx := range rows {
+		st := &rows[idx]
 		if st.SourceProvider == nil {
 			manual[st.Symbol] = true
 		} else {
@@ -281,7 +282,8 @@ func (s *service) existingStockKinds(ctx context.Context, userID uuid.UUID) (map
 		}
 	}
 	out := map[string]string{}
-	for _, st := range rows {
+	for idx := range rows {
+		st := &rows[idx]
 		switch m, i := manual[st.Symbol], imported[st.Symbol]; {
 		case m && i:
 			out[st.Symbol] = kindMixed
@@ -450,12 +452,13 @@ func (s *service) commit(ctx context.Context, base []PreviewItem, baseErrors []P
 	}
 
 	resp := CommitResponse{Provider: broker.Provider, Inserted: []stocks.StockResponse{}, Updated: []stocks.StockResponse{}, ReplacedSymbols: []string{}}
-	for _, imp := range resolved {
+	for idx := range resolved {
+		imp := &resolved[idx]
 		var stock brokersdb.Stock
 		var replaced bool
 		err := inTx(ctx, s.db, func(tx dbtx) error {
 			var err error
-			stock, replaced, err = s.importSymbolRows(ctx, tx, imp, provider, targetList, userID, colliding[imp.symbol])
+			stock, replaced, err = s.importSymbolRows(ctx, tx, *imp, provider, targetList, userID, colliding[imp.symbol])
 			return err
 		})
 		if err != nil {
@@ -524,7 +527,8 @@ func (s *service) foreignHoldingSymbols(ctx context.Context, grouped map[string]
 	if err != nil {
 		return nil, err
 	}
-	for _, st := range existing {
+	for idx := range existing {
+		st := &existing[idx]
 		if own == nil || st.SourceAccountID == nil || *st.SourceAccountID != own.ID {
 			out[st.Symbol] = true
 		}

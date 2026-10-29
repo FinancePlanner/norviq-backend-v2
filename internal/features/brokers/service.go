@@ -13,8 +13,8 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/httpx"
-	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/crypto"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/store/brokersdb"
 
@@ -44,17 +44,17 @@ func connectionMode(externalID *string) (string, bool) {
 
 // service is DefaultBrokersService plus the sync services it builds.
 type service struct {
-	db       *pgxpool.Pool
-	logger   *slog.Logger
-	vault    *crypto.Vault
-	gateway  gatewayClient // the configured gateway client
-	oauth    *oauthClient  // nil when IBKR OAuth2 is not configured
-	oauthOn  bool          // ibkrConnectMode == .oauth2
-	http     *http.Client
-	search   symbolSearch
-	env      func(string) string
-	now      func() time.Time
-	sleep    func(ctx context.Context, d time.Duration) error
+	db           *pgxpool.Pool
+	logger       *slog.Logger
+	vault        *crypto.Vault
+	gateway      gatewayClient // the configured gateway client
+	oauth        *oauthClient  // nil when IBKR OAuth2 is not configured
+	oauthOn      bool          // ibkrConnectMode == .oauth2
+	http         *http.Client
+	search       symbolSearch
+	env          func(string) string
+	now          func() time.Time
+	sleep        func(ctx context.Context, d time.Duration) error
 	entitlements *entitlements.Service
 	extractor    Extractor
 }
@@ -111,8 +111,9 @@ func (s *service) list(ctx context.Context, userID uuid.UUID) ([]ConnectionRespo
 		return nil, err
 	}
 	out := make([]ConnectionResponse, len(rows))
-	for i, r := range rows {
-		out[i] = connectionResponse(r)
+	for i := range rows {
+		r := &rows[i]
+		out[i] = connectionResponse(*r)
 	}
 	return out, nil
 }
@@ -271,9 +272,7 @@ func (s *service) startIBKRConnect(ctx context.Context, r *http.Request, redirec
 		if s.oauth == nil {
 			return ConnectStartResponse{}, httpx.Abort(http.StatusServiceUnavailable, "IBKR OAuth2 is not configured.")
 		}
-		if authorization, err = s.oauth.authorizationURL(state, callback); err != nil {
-			return ConnectStartResponse{}, err
-		}
+		authorization = s.oauth.authorizationURL(state, callback)
 	} else {
 		authorization = callback + "?" + encodeQueryItems([][2]string{{"flowId", apijson.FormatUUID(flow.ID)}, {"state", state}})
 	}

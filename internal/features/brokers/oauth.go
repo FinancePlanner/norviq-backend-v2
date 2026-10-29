@@ -74,7 +74,7 @@ func oauthConfigFromEnv(env func(string) string) (*oauthConfig, error) {
 	}
 	authURL, err := url.Parse(*authRaw)
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // URL(string:) failing means "not configured"
 	}
 	scope := trimmedNonEmpty(env("IBKR_OAUTH_SCOPE"))
 	if err := assertReadOnlyScope(scope); err != nil {
@@ -130,7 +130,7 @@ type oauthToken struct {
 
 // authorizationURL replaces the configured URL's query with the OAuth2
 // authorization request.
-func (o *oauthClient) authorizationURL(state, redirectURI string) (string, error) {
+func (o *oauthClient) authorizationURL(state, redirectURI string) string {
 	u := *o.config.authorizationURL
 	items := [][2]string{
 		{"client_id", o.config.clientID},
@@ -143,7 +143,7 @@ func (o *oauthClient) authorizationURL(state, redirectURI string) (string, error
 	}
 	u.RawQuery = encodeQueryItems(items)
 	u.ForceQuery = false
-	return u.String(), nil
+	return u.String()
 }
 
 func (o *oauthClient) exchangeCode(ctx context.Context, code, redirectURI string) (oauthToken, error) {

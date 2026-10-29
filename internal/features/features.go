@@ -19,6 +19,7 @@ import (
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
+	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
@@ -134,6 +135,8 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// BrokerController and the IBKR OAuth callback.
+		brokers.Feature{},
 	}
 }
 
@@ -194,6 +197,7 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		brokers.IBKRSyncJob{},
 	}
 }
 

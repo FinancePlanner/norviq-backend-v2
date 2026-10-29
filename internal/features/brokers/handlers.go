@@ -2,6 +2,7 @@ package brokers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -81,7 +82,8 @@ func (h *handlers) listHoldings(c *echo.Context) error {
 		return err
 	}
 	out := make([]HoldingResponse, len(rows))
-	for i, r := range rows {
+	for i := range rows {
+		r := rows[i]
 		out[i] = HoldingResponse{Symbol: r.Symbol, Quantity: r.Shares, Currency: "USD"}
 	}
 	return httpx.OK(c, out)
@@ -368,7 +370,7 @@ func readScreenshotUpload(c *echo.Context, body []byte) (string, []screenshotIma
 	}
 	parts, err := multipartform.Parse(body, boundary)
 	switch {
-	case err == multipartform.ErrEmptyBoundary:
+	case errors.Is(err, multipartform.ErrEmptyBoundary):
 		return "", nil, httpx.BadRequest("Upload the form as multipart/form-data.")
 	case err != nil:
 		return "", nil, httpx.BadRequest("Could not read the uploaded form.")

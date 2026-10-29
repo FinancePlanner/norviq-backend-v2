@@ -154,29 +154,30 @@ type lotAccounting struct{ now func() time.Time }
 
 // recordAcquisition opens the lot for a BUY/OPENING_BALANCE trade, or returns
 // the one it already opened.
-func (a lotAccounting) recordAcquisition(ctx context.Context, db dbtx, t brokersdb.Transaction) (brokersdb.Lot, error) {
+func (a lotAccounting) recordAcquisition(ctx context.Context, db dbtx, t brokersdb.Transaction) error {
 	if t.Quantity == nil || abs(*t.Quantity) <= 0 || t.Price == nil || *t.Price < 0 {
-		return brokersdb.Lot{}, &lotAccountingError{kind: "invalidQuantity"}
+		return &lotAccountingError{kind: "invalidQuantity"}
 	}
 	q := brokersdb.New(db)
 	id := t.ID
 	existing, err := q.LotByOpenTransaction(ctx, &id)
 	if err != nil {
-		return brokersdb.Lot{}, err
+		return err
 	}
 	if len(existing) > 0 {
-		return existing[0], nil
+		return nil
 	}
 	quantity := abs(*t.Quantity)
 	fees := 0.0
 	if t.Fees != nil {
 		fees = *t.Fees
 	}
-	return q.InsertLot(ctx, brokersdb.InsertLotParams{
+	_, err = q.InsertLot(ctx, brokersdb.InsertLotParams{
 		ID: uuid.New(), AccountID: t.AccountID, InstrumentID: t.InstrumentID, OpenTransactionID: &id,
 		OpenDate: t.TradeDate, OpenQuantity: quantity, RemainingQuantity: quantity,
 		OpenPrice: unitBasis(quantity, *t.Price, fees), Currency: t.Currency, Status: "open", Now: a.now(),
 	})
+	return err
 }
 
 // recordDisposal matches a SELL against the open lots in one transaction;
@@ -202,7 +203,8 @@ func (a lotAccounting) recordDisposal(ctx context.Context, db dbtx, t brokersdb.
 			return err
 		}
 		ids := make([]uuid.UUID, len(lots))
-		for i, l := range lots {
+		for i := range lots {
+			l := &lots[i]
 			ids[i] = l.ID
 		}
 		adjustmentByLot := map[uuid.UUID]float64{}
@@ -211,12 +213,14 @@ func (a lotAccounting) recordDisposal(ctx context.Context, db dbtx, t brokersdb.
 			if err != nil {
 				return err
 			}
-			for _, adj := range adjustments {
+			for ix := range adjustments {
+				adj := adjustments[ix]
 				adjustmentByLot[adj.LotID] += adj.Amount
 			}
 		}
 		var candidates []lotCandidate
-		for _, l := range lots {
+		for ix := range lots {
+			l := lots[ix]
 			if l.RemainingQuantity <= 0 {
 				continue
 			}
@@ -285,7 +289,8 @@ func holdingPeriod(open, closed time.Time) string {
 // non-empty tax identity group.
 func sameInstrumentIDs(sold brokersdb.Instrument, all []brokersdb.Instrument) []uuid.UUID {
 	var ids []uuid.UUID
-	for _, in := range all {
+	for ix := range all {
+		in := all[ix]
 		if in.ID == sold.ID {
 			ids = append(ids, in.ID)
 			continue
@@ -369,11 +374,12 @@ func (a lotAccounting) recordUSWashSales(ctx context.Context, db dbtx, disposals
 		}
 		accountByID := map[uuid.UUID]brokersdb.Account{}
 		var accountIDs []uuid.UUID
-		for _, acc := range accounts {
+		for idx := range accounts {
+			acc := &accounts[idx]
 			if _, dup := accountByID[acc.ID]; !dup {
 				accountIDs = append(accountIDs, acc.ID)
 			}
-			accountByID[acc.ID] = acc
+			accountByID[acc.ID] = *acc
 		}
 		if len(accountIDs) == 0 {
 			return nil
@@ -394,7 +400,8 @@ func (a lotAccounting) recordUSWashSales(ctx context.Context, db dbtx, disposals
 			return err
 		}
 		available := map[uuid.UUID]float64{}
-		for _, l := range lots {
+		for ix := range lots {
+			l := lots[ix]
 			available[l.ID] = max(0, l.OpenQuantity)
 		}
 		now := a.now()
@@ -403,7 +410,8 @@ func (a lotAccounting) recordUSWashSales(ctx context.Context, db dbtx, disposals
 				continue
 			}
 			var replacements []washReplacement
-			for _, l := range lots {
+			for ix := range lots {
+				l := lots[ix]
 				acc, ok := accountByID[l.AccountID]
 				if !ok {
 					continue
@@ -481,7 +489,8 @@ func (a lotAccounting) recordSpainLossDeferrals(ctx context.Context, db dbtx, di
 			return err
 		}
 		accountIDs := make([]uuid.UUID, len(accounts))
-		for i, acc := range accounts {
+		for i := range accounts {
+			acc := &accounts[i]
 			accountIDs[i] = acc.ID
 		}
 		if len(accountIDs) == 0 {
@@ -511,13 +520,15 @@ func (a lotAccounting) recordSpainLossDeferrals(ctx context.Context, db dbtx, di
 			return err
 		}
 		var lots []brokersdb.Lot
-		for _, l := range windowLots {
+		for ix := range windowLots {
+			l := windowLots[ix]
 			if !soldLots[l.ID] {
 				lots = append(lots, l)
 			}
 		}
 		available := map[uuid.UUID]float64{}
-		for _, l := range lots {
+		for ix := range lots {
+			l := lots[ix]
 			available[l.ID] = max(0, l.RemainingQuantity)
 		}
 		now := a.now()
@@ -526,7 +537,8 @@ func (a lotAccounting) recordSpainLossDeferrals(ctx context.Context, db dbtx, di
 				continue
 			}
 			var replacements []washReplacement
-			for _, l := range lots {
+			for ix := range lots {
+				l := lots[ix]
 				replacements = append(replacements, washReplacement{lotID: l.ID, acquisitionDate: l.OpenDate, available: available[l.ID]})
 			}
 			if months <= 0 {
@@ -589,7 +601,8 @@ func (p planReconciler) match(ctx context.Context, db dbtx, t brokersdb.Transact
 		plan brokersdb.TaxActionPlan
 	}
 	var eligible []pair
-	for _, leg := range legs {
+	for ix := range legs {
+		leg := legs[ix]
 		plans, err := q.UserPlan(ctx, brokersdb.UserPlanParams{ID: leg.ActionPlanID, UserID: userID})
 		if err != nil {
 			return nil, err
@@ -609,7 +622,8 @@ func (p planReconciler) match(ctx context.Context, db dbtx, t brokersdb.Transact
 	if len(eligible) != 1 {
 		if len(eligible) > 1 {
 			now := p.now()
-			for _, e := range eligible {
+			for idx := range eligible {
+				e := &eligible[idx]
 				if err := q.SetPlanStatus(ctx, brokersdb.SetPlanStatusParams{ID: e.plan.ID, Status: "requires_review", ExecutedAt: e.plan.ExecutedAt, Now: &now}); err != nil {
 					return nil, err
 				}
@@ -696,7 +710,8 @@ func (p planReconciler) complete(ctx context.Context, db dbtx, m *planMatch, t b
 		return err
 	}
 	allMatched := true
-	for _, l := range planLegs {
+	for ix := range planLegs {
+		l := planLegs[ix]
 		if l.Status != "matched" {
 			allMatched = false
 		}
@@ -749,7 +764,8 @@ func (p planReconciler) createRestrictionWindow(ctx context.Context, db dbtx, us
 	}
 	idSet := map[uuid.UUID]bool{}
 	var ids []uuid.UUID
-	for _, b := range buys {
+	for ix := range buys {
+		b := buys[ix]
 		if !idSet[b.InstrumentID] {
 			idSet[b.InstrumentID] = true
 			ids = append(ids, b.InstrumentID)
@@ -761,14 +777,16 @@ func (p planReconciler) createRestrictionWindow(ctx context.Context, db dbtx, us
 		if err != nil {
 			return err
 		}
-		for _, in := range ins {
+		for ix := range ins {
+			in := ins[ix]
 			if identityKey(in) == key {
 				matching[in.ID] = true
 			}
 		}
 	}
 	var candidates []brokersdb.Transaction
-	for _, b := range buys {
+	for ix := range buys {
+		b := buys[ix]
 		if matching[b.InstrumentID] {
 			candidates = append(candidates, b)
 		}
@@ -801,7 +819,8 @@ func (p planReconciler) detectRestrictionViolation(ctx context.Context, db dbtx,
 	}
 	now := p.now()
 	txID := t.ID
-	for _, w := range windows {
+	for idx := range windows {
+		w := &windows[idx]
 		if err := q.ViolateWindow(ctx, brokersdb.ViolateWindowParams{ID: w.ID, ViolatingTransactionID: &txID, Now: &now}); err != nil {
 			return err
 		}
@@ -832,7 +851,7 @@ func applyWithholding(lines []withholdingRow, symbol string, payDate time.Time, 
 	day := utcDay(payDate)
 	sym, cur := strings.ToUpper(symbol), strings.ToUpper(currency)
 	for _, w := range lines {
-		if strings.ToUpper(w.Symbol) == sym && utcDay(w.PayDate).Equal(day) && strings.ToUpper(w.Currency) == cur {
+		if strings.EqualFold(w.Symbol, sym) && utcDay(w.PayDate).Equal(day) && strings.EqualFold(w.Currency, cur) {
 			tax := abs(w.Amount)
 			g := amount + tax
 			return &tax, &g

@@ -335,7 +335,7 @@ func Normalize(row int, cells map[ColumnRole]Cell, s NormalizerSettings, isAggre
 
 	final := *amount
 	var foreign, applied *float64
-	if currency != nil && s.BaseCurrency != nil && *currency != strings.ToUpper(*s.BaseCurrency) {
+	if currency != nil && s.BaseCurrency != nil && *currency != strings.ToUpper(*s.BaseCurrency) { //nolint:gocritic // only the base is upper-cased, as in Swift
 		rate, ok := s.ExchangeRates[*currency]
 		if !ok || rate <= 0 {
 			f := *amount

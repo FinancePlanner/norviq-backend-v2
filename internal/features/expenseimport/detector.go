@@ -236,7 +236,7 @@ func typeConsistencyBelow(sheet Sheet, headerRow, first, last int) float64 {
 	return float64(consistent) / float64(considered)
 }
 
-// AggregateRows finds totals rows: a labelled total, or the last numeric
+// AggregateRows finds totals rows: a labeled total, or the last numeric
 // value of a column equalling the sum above it.
 func AggregateRows(sheet Sheet, dataStart, dataEnd, first, last int) []int {
 	if dataEnd < dataStart || last < first {
@@ -504,7 +504,8 @@ func assignFields(columns []DetectedColumn) []DetectedColumn {
 		}
 	}
 	out := make([]DetectedColumn, len(scored))
-	for i, s := range scored {
+	for i := range scored {
+		s := &scored[i]
 		c := s.column
 		c.Field = s.field
 		c.Confidence = s.confidence
@@ -565,7 +566,7 @@ var (
 	hasDigitRe     = regexp.MustCompile(`[0-9]`)
 )
 
-// LooksLikeAmount recognises an amount without committing to a decimal
+// LooksLikeAmount recognizes an amount without committing to a decimal
 // separator.
 func LooksLikeAmount(raw string) (AmountSniff, bool) {
 	trimmed := strings.TrimSpace(raw)
@@ -622,7 +623,7 @@ var datePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^\d{1,2} [A-Za-zÀ-ÿ]{3,} \d{2,4}$`),
 }
 
-// LooksLikeDate recognises the common text date layouts.
+// LooksLikeDate recognizes the common text date layouts.
 func LooksLikeDate(raw string) bool {
 	trimmed := strings.TrimSpace(raw)
 	n := utf8.RuneCountInString(trimmed)

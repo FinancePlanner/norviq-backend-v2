@@ -317,7 +317,7 @@ func ProviderFromEnv(env ai.Env, cfg ai.ProviderConfig, client *http.Client, log
 		logger.Info("spreadsheet_import configured provider=openai model=" + model)
 		return p
 	}
-	if configured != "" && strings.ToLower(configured) != "disabled" {
+	if configured != "" && !strings.EqualFold(configured, "disabled") {
 		logger.Warn("SPREADSHEET_IMPORT_AI=" + configured + " is not recognized; spreadsheet import will use heuristics only.")
 	}
 	return DisabledProvider{}

@@ -1,6 +1,7 @@
 package receipts
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -148,7 +149,7 @@ func readImageUploads(c *echo.Context, body []byte) ([]multipartform.Part, error
 	}
 	parts, err := multipartform.Parse(body, boundary)
 	switch {
-	case err == multipartform.ErrEmptyBoundary:
+	case errors.Is(err, multipartform.ErrEmptyBoundary):
 		return nil, httpx.BadRequest("Upload the form as multipart/form-data.")
 	case err != nil:
 		return nil, httpx.BadRequest("Could not read the uploaded form.")
@@ -236,7 +237,8 @@ func (h *handlers) commit(c *echo.Context) error {
 		return httpx.BadRequest(fmt.Sprintf("Import at most %d expenses at a time.", maxCommitItems))
 	}
 	candidates := make([]expenses.Candidate, len(payload.Items))
-	for i, item := range payload.Items {
+	for i := range payload.Items {
+		item := &payload.Items[i]
 		candidates[i] = expenses.Candidate{Reference: i, Request: item.Expense.toRequest(), ExternalID: item.ExternalID}
 	}
 
@@ -249,14 +251,15 @@ func (h *handlers) commit(c *echo.Context) error {
 	seen := map[string]bool{}
 	accepted := []expenses.Candidate{}
 	skipped := 0
-	for _, cand := range candidates {
+	for i := range candidates {
+		cand := &candidates[i]
 		key := expenses.DedupKey(cand.Request.OccurredOn, cand.Request.Amount, cand.Request.Title, cand.ExternalID)
 		if _, dup := existing[key]; dup || seen[key] {
 			skipped++
 			continue
 		}
 		seen[key] = true
-		accepted = append(accepted, cand)
+		accepted = append(accepted, *cand)
 	}
 	outcome, err := importer.Insert(ctx, db, s.UserID, accepted)
 	if err != nil {

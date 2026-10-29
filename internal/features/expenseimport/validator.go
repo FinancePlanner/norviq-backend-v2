@@ -80,7 +80,7 @@ func ValidateMapping(proposal *AIProposal, detected DetectedSheet, existingCateg
 		}
 		role, ok := parseRole(p.Field)
 		if !ok {
-			rejections = append(rejections, fmt.Sprintf("Unknown field \"%s\" for column %s.", p.Field, p.Letter))
+			rejections = append(rejections, "Unknown field \""+p.Field+"\" for column "+p.Letter+".")
 			continue
 		}
 		if !IsPlausible(role, column) {
@@ -151,7 +151,7 @@ func validatedPillar(raw *string, allowed map[string]bool, rejections *[]string)
 		return nil
 	}
 	if !allowed[candidate] {
-		*rejections = append(*rejections, fmt.Sprintf("Pillar \"%s\" doesn't exist yet, so those rows need a choice.", *raw))
+		*rejections = append(*rejections, "Pillar \""+*raw+"\" doesn't exist yet, so those rows need a choice.")
 		return nil
 	}
 	return &candidate

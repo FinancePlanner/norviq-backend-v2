@@ -97,9 +97,9 @@ func form(t *testing.T, parts ...upload) ([]byte, string) {
 	for _, p := range parts {
 		h := textproto.MIMEHeader{}
 		if p.filename == "" {
-			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"`, p.field))
+			h.Set("Content-Disposition", `form-data; name="`+p.field+`"`)
 		} else {
-			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, p.field, p.filename))
+			h.Set("Content-Disposition", `form-data; name="`+p.field+`"; filename="`+p.filename+`"`)
 			h.Set("Content-Type", "image/jpeg")
 		}
 		pw, _ := w.CreatePart(h)
@@ -163,7 +163,7 @@ func TestScanErrors(t *testing.T) {
 	body, ct = form(t, upload{"image", "big.jpg", make([]byte, maxImageBytes+1)})
 	expectReason(t, e.raw("/v1/receipts/scan", pro, ct, body), http.StatusRequestEntityTooLarge, "Each receipt image must be 8 MB or smaller.")
 	// Three 8 MB photos outrun the app-wide 10 MB cap; the route lifts it.
-	body, ct = form(t, upload{"file", "a.jpg", make([]byte, maxImageBytes)}, upload{"file", "b.jpg", make([]byte, 4 << 20)})
+	body, ct = form(t, upload{"file", "a.jpg", make([]byte, maxImageBytes)}, upload{"file", "b.jpg", make([]byte, 4<<20)})
 	if r := e.raw("/v1/receipts/scan", pro, ct, body); r.Status != http.StatusOK {
 		t.Fatalf("12 MB batch: %d %s", r.Status, r.Body)
 	}

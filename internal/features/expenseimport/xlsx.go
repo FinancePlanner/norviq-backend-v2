@@ -49,7 +49,7 @@ func (XLSXReader) Read(data []byte, limits Limits) (*Workbook, error) {
 			return nil, &ReadError{Kind: ErrPasswordProtected}
 		}
 	}
-	if inflated > uint64(limits.MaxInflatedBytes) {
+	if inflated > uint64(limits.MaxInflatedBytes) { //nolint:gosec // limits are positive constants
 		return nil, &ReadError{Kind: ErrTooLarge, Bytes: int(min(inflated, math.MaxInt32)), Limit: limits.MaxInflatedBytes}
 	}
 
@@ -453,7 +453,7 @@ func resolveCell(c xmlCell, shared []sharedStringItem, dateStyles map[int]bool, 
 		}
 		return textCell(text), false
 	case "b":
-		return boolCell(raw == "1" || strings.ToLower(raw) == "true"), false
+		return boolCell(raw == "1" || strings.EqualFold(raw, "true")), false
 	case "e":
 		return Cell{}, false
 	case "d":

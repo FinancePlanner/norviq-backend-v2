@@ -218,8 +218,8 @@ func SwiftTypeName(t reflect.Type) string {
 	return dictType
 }
 
-// validate checks raw against t. top is the root value.
-func validate(raw json.RawMessage, t reflect.Type, path []string, top bool) error {
+// validate checks raw against t. The last argument marks the root value.
+func validate(raw json.RawMessage, t reflect.Type, path []string, _ bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}

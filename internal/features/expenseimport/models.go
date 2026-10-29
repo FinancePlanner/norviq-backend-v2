@@ -55,10 +55,10 @@ type Cell struct {
 }
 
 // Cell constructors.
-func textCell(s string) Cell      { return Cell{Kind: CellText, Text: s} }
-func numberCell(v float64) Cell   { return Cell{Kind: CellNumber, Number: v} }
-func dateCell(t time.Time) Cell   { return Cell{Kind: CellDate, Date: t} }
-func boolCell(b bool) Cell        { return Cell{Kind: CellBool, Bool: b} }
+func textCell(s string) Cell     { return Cell{Kind: CellText, Text: s} }
+func numberCell(v float64) Cell  { return Cell{Kind: CellNumber, Number: v} }
+func dateCell(t time.Time) Cell  { return Cell{Kind: CellDate, Date: t} }
+func boolCell(b bool) Cell       { return Cell{Kind: CellBool, Bool: b} }
 func (c Cell) Equal(o Cell) bool { return c == o }
 
 // IsEmpty is SpreadsheetCell.isEmpty.
@@ -197,7 +197,7 @@ func (e *ReadError) Reason() string {
 	case ErrTooLarge:
 		return fmt.Sprintf("Spreadsheet must be %d MB or smaller.", e.Limit/(1024*1024))
 	case ErrTooManyRows:
-		return fmt.Sprintf("Sheet \"%s\" has more than %d rows. Split it and try again.", e.Sheet, e.Limit)
+		return "Sheet \"" + e.Sheet + "\" has more than " + strconv.Itoa(e.Limit) + " rows. Split it and try again."
 	case ErrNoReadableSheets:
 		return "We couldn't find any readable sheets in that file."
 	}

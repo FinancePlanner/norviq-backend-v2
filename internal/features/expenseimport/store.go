@@ -118,8 +118,8 @@ func (s *SessionStore) Create(ctx context.Context, q *expenseimportdb.Queries, u
 		return Session{}, err
 	}
 	rows := 0
-	for _, sh := range sheets {
-		rows += len(sh.Rows)
+	for i := range sheets {
+		rows += len(sheets[i].Rows)
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
 	p := expenseimportdb.InsertSessionParams{

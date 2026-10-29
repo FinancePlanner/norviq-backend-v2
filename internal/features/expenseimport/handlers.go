@@ -234,4 +234,3 @@ func sanitize(raw string) string {
 	}
 	return cleaned
 }
-

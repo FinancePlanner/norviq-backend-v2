@@ -53,15 +53,15 @@ func newImportEnv(t *testing.T, provider AnalysisProvider, ent entitlements.Conf
 	return &importEnv{app: app, t: t}
 }
 
-func (e *importEnv) user() (string, uuid.UUID) {
+func (e *importEnv) user() string {
 	e.t.Helper()
 	id := e.app.CreateUser(fmt.Sprintf("xlsx_%s@example.com", uuid.NewString()[:8]))
-	return e.app.Token(id), id
+	return e.app.Token(id)
 }
 
-func (e *importEnv) raw(method, path, token, contentType string, headers map[string]string, body []byte) *testutil.Response {
+func (e *importEnv) post(token, contentType string, headers map[string]string, body []byte) *testutil.Response {
 	e.t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), method, e.app.Server.URL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, e.app.Server.URL+"/v1/expenses/import/spreadsheet", bytes.NewReader(body))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -83,9 +83,10 @@ func (e *importEnv) raw(method, path, token, contentType string, headers map[str
 	return &testutil.Response{Status: resp.StatusCode, Header: resp.Header, Body: data}
 }
 
-func (e *importEnv) upload(token, name string) AnalysisResponse {
+func (e *importEnv) upload(token string) AnalysisResponse {
+	const name = "excel-like.xlsx"
 	e.t.Helper()
-	r := e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream",
+	r := e.post(token, "application/octet-stream",
 		map[string]string{"X-File-Name": name}, fixture(e.t, name))
 	if r.Status != http.StatusOK {
 		e.t.Fatalf("upload: %d %s", r.Status, r.Body)
@@ -128,8 +129,8 @@ func decision(a AnalysisResponse, overrides []map[string]any) map[string]any {
 
 func includedSheet(t *testing.T, a AnalysisResponse) ImportSheet {
 	t.Helper()
-	for _, s := range a.Sheets {
-		if s.Include {
+	for i := range a.Sheets {
+		if s := a.Sheets[i]; s.Include {
 			return s
 		}
 	}
@@ -148,8 +149,8 @@ func hasField(s ImportSheet, f ImportField) bool {
 
 func TestAnalyzeReturnsPreview(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	if a.SessionID == "" || a.FileName != "excel-like.xlsx" || a.Preview.TotalRows == 0 || a.AIAvailable {
 		t.Fatalf("%+v", a)
 	}
@@ -161,8 +162,8 @@ func TestAnalyzeReturnsPreview(t *testing.T) {
 
 func TestExcludesTotalsRow(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	if len(includedSheet(t, a).ExcludedRows) == 0 {
 		t.Fatal("no excluded rows")
 	}
@@ -182,8 +183,8 @@ func TestExcludesTotalsRow(t *testing.T) {
 
 func TestResumesSession(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	r := e.app.Do(http.MethodGet, "/v1/expenses/import/spreadsheet/"+a.SessionID, token, nil)
 	var resumed AnalysisResponse
 	r.JSON(t, &resumed)
@@ -194,25 +195,25 @@ func TestResumesSession(t *testing.T) {
 
 func TestUploadRejections(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
+	token := e.user()
 	legacy := append([]byte{0xD0, 0xCF, 0x11, 0xE0}, make([]byte, 64)...)
-	r := e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream", nil, legacy)
+	r := e.post(token, "application/octet-stream", nil, legacy)
 	if r.Status != http.StatusUnsupportedMediaType || !strings.Contains(string(r.Body), ".xlsx") {
 		t.Errorf("legacy: %d %s", r.Status, r.Body)
 	}
-	r = e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream", nil, []byte("definitely not a spreadsheet"))
+	r = e.post(token, "application/octet-stream", nil, []byte("definitely not a spreadsheet"))
 	if r.Status != http.StatusBadRequest {
 		t.Errorf("garbage: %d %s", r.Status, r.Body)
 	}
-	r = e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", "", "application/octet-stream", nil, fixture(t, "excel-like.xlsx"))
+	r = e.post("", "application/octet-stream", nil, fixture(t, "excel-like.xlsx"))
 	if r.Status != http.StatusUnauthorized {
 		t.Errorf("unauthenticated: %d", r.Status)
 	}
-	r = e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream", nil, nil)
+	r = e.post(token, "application/octet-stream", nil, nil)
 	if r.Status != http.StatusBadRequest || !strings.Contains(string(r.Body), "Missing spreadsheet body.") {
 		t.Errorf("empty: %d %s", r.Status, r.Body)
 	}
-	r = e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream", nil, make([]byte, 8*1024*1024+1))
+	r = e.post(token, "application/octet-stream", nil, make([]byte, 8*1024*1024+1))
 	if r.Status != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversize: %d %s", r.Status, r.Body)
 	}
@@ -224,13 +225,13 @@ func TestUploadRejections(t *testing.T) {
 
 func TestMultipartUpload(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
+	token := e.user()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	part, _ := w.CreateFormFile("spreadsheet", "../My/Budget.xlsx")
 	_, _ = part.Write(fixture(t, "excel-like.xlsx"))
 	_ = w.Close()
-	r := e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, w.FormDataContentType(), nil, buf.Bytes())
+	r := e.post(token, w.FormDataContentType(), nil, buf.Bytes())
 	var a AnalysisResponse
 	r.JSON(t, &a)
 	// Go's multipart writer keeps the path; the sanitizer strips separators.
@@ -242,7 +243,7 @@ func TestMultipartUpload(t *testing.T) {
 	w = multipart.NewWriter(&buf)
 	_ = w.WriteField("note", "no file here")
 	_ = w.Close()
-	r = e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, w.FormDataContentType(), nil, buf.Bytes())
+	r = e.post(token, w.FormDataContentType(), nil, buf.Bytes())
 	if r.Status != http.StatusBadRequest || !strings.Contains(string(r.Body), "Missing file field in multipart body.") {
 		t.Fatalf("missing: %d %s", r.Status, r.Body)
 	}
@@ -250,8 +251,8 @@ func TestMultipartUpload(t *testing.T) {
 
 func TestPremiumRequired(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{})
-	token, _ := e.user()
-	r := e.raw(http.MethodPost, "/v1/expenses/import/spreadsheet", token, "application/octet-stream", nil, fixture(t, "excel-like.xlsx"))
+	token := e.user()
+	r := e.post(token, "application/octet-stream", nil, fixture(t, "excel-like.xlsx"))
 	if r.Status < 400 || r.Status == http.StatusOK {
 		t.Fatalf("free user upload: %d %s", r.Status, r.Body)
 	}
@@ -259,9 +260,9 @@ func TestPremiumRequired(t *testing.T) {
 
 func TestHidesOtherUsersSessions(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	owner, _ := e.user()
-	stranger, _ := e.user()
-	a := e.upload(owner, "excel-like.xlsx")
+	owner := e.user()
+	stranger := e.user()
+	a := e.upload(owner)
 	if r := e.app.Do(http.MethodGet, "/v1/expenses/import/spreadsheet/"+a.SessionID, stranger, nil); r.Status != http.StatusNotFound {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
@@ -286,8 +287,8 @@ func (e *importEnv) sessionExists(sessionID string) bool {
 
 func TestRejectsExpiredSession(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	e.expire(a.SessionID)
 	if r := e.app.Do(http.MethodGet, "/v1/expenses/import/spreadsheet/"+a.SessionID, token, nil); r.Status != http.StatusNotFound {
 		t.Fatalf("%d %s", r.Status, r.Body)
@@ -309,8 +310,8 @@ func (e *importEnv) commit(token string, a AnalysisResponse, overrides []map[str
 
 func TestCommitWritesRows(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	importable := 0
 	for _, r := range a.Preview.Rows {
 		if r.Status == "needsCategory" || r.Status == "ok" {
@@ -335,8 +336,8 @@ func TestCommitWritesRows(t *testing.T) {
 
 func TestPreviewDecision(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	r := e.app.Do(http.MethodPost, "/v1/expenses/import/spreadsheet/"+a.SessionID+"/preview", token, decision(a, nil))
 	var p PreviewResponse
 	r.JSON(t, &p)
@@ -351,11 +352,11 @@ func TestPreviewDecision(t *testing.T) {
 
 func TestSecondImportDedupes(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	if c := e.commit(token, e.upload(token, "excel-like.xlsx"), nil, http.StatusOK); c.Imported == 0 {
+	token := e.user()
+	if c := e.commit(token, e.upload(token), nil, http.StatusOK); c.Imported == 0 {
 		t.Fatal("first import wrote nothing")
 	}
-	second := e.upload(token, "excel-like.xlsx")
+	second := e.upload(token)
 	if second.Preview.DuplicateRows == 0 || second.Preview.ImportableRows != 0 {
 		t.Fatalf("%+v", second.Preview)
 	}
@@ -363,16 +364,16 @@ func TestSecondImportDedupes(t *testing.T) {
 
 func TestRefusesDoubleCommit(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	e.commit(token, a, nil, http.StatusOK)
 	e.commit(token, a, nil, http.StatusConflict)
 }
 
 func TestHonoursRowExclusions(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	s := includedSheet(t, a)
 	var ex []map[string]any
 	for _, r := range a.Preview.Rows[:2] {
@@ -385,8 +386,8 @@ func TestHonoursRowExclusions(t *testing.T) {
 
 func TestStoresPayloadsEncrypted(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	var blob []byte
 	if err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT sheets_encrypted FROM expense_import_sessions WHERE id = $1`, a.SessionID).Scan(&blob); err != nil {
 		t.Fatal(err)
@@ -398,8 +399,8 @@ func TestStoresPayloadsEncrypted(t *testing.T) {
 
 func TestDiscardRemovesSession(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	if r := e.app.Do(http.MethodDelete, "/v1/expenses/import/spreadsheet/"+a.SessionID, token, nil); r.Status != http.StatusNoContent {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
@@ -410,8 +411,8 @@ func TestDiscardRemovesSession(t *testing.T) {
 
 func TestRetentionJobSweepsExpired(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	e.expire(a.SessionID)
 	RetentionOnce(context.Background(), e.app.Deps, time.Now())
 	if e.sessionExists(a.SessionID) {
@@ -421,12 +422,15 @@ func TestRetentionJobSweepsExpired(t *testing.T) {
 
 func TestRetentionJobRunsAndStops(t *testing.T) {
 	e := newImportEnv(t, nil, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	e.expire(a.SessionID)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { RetentionJob{Interval: time.Hour, InitialDelay: time.Millisecond}.Run(ctx, e.app.Deps); close(done) }()
+	go func() {
+		RetentionJob{Interval: time.Hour, InitialDelay: time.Millisecond}.Run(ctx, e.app.Deps)
+		close(done)
+	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for e.sessionExists(a.SessionID) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
@@ -452,8 +456,8 @@ func TestAnalyzeWithStubbedModel(t *testing.T) {
 	defer stub.Close()
 	provider := &OpenAIProvider{APIKey: "stub-key", BaseURL: stub.URL, Model: "stub-model", Client: stub.Client()}
 	e := newImportEnv(t, provider, entitlements.Config{BypassBilling: true})
-	token, _ := e.user()
-	a := e.upload(token, "excel-like.xlsx")
+	token := e.user()
+	a := e.upload(token)
 	if calls.Load() != 1 || !a.AIAvailable || a.AIConfidence == nil || *a.AIConfidence != 0.8 {
 		t.Fatalf("calls %d analysis %+v", calls.Load(), a)
 	}

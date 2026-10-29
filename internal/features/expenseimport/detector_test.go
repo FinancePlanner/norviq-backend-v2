@@ -9,9 +9,9 @@ import (
 
 // Ports SpreadsheetStructureDetectorTests.swift.
 
-func detectFixture(t *testing.T, file string, index int) DetectedSheet {
+func detectFixture(t *testing.T, index int) DetectedSheet {
 	t.Helper()
-	return Detect(read(t, file, DefaultLimits).Sheets[index])
+	return Detect(read(t, "messy.xlsx", DefaultLimits).Sheets[index])
 }
 
 func fieldOf(d DetectedSheet, letter string) ColumnRole {
@@ -26,14 +26,14 @@ func fieldOf(d DetectedSheet, letter string) ColumnRole {
 func sheetOf(rows ...[]Cell) Sheet { return Sheet{Name: "Sheet1", Rows: rows} }
 
 func TestFindsOffsetHeaderRow(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 0)
+	d := detectFixture(t, 0)
 	if d.HeaderRow == nil || *d.HeaderRow != 5 || d.DataStartRow != 6 || d.DataEndRow != 14 {
 		t.Fatalf("header %v start %d end %d", d.HeaderRow, d.DataStartRow, d.DataEndRow)
 	}
 }
 
 func TestFindsOffsetColumns(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 0)
+	d := detectFixture(t, 0)
 	if d.FirstColumn != 2 || d.LastColumn != 12 {
 		t.Fatalf("columns %d..%d", d.FirstColumn, d.LastColumn)
 	}
@@ -43,14 +43,14 @@ func TestFindsOffsetColumns(t *testing.T) {
 }
 
 func TestHandlesCleanSheet(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 2)
+	d := detectFixture(t, 2)
 	if d.HeaderRow == nil || *d.HeaderRow != 1 || d.DataStartRow != 2 || d.FirstColumn != 1 {
 		t.Fatalf("%+v", d)
 	}
 }
 
 func TestExcludesLabelledTotalRow(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 0)
+	d := detectFixture(t, 0)
 	if !slices.Contains(d.ExcludedRows, 14) {
 		t.Fatalf("excluded %v", d.ExcludedRows)
 	}
@@ -98,7 +98,7 @@ func TestRecognisesTotalLabels(t *testing.T) {
 }
 
 func TestMapsColumns(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 0)
+	d := detectFixture(t, 0)
 	for letter, want := range map[string]ColumnRole{"G": RoleDate, "H": RoleTitle, "I": RoleCategory, "J": RoleAmount, "K": RoleNotes} {
 		if got := fieldOf(d, letter); got != want {
 			t.Errorf("%s = %q, want %q", letter, got, want)
@@ -107,7 +107,7 @@ func TestMapsColumns(t *testing.T) {
 }
 
 func TestResolvesCompetingAmountColumns(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 0)
+	d := detectFixture(t, 0)
 	var amounts []string
 	for _, c := range d.Columns {
 		if c.Field == RoleAmount {
@@ -120,7 +120,7 @@ func TestResolvesCompetingAmountColumns(t *testing.T) {
 }
 
 func TestMapsEnglishHeaders(t *testing.T) {
-	d := detectFixture(t, "messy.xlsx", 2)
+	d := detectFixture(t, 2)
 	for letter, want := range map[string]ColumnRole{"A": RoleDate, "B": RoleTitle, "C": RoleAmount, "D": RolePillar} {
 		if got := fieldOf(d, letter); got != want {
 			t.Errorf("%s = %q, want %q", letter, got, want)

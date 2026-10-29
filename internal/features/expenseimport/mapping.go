@@ -202,8 +202,8 @@ func overrideKey(sheet string, row int) string { return sheet + "#" + strconv.It
 
 func wireSheets(sheets []StoredSheet, m StoredMapping) []ImportSheet {
 	out := make([]ImportSheet, len(sheets))
-	for i, s := range sheets {
-		out[i] = wireSheet(s, m)
+	for i := range sheets {
+		out[i] = wireSheet(sheets[i], m)
 	}
 	return out
 }

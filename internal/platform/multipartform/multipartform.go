@@ -7,7 +7,6 @@ package multipartform
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -119,7 +118,7 @@ func FileField(parts []Part, name string) (*Part, error) {
 	}
 	if p.Filename == nil {
 		return nil, swiftjson.DataCorrupted([]string{name},
-			fmt.Sprintf(`Could not convert value at "%s" to type File from multipart part.`, name))
+			`Could not convert value at "`+name+`" to type File from multipart part.`)
 	}
 	return p, nil
 }

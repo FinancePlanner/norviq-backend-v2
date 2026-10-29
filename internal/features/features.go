@@ -58,7 +58,8 @@ func All() []server.Feature {
 		// reports overview are wired once budgeting and statistics land.
 		expenses.Feature{},
 		// Spreadsheet import and receipts (throttled groups in routes.swift).
-		expenseimport.Feature{}, receipts.Feature{},
+		expenseimport.Feature{},
+		receipts.Feature{},
 	}
 }
 

@@ -155,4 +155,3 @@ func TestColumnLetterRoundTrip(t *testing.T) {
 		}
 	}
 }
-

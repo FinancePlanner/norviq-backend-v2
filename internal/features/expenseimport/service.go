@@ -114,8 +114,8 @@ func (s *Service) Analyze(ctx context.Context, data []byte, fileName string, use
 		detections[i] = detection{sh, Detect(sh)}
 	}
 	best := -1
-	for i, d := range detections {
-		if best < 0 || detections[best].detected.Score < d.detected.Score {
+	for i := range detections {
+		if best < 0 || detections[best].detected.Score < detections[i].detected.Score {
 			best = i
 		}
 	}
@@ -139,8 +139,8 @@ func (s *Service) Analyze(ctx context.Context, data []byte, fileName string, use
 	sorted := append([]detection{}, detections...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].detected.Score > sorted[j].detected.Score })
 	digestSheets := make([]DigestSheet, 0, 2)
-	for _, d := range sorted[:min(2, len(sorted))] {
-		digestSheets = append(digestSheets, digestSheet(d.sheet, d.detected))
+	for i := range sorted[:min(2, len(sorted))] {
+		digestSheets = append(digestSheets, digestSheet(sorted[i].sheet, sorted[i].detected))
 	}
 
 	var proposal *AIProposal
@@ -164,10 +164,10 @@ func (s *Service) Analyze(ctx context.Context, data []byte, fileName string, use
 
 	chosen := detections[best]
 	if proposal != nil && proposal.SheetName != nil {
-		for _, d := range detections {
-			if d.sheet.Name == *proposal.SheetName {
+		for i := range detections {
+			if d := &detections[i]; d.sheet.Name == *proposal.SheetName {
 				if d.detected.Score > 0 {
-					chosen = d
+					chosen = *d
 				}
 				break
 			}
@@ -176,8 +176,8 @@ func (s *Service) Analyze(ctx context.Context, data []byte, fileName string, use
 
 	validated := ValidateMapping(proposal, chosen.detected, existing, allowed)
 	stored := make([]StoredSheet, len(detections))
-	for i, d := range detections {
-		stored[i] = storedSheet(d.sheet, d.detected)
+	for i := range detections {
+		stored[i] = storedSheet(detections[i].sheet, detections[i].detected)
 	}
 	mapping := storedMapping(chosen.sheet.Name, validated, chosen.detected, existing, nil)
 	mapping.Warnings = append(append([]string{}, wb.Warnings...), validated.Rejections...)
@@ -287,8 +287,8 @@ func (s *Service) Commit(ctx context.Context, session Session, decision Decision
 		return nil, err
 	}
 	var candidates []Candidate
-	for _, r := range derived.rows {
-		if r.status == StatusOK && r.request != nil {
+	for i := range derived.rows {
+		if r := &derived.rows[i]; r.status == StatusOK && r.request != nil {
 			candidates = append(candidates, Candidate{Reference: r.reference, Request: *r.request})
 		}
 	}
@@ -301,7 +301,8 @@ func (s *Service) Commit(ctx context.Context, session Session, decision Decision
 	}
 	rows := make([]RowResult, 0, min(len(derived.rows), previewRowLimit))
 	skipped := 0
-	for _, r := range derived.rows {
+	for i := range derived.rows {
+		r := &derived.rows[i]
 		if r.status != StatusOK {
 			skipped++
 		}
@@ -578,7 +579,8 @@ func (s *Service) buildPreview(ctx context.Context, sheets []StoredSheet, mappin
 		return Preview{}, err
 	}
 	p := Preview{TotalRows: len(d.rows), Rows: []PreviewRow{}, DetectedCurrencies: []string{}}
-	for _, r := range d.rows {
+	for i := range d.rows {
+		r := &d.rows[i]
 		switch r.status {
 		case StatusOK:
 			p.ImportableRows++

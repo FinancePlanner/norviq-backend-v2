@@ -7,6 +7,10 @@
 //
 //	{"name":"me","method":"GET","path":"/v1/users/me","as":"<user uuid>","body":{...}}
 //
+// "bodyFile" sends a file's bytes instead of "body" (uploads, multipart);
+// set its Content-Type in "headers". The path is relative to the working
+// directory.
+//
 // "as" signs a SessionToken for that user with -jwt-secret, so both backends
 // see the same caller. Volatile fields (requestId, timestamps listed with
 // -ignore) are dropped before comparing. Only use against databases you own:
@@ -39,6 +43,8 @@ type testCase struct {
 	As      string            `json:"as"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
+	// BodyFile is sent verbatim instead of Body.
+	BodyFile string `json:"bodyFile"`
 }
 
 type result struct {
@@ -122,6 +128,13 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 	var body io.Reader
 	if len(tc.Body) > 0 {
 		body = bytes.NewReader(tc.Body)
+	}
+	if tc.BodyFile != "" {
+		data, err := os.ReadFile(tc.BodyFile)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(data)
 	}
 	req, err := http.NewRequest(method, base+tc.Path, body) //nolint:noctx // CLI tool, client has a timeout
 	if err != nil {

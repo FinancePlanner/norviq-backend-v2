@@ -306,7 +306,7 @@ func TestReceiptImportCommit(t *testing.T) {
 		http.StatusBadRequest, "Import at most 300 expenses at a time.")
 	bad := []any{map[string]any{"expense": map[string]any{"title": "x", "amount": 1, "pillar": "fun", "occurredOn": "2026-09-01", "splitMode": "half"}}}
 	expectReason(t, e.app.Do(http.MethodPost, "/v1/expenses/import/receipts/commit", token, map[string]any{"items": bad}),
-		http.StatusBadRequest, "Data corrupted at path 'items.Index 0.expense.splitMode'. Cannot initialize ExpenseSplitMode from invalid String value half")
+		http.StatusBadRequest, "Data corrupted at path 'items.Index 0.expense.splitMode'. Cannot initialize ExpenseSplitMode from invalid String value half.")
 	if r := e.app.Do(http.MethodPost, "/v1/expenses/import/receipts/commit", e.user(false), map[string]any{"items": items[:1]}); r.Status < 400 {
 		t.Fatalf("free user: %d %s", r.Status, r.Body)
 	}

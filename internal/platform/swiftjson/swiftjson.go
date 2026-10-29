@@ -113,9 +113,10 @@ func ValueNotFound(typeName string, path []string, container string) error {
 		typeName, Path(path), what))
 }
 
-// DataCorrupted is DecodingError.dataCorrupted at path.
+// DataCorrupted is DecodingError.dataCorrupted at path. Vapor ends the
+// description with exactly one period whether or not it had one.
 func DataCorrupted(path []string, description string) error {
-	return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. %s", Path(path), description))
+	return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. %s.", Path(path), strings.TrimSuffix(description, ".")))
 }
 
 // Corrupted is the whole-document "not valid JSON" error.
@@ -184,8 +185,37 @@ func decodeForm(body []byte, v any) error {
 			fields[k] = vs[len(vs)-1]
 		}
 	}
+	if err := formMissingKey(fields, reflect.TypeOf(v)); err != nil {
+		return err
+	}
 	b, _ := json.Marshal(fields)
 	return Decode(b, v)
+}
+
+// formMissingKey is URLEncodedFormDecoder's error for an absent required
+// top-level key: valueNotFound, not keyNotFound as JSONDecoder says.
+func formMissingKey(fields map[string]any, t reflect.Type) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if !f.IsExported() || name == "-" || f.Type.Kind() == reflect.Pointer || strings.Contains(f.Tag.Get("swift"), "default") {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		if _, ok := fields[name]; !ok {
+			typeName := SwiftTypeName(f.Type)
+			return httpx.BadRequest(fmt.Sprintf("No value found (expected type '%s') at path '%s'. No %s was found at '%s'.", typeName, name, typeName, name))
+		}
+	}
+	return nil
 }
 
 var (

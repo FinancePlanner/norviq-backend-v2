@@ -85,6 +85,10 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		// Tax: report queue, report expiry, daily projections.
+		tax.ReportGenerationJob{},
+		tax.ReportCleanupJob{},
+		tax.ProjectionJob{},
 	}
 }
 

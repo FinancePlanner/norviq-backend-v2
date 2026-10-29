@@ -7,6 +7,8 @@
 //
 //	{"name":"me","method":"GET","path":"/v1/users/me","as":"<user uuid>","body":{...}}
 //
+// "rawBody" (a string) is sent verbatim in place of "body", for non-JSON
+// uploads.
 // "bodyFile" sends a file's bytes instead of "body" (uploads, multipart);
 // set its Content-Type in "headers". The path is relative to the working
 // directory.
@@ -43,6 +45,9 @@ type testCase struct {
 	As      string            `json:"as"`
 	Headers map[string]string `json:"headers"`
 	Body    json.RawMessage   `json:"body"`
+	// RawBody is sent verbatim instead of Body (CSV uploads); set its
+	// Content-Type in Headers.
+	RawBody *string `json:"rawBody"`
 	// BodyFile is sent verbatim instead of Body.
 	BodyFile string `json:"bodyFile"`
 }
@@ -126,7 +131,10 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 		method = http.MethodGet
 	}
 	var body io.Reader
-	if len(tc.Body) > 0 {
+	switch {
+	case tc.RawBody != nil:
+		body = strings.NewReader(*tc.RawBody)
+	case len(tc.Body) > 0:
 		body = bytes.NewReader(tc.Body)
 	}
 	if tc.BodyFile != "" {
@@ -140,7 +148,7 @@ func do(client *http.Client, base string, tc testCase, signer *auth.Signer) (*re
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
+	if len(tc.Body) > 0 && tc.RawBody == nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range tc.Headers {

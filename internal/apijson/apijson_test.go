@@ -1,6 +1,7 @@
 package apijson
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -101,5 +102,59 @@ func TestMarshalDoesNotEscapeHTML(t *testing.T) {
 	got, _ := Marshal(map[string]string{"q": "a<b&c"})
 	if string(got) != `{"q":"a<b&c"}` {
 		t.Errorf("got %s", got)
+	}
+}
+
+func TestUnmarshalKeepsDictionaryKeys(t *testing.T) {
+	type item struct {
+		GivesAccess bool `json:"givesAccess"`
+	}
+	type base struct {
+		CreatedBy string `json:"createdBy"`
+	}
+	type body struct {
+		base
+		DisplayName string            `json:"displayName"`
+		Labels      map[string]string `json:"labels"`
+		Items       map[string]*item  `json:"items"`
+		List        []item            `json:"list"`
+		Loose       any               `json:"loose"`
+	}
+	var got body
+	err := Unmarshal([]byte(`{
+		"display_name": "n",
+		"created_by": "me",
+		"labels": {"pro_monthly": "a"},
+		"items": {"pro_annual": {"gives_access": true}},
+		"list": [{"gives_access": true}],
+		"loose": {"some_key": 1}
+	}`), &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "n" || got.CreatedBy != "me" {
+		t.Errorf("struct keys not rewritten: %+v", got)
+	}
+	if got.Labels["pro_monthly"] != "a" {
+		t.Errorf("map key rewritten: %v", got.Labels)
+	}
+	if it := got.Items["pro_annual"]; it == nil || !it.GivesAccess {
+		t.Errorf("map value: %v", got.Items)
+	}
+	if len(got.List) != 1 || !got.List[0].GivesAccess {
+		t.Errorf("slice elem: %v", got.List)
+	}
+	if m, _ := got.Loose.(map[string]any); m["someKey"] == nil {
+		t.Errorf("interface target not rewritten: %v", got.Loose)
+	}
+}
+
+func TestUnmarshalKeyedRewritesRawContainers(t *testing.T) {
+	var obj map[string]json.RawMessage
+	if err := UnmarshalKeyed([]byte(`{"app_user_id": {"inner_key": 1}}`), &obj); err != nil {
+		t.Fatal(err)
+	}
+	if string(obj["appUserId"]) != `{"innerKey":1}` {
+		t.Errorf("got %v", obj)
 	}
 }

@@ -4,8 +4,9 @@
 // The Swift backend encoded with `JSONEncoder.backendAPI`: property names as
 // declared (camelCase), dates as ISO 8601 at second precision in UTC, and
 // UUIDs as `uuidString`, which is uppercase. It decoded with a custom key
-// strategy that rewrote any key containing an underscore to camelCase, so
-// clients may send either spelling. Both directions are kept here so handler
+// strategy that rewrote any key containing an underscore to camelCase (in
+// keyed containers only, never dictionary keys), so clients may send either
+// spelling. Both directions are kept here so handler
 // code never has to think about them.
 package apijson
 
@@ -15,8 +16,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -168,13 +171,19 @@ func Decode(r io.Reader, v any) error {
 }
 
 // Unmarshal is Decode for a byte slice.
+//
+// The rewrite follows v's type, because Swift applied its key strategy only
+// to keyed containers: the keys of a [String: T] dictionary (a Go map) reach
+// the handler exactly as sent, while the keys of the structs inside it are
+// rewritten. Types with their own UnmarshalJSON receive their bytes untouched;
+// an interface target (any) gets every key rewritten.
 func Unmarshal(raw []byte, v any) error {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return io.EOF
 	}
 	if bytes.IndexByte(raw, '_') >= 0 {
-		normalized, err := normalizeKeys(raw)
+		normalized, err := normalizeKeys(raw, reflect.TypeOf(v))
 		if err != nil {
 			return err
 		}
@@ -183,19 +192,64 @@ func Unmarshal(raw []byte, v any) error {
 	return json.Unmarshal(raw, v)
 }
 
-func normalizeKeys(raw []byte) ([]byte, error) {
+// UnmarshalKeyed is Unmarshal with every object key rewritten, whatever v's
+// type. It is for hand-written decoders that walk raw JSON as Swift keyed
+// containers (e.g. into map[string]json.RawMessage) to reproduce Vapor's
+// DecodingError texts.
+func UnmarshalKeyed(raw []byte, v any) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return io.EOF
+	}
+	if bytes.IndexByte(raw, '_') >= 0 {
+		normalized, err := normalizeKeys(raw, nil)
+		if err != nil {
+			return err
+		}
+		raw = normalized
+	}
+	return json.Unmarshal(raw, v)
+}
+
+func normalizeKeys(raw []byte, t reflect.Type) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var tree any
 	if err := dec.Decode(&tree); err != nil {
 		return nil, err
 	}
-	return json.Marshal(rewrite(tree))
+	return json.Marshal(rewrite(tree, t))
 }
 
-func rewrite(node any) any {
+var unmarshalerType = reflect.TypeFor[json.Unmarshaler]()
+
+// rewrite renames the snake_case keys of every JSON object that decodes into
+// a struct. A nil t means "unknown type": rewrite everything, as Foundation
+// did for values decoded through keyed containers.
+func rewrite(node any, t reflect.Type) any {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t != nil {
+		if reflect.PointerTo(t).Implements(unmarshalerType) {
+			return node
+		}
+		if t.Kind() == reflect.Interface {
+			t = nil
+		}
+	}
 	switch n := node.(type) {
 	case map[string]any:
+		if t != nil && t.Kind() == reflect.Map {
+			for k, v := range n {
+				n[k] = rewrite(v, t.Elem())
+			}
+			return n
+		}
+		var fields map[string]reflect.Type
+		if t != nil && t.Kind() == reflect.Struct {
+			fields = structFields(t)
+		}
 		out := make(map[string]any, len(n))
 		for k, v := range n {
 			key := k
@@ -207,16 +261,96 @@ func rewrite(node any) any {
 			if _, exists := out[key]; exists && key != k {
 				continue
 			}
-			out[key] = rewrite(v)
+			var ft reflect.Type
+			if t != nil {
+				var ok bool
+				if ft, ok = lookupField(fields, key); !ok {
+					// Unknown keys are dropped by encoding/json anyway.
+					out[key] = v
+					continue
+				}
+			}
+			out[key] = rewrite(v, ft)
 		}
 		return out
 	case []any:
+		var et reflect.Type
+		if t != nil && (t.Kind() == reflect.Slice || t.Kind() == reflect.Array) {
+			et = t.Elem()
+		}
 		for i := range n {
-			n[i] = rewrite(n[i])
+			n[i] = rewrite(n[i], et)
 		}
 		return n
 	default:
 		return node
+	}
+}
+
+// lookupField matches a key to a field the way encoding/json does: exact
+// name first, then case-insensitively.
+func lookupField(fields map[string]reflect.Type, key string) (reflect.Type, bool) {
+	if ft, ok := fields[key]; ok {
+		return ft, true
+	}
+	for name, ft := range fields {
+		if strings.EqualFold(name, key) {
+			return ft, true
+		}
+	}
+	return nil, false
+}
+
+var fieldCache sync.Map // reflect.Type -> map[string]reflect.Type
+
+// structFields maps the JSON names of t's fields, embedded ones included, to
+// their types.
+func structFields(t reflect.Type) map[string]reflect.Type {
+	if cached, ok := fieldCache.Load(t); ok {
+		return cached.(map[string]reflect.Type)
+	}
+	fields := map[string]reflect.Type{}
+	collectFields(t, fields)
+	fieldCache.Store(t, fields)
+	return fields
+}
+
+func collectFields(t reflect.Type, fields map[string]reflect.Type) {
+	// Fields declared directly on t shadow promoted ones, as in encoding/json.
+	var embedded []reflect.Type
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if f.Anonymous && name == "" {
+			et := f.Type
+			if et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			if et.Kind() == reflect.Struct {
+				embedded = append(embedded, et)
+				continue
+			}
+		}
+		if !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		fields[name] = f.Type
+	}
+	for _, et := range embedded {
+		promoted := map[string]reflect.Type{}
+		collectFields(et, promoted)
+		for name, ft := range promoted {
+			if _, taken := fields[name]; !taken {
+				fields[name] = ft
+			}
+		}
 	}
 }
 

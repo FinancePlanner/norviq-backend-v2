@@ -25,6 +25,8 @@ import (
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
+	"norviq-api/internal/features/goalplanning"
+	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
@@ -118,6 +120,11 @@ func All() []server.Feature {
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// ScenarioController portfolio snapshot routes.
 		scenarios.Feature{},
+		// GoalPlanningController (/v1/financial-goals); unregistered when
+		// GOAL_PLANNING_ENABLED is off, as in routes.swift.
+		goalplanning.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		// Dashboard GoalsController (/v1/goals).
+		goals.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// WealthAutomationController rebalancing-policy routes.
 		automation.Feature{},
 		// Community boards (BoardsController).
@@ -194,6 +201,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// GoalPlanningDailyJob (Vapor: GOAL_EVALUATOR_ENABLED=false).
+		goalplanning.DailyJob{},
 	}
 }
 

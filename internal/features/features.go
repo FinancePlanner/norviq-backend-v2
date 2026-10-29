@@ -27,6 +27,7 @@ import (
 	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
+	"norviq-api/internal/features/news"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/pilots"
 	"norviq-api/internal/features/portfolio"
@@ -134,6 +135,8 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// NewsController (/v1/news/*) and FinnhubWebhookController.
+		news.Feature{},
 	}
 }
 
@@ -194,6 +197,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		news.IngestionJob{},
+		news.NotificationJob{},
 	}
 }
 

@@ -39,6 +39,14 @@ type Service struct {
 	basicFinancialsFlight singleflight.Group
 }
 
+// baseURLOr returns raw trimmed, or def when it is blank.
+func baseURLOr(raw, def string) string {
+	if t := strings.TrimSpace(raw); t != "" {
+		return t
+	}
+	return def
+}
+
 // NewFromSettings builds the service the way Vapor's configure.swift did:
 // provider selection from MARKET_PROVIDER and the credentials present, FMP
 // when FMP_API_KEY is set. rdb may be nil (no Redis: every read is a miss).
@@ -51,14 +59,14 @@ func NewFromSettings(s Settings, q marketdatadb.Querier, rdb redis.UniversalClie
 	var provider Provider = Disabled{}
 	switch SelectProvider(s.MarketProvider, strings.TrimSpace(s.FinnhubAPIKey) != "", strings.TrimSpace(s.IBKRAPIBaseURL) != "") {
 	case KindFinnhub:
-		provider = &Finnhub{BaseURL: s.FinnhubBaseURL, APIKey: strings.TrimSpace(s.FinnhubAPIKey), DefaultCurrency: s.providerCurrency(), Client: client, Logger: logger}
+		provider = &Finnhub{BaseURL: baseURLOr(s.FinnhubBaseURL, DefaultFinnhubBaseURL), APIKey: strings.TrimSpace(s.FinnhubAPIKey), DefaultCurrency: s.providerCurrency(), Client: client, Logger: logger}
 	case KindIBKR:
 		provider = &IBKR{BaseURL: strings.TrimSpace(s.IBKRAPIBaseURL), DefaultCurrency: s.providerCurrency(), Client: client}
 	case KindDisabled:
 	}
 	var fmp *FMP
 	if key := strings.TrimSpace(s.FMPAPIKey); key != "" {
-		fmp = &FMP{BaseURL: s.FMPBaseURL, APIKey: key, Cache: redisCache, EODTTL: cfg.EODTTL, Client: client, Logger: logger}
+		fmp = &FMP{BaseURL: baseURLOr(s.FMPBaseURL, DefaultFMPBaseURL), APIKey: key, Cache: redisCache, EODTTL: cfg.EODTTL, Client: client, Logger: logger}
 	}
 	return &Service{
 		Provider: provider,

@@ -179,7 +179,9 @@ func (h handlers) topMovers(c *echo.Context) error {
 	for _, m := range snap.TopMovers {
 		category := strings.ToLower(m.Category)
 		for _, w := range wanted {
-			if strings.Contains(category, w) {
+			// Foundation's contains("") is false, so a blank piece
+			// matches nothing.
+			if w != "" && strings.Contains(category, w) {
 				out = append(out, m)
 				break
 			}

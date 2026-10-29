@@ -23,3 +23,4 @@ vendor/
 
 # Local parity captures can hold real user data; never commit them.
 /parity-captures/
+!scripts/coverage.sh

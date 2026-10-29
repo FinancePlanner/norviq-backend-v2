@@ -1,0 +1,108 @@
+# Identity: auth, MFA, OAuth login, WebAuthn, PATs, OAuth server, profile, onboarding.
+# Seed first: psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/identity-setup.sql
+# Both servers run with provider/Resend/WebAuthn/introspection env unset, so
+# the not-configured paths are what is compared.
+# --- register
+{"name":"register-empty","method":"POST","path":"/v1/auth/register","body":{}}
+{"name":"register-no-confirm","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","username":"newparity"}}
+{"name":"register-mismatch","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Other!Pass1","username":"newparity","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-weak","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"abc","confirmPassword":"abc","username":"newparity","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-no-symbol","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Abcdefgh1","confirmPassword":"Abcdefgh1","username":"newparity","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-bad-email","method":"POST","path":"/v1/auth/register","body":{"email":"not-an-email","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"newparity","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-bad-username","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"a b","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-reserved-username","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"norviq","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-dup-email","method":"POST","path":"/v1/auth/register","body":{"email":"identity-parity-a@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"newparity","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-dup-username","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"identityparitya","date_of_birth":"1990-01-01T00:00:00Z"}}
+{"name":"register-bad-dob","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"newparity","date_of_birth":"yesterday"}}
+{"name":"register-future-dob","method":"POST","path":"/v1/auth/register","body":{"email":"new-parity@example.com","password":"Str0ng!Pass","confirmPassword":"Str0ng!Pass","username":"newparity","date_of_birth":"2999-01-01T00:00:00Z"}}
+# --- login / me / refresh
+{"name":"login-empty","method":"POST","path":"/v1/auth/login","body":{}}
+{"name":"login-unknown","method":"POST","path":"/v1/auth/login","body":{"email":"nobody-parity@example.com","password":"Str0ng!Pass"}}
+{"name":"login-ok","method":"POST","path":"/v1/auth/login","body":{"email":"identity-parity-a@example.com","password":"Str0ng!Pass"}}
+{"name":"login-ok-mfa-capable","method":"POST","path":"/v1/auth/login","headers":{"X-StockPlan-Client-Capabilities":"mfa-auth-v1"},"body":{"email":"identity-parity-b@example.com","password":"Str0ng!Pass"}}
+{"name":"me","path":"/v1/auth/me","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"me-anon","path":"/v1/auth/me"}
+{"name":"refresh-empty","method":"POST","path":"/v1/auth/refresh","body":{}}
+{"name":"refresh-bad","method":"POST","path":"/v1/auth/refresh","body":{"refreshToken":"not-a-real-token"}}
+# --- password reset
+{"name":"forgot-empty","method":"POST","path":"/v1/auth/forgot-password","body":{}}
+{"name":"forgot-unknown","method":"POST","path":"/v1/auth/forgot-password","body":{"email":"nobody-parity@example.com"}}
+{"name":"forgot-known","method":"POST","path":"/v1/auth/forgot-password","body":{"email":"identity-parity-b@example.com"}}
+{"name":"resend-reset-known","method":"POST","path":"/v1/auth/resend-reset","body":{"email":"identity-parity-b@example.com"}}
+{"name":"resend-reset-unknown","method":"POST","path":"/v1/auth/resend-reset","body":{"email":"nobody-parity@example.com"}}
+{"name":"reset-empty","method":"POST","path":"/v1/auth/reset-password","body":{}}
+{"name":"reset-bad-code","method":"POST","path":"/v1/auth/reset-password","body":{"email":"identity-parity-b@example.com","code":"000000","newPassword":"N3w!Password","confirmPassword":"N3w!Password"}}
+# --- MFA
+{"name":"mfa-verify-empty","method":"POST","path":"/v1/auth/mfa/verify","body":{}}
+{"name":"mfa-verify-unknown","method":"POST","path":"/v1/auth/mfa/verify","body":{"challengeId":"0B1D0000-0000-4000-8000-0000000000FF","code":"123456"}}
+{"name":"mfa-resend-unknown","method":"POST","path":"/v1/auth/mfa/resend","body":{"challengeId":"0B1D0000-0000-4000-8000-0000000000FF"}}
+# --- OAuth login (providers not configured)
+{"name":"oauth-start-google","method":"POST","path":"/v1/auth/oauth/google/start","body":{"redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-start-unknown","method":"POST","path":"/v1/auth/oauth/myspace/start","body":{"redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-exchange-google","method":"POST","path":"/v1/auth/oauth/google/exchange","body":{"flowId":"0B1D0000-0000-4000-8000-0000000000FF","code":"x","state":"y","redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-link-start-anon","method":"POST","path":"/v1/auth/oauth/google/link/start","body":{"redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-link-start","method":"POST","path":"/v1/auth/oauth/google/link/start","as":"0b1d0000-0000-4000-8000-000000000001","body":{"redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-link-exchange","method":"POST","path":"/v1/auth/oauth/apple/link/exchange","as":"0b1d0000-0000-4000-8000-000000000001","body":{"flowId":"0B1D0000-0000-4000-8000-0000000000FF","code":"x","state":"y","redirectURI":"norviqa://oauth/callback"}}
+{"name":"oauth-identities","path":"/v1/auth/oauth/identities","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"oauth-callback-get","path":"/v1/auth/oauth/apple/callback?code=abc&state=xyz"}
+# --- WebAuthn (not configured)
+{"name":"webauthn-login-options","method":"POST","path":"/v1/auth/webauthn/login/options"}
+{"name":"webauthn-login-verify","method":"POST","path":"/v1/auth/webauthn/login/verify","body":{}}
+{"name":"webauthn-register-options-anon","method":"POST","path":"/v1/auth/webauthn/register/options"}
+{"name":"webauthn-register-options","method":"POST","path":"/v1/auth/webauthn/register/options","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"webauthn-register-verify","method":"POST","path":"/v1/auth/webauthn/register/verify","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+# --- personal access tokens
+{"name":"tokens-list-anon","path":"/v1/tokens"}
+{"name":"tokens-create-free","method":"POST","path":"/v1/tokens","as":"0b1d0000-0000-4000-8000-000000000001","body":{"name":"cli","scopes":["portfolio:read"]}}
+{"name":"tokens-create-bad-scope","method":"POST","path":"/v1/tokens","as":"0b1d0000-0000-4000-8000-000000000003","body":{"name":"cli","scopes":["root:everything"]}}
+{"name":"tokens-create-no-name","method":"POST","path":"/v1/tokens","as":"0b1d0000-0000-4000-8000-000000000003","body":{"scopes":["portfolio:read"]}}
+{"name":"tokens-create","method":"POST","path":"/v1/tokens","as":"0b1d0000-0000-4000-8000-000000000003","body":{"name":"cli","scopes":["portfolio:read","settings:write"]}}
+{"name":"tokens-list","path":"/v1/tokens","as":"0b1d0000-0000-4000-8000-000000000003"}
+{"name":"tokens-revoke-unknown","method":"DELETE","path":"/v1/tokens/0B1D0000-0000-4000-8000-0000000000FF","as":"0b1d0000-0000-4000-8000-000000000003"}
+{"name":"tokens-revoke-bad-id","method":"DELETE","path":"/v1/tokens/nope","as":"0b1d0000-0000-4000-8000-000000000003"}
+# --- OAuth authorization server
+{"name":"well-known","path":"/.well-known/oauth-authorization-server","headers":{"Host":"api.norviq.test"}}
+{"name":"introspect-no-secret","method":"POST","path":"/v1/oauth/introspect","body":{"token":"nvq_pat_x"}}
+{"name":"authorize-no-client","path":"/v1/oauth/authorize?response_type=code"}
+{"name":"authorize-unknown-client","path":"/v1/oauth/authorize?response_type=code&client_id=nope&redirect_uri=https%3A%2F%2Fexample.com%2Fcb&code_challenge=abc&code_challenge_method=S256"}
+{"name":"flow-unknown","path":"/v1/oauth/flows/0B1D0000-0000-4000-8000-0000000000FF","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"flow-anon","path":"/v1/oauth/flows/0B1D0000-0000-4000-8000-0000000000FF"}
+{"name":"flow-approve-unknown","method":"POST","path":"/v1/oauth/flows/0B1D0000-0000-4000-8000-0000000000FF/approve","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+{"name":"flow-deny-unknown","method":"POST","path":"/v1/oauth/flows/0B1D0000-0000-4000-8000-0000000000FF/deny","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+{"name":"token-no-grant","method":"POST","path":"/v1/oauth/token","body":{}}
+{"name":"token-bad-grant","method":"POST","path":"/v1/oauth/token","body":{"grant_type":"password"}}
+{"name":"token-bad-code","method":"POST","path":"/v1/oauth/token","body":{"grant_type":"authorization_code","code":"nope","client_id":"nope","redirect_uri":"https://example.com/cb","code_verifier":"x"}}
+{"name":"token-bad-refresh","method":"POST","path":"/v1/oauth/token","body":{"grant_type":"refresh_token","refresh_token":"nope","client_id":"nope"}}
+{"name":"register-client-empty","method":"POST","path":"/v1/oauth/register","body":{}}
+{"name":"register-client-bad-redirect","method":"POST","path":"/v1/oauth/register","body":{"client_name":"Parity","redirect_uris":["http://evil.example.com/cb"]}}
+{"name":"register-client","method":"POST","path":"/v1/oauth/register","body":{"client_name":"Parity","redirect_uris":["https://example.com/cb"]}}
+{"name":"revoke-unknown","method":"POST","path":"/v1/oauth/revoke","body":{"token":"nope"}}
+# --- profile
+{"name":"profile-get","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"profile-get-anon","path":"/v1/users"}
+{"name":"profile-get-by-id","path":"/v1/users/0b1d0000-0000-4000-8000-000000000001","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"profile-get-other","path":"/v1/users/0b1d0000-0000-4000-8000-000000000002","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"profile-get-bad-id","path":"/v1/users/not-a-uuid","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"profile-put","method":"PUT","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001","body":{"userProfile":{"id":"0B1D0000-0000-4000-8000-000000000001","email":"identity-parity-a@example.com","username":"identityparitya","bio":"Parity bio"}}}
+{"name":"profile-put-by-id","method":"PUT","path":"/v1/users/0b1d0000-0000-4000-8000-000000000001","as":"0b1d0000-0000-4000-8000-000000000001","body":{"userProfile":{"id":"0B1D0000-0000-4000-8000-000000000001","email":"identity-parity-a@example.com","username":"identityparitya","bio":"Parity bio"}}}
+{"name":"profile-put-wrong-id","method":"PUT","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001","body":{"userProfile":{"id":"0B1D0000-0000-4000-8000-000000000002","email":"identity-parity-a@example.com"}}}
+{"name":"profile-put-email-change","method":"PUT","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001","body":{"userProfile":{"id":"0B1D0000-0000-4000-8000-000000000001","email":"moved-parity@example.com"}}}
+{"name":"profile-put-taken-username","method":"PUT","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001","body":{"userProfile":{"id":"0B1D0000-0000-4000-8000-000000000001","email":"identity-parity-a@example.com","username":"identityparityb"}}}
+{"name":"profile-put-empty","method":"PUT","path":"/v1/users","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+{"name":"username-taken","method":"PATCH","path":"/v1/users/username","as":"0b1d0000-0000-4000-8000-000000000001","body":{"username":"identityparityb"}}
+{"name":"username-same","method":"PATCH","path":"/v1/users/username","as":"0b1d0000-0000-4000-8000-000000000001","body":{"username":"IdentityParityA"}}
+{"name":"username-empty","method":"PATCH","path":"/v1/users/username","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+{"name":"email-unchanged","method":"PATCH","path":"/v1/users/email","as":"0b1d0000-0000-4000-8000-000000000001","body":{"email":"IDENTITY-parity-a@example.com"}}
+{"name":"email-no-password","method":"PATCH","path":"/v1/users/email","as":"0b1d0000-0000-4000-8000-000000000001","body":{"email":"moved-parity@example.com"}}
+{"name":"email-wrong-password","method":"PATCH","path":"/v1/users/email","as":"0b1d0000-0000-4000-8000-000000000001","body":{"email":"moved-parity@example.com","currentPassword":"Wr0ng!Pass"}}
+{"name":"email-taken","method":"PATCH","path":"/v1/users/email","as":"0b1d0000-0000-4000-8000-000000000001","body":{"email":"identity-parity-b@example.com","currentPassword":"Str0ng!Pass"}}
+{"name":"password-wrong","method":"PATCH","path":"/v1/users/password","as":"0b1d0000-0000-4000-8000-000000000001","body":{"currentPassword":"Wr0ng!Pass","newPassword":"N3w!Password"}}
+{"name":"password-empty","method":"PATCH","path":"/v1/users/password","as":"0b1d0000-0000-4000-8000-000000000001","body":{}}
+# --- onboarding
+{"name":"onboarding-get","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001"}
+{"name":"onboarding-get-anon","path":"/v1/onboarding"}
+{"name":"onboarding-patch","method":"PATCH","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001","body":{"funnelStep":"budget","guidedStartDismissed":true}}
+{"name":"onboarding-patch-snake","method":"PATCH","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001","body":{"funnel_step":"goal"}}
+{"name":"onboarding-patch-server-key","method":"PATCH","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001","body":{"addHoldingCompleted":true}}
+{"name":"onboarding-patch-bad-step","method":"PATCH","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001","body":{"funnelStep":"nowhere"}}
+{"name":"onboarding-patch-array","method":"PATCH","path":"/v1/onboarding","as":"0b1d0000-0000-4000-8000-000000000001","body":[1]}

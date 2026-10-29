@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
+	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/platform/entitlements"
@@ -47,6 +48,9 @@ func All() []server.Feature {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		earnings.Feature{},
+		// Identity: auth, tokens, OAuth server, profile and
+		// onboarding.
+		identity.Feature{},
 	}
 }
 
@@ -76,6 +80,7 @@ type Job interface {
 // AllJobs returns every ported background job.
 func AllJobs() []Job {
 	return []Job{
+		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
 	}

@@ -33,12 +33,12 @@ func (s *Service) Pressure(ctx context.Context, rawSymbol string) (MarketPressur
 	}
 	now := s.now().UTC()
 	var (
-		wg               sync.WaitGroup
-		quotes           []CryptoQuoteResponse
-		quotesErr        error
-		history          []CryptoHistoricalLightPoint
-		historyErr       error
-		insider          *MarketPressureInsider
+		wg                sync.WaitGroup
+		quotes            []CryptoQuoteResponse
+		quotesErr         error
+		history           []CryptoHistoricalLightPoint
+		historyErr        error
+		insider           *MarketPressureInsider
 		fromDay, todayDay = FormatDateOnly(now.AddDate(0, 0, -75)), FormatDateOnly(now)
 	)
 	wg.Add(3)

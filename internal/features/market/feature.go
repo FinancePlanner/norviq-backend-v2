@@ -35,20 +35,27 @@ const (
 
 // PremiumGate is UsageCounterService.requirePremium: nil when userID's plan
 // includes feature, otherwise the billing upgrade error to return as-is.
-// The billing port provides it; adapt with
-//
-//	func(ctx context.Context, f string, id uuid.UUID) error {
-//		return entitlements.RequirePremium(ctx, entitlements.Feature(f), id)
-//	}
-type PremiumGate func(ctx context.Context, feature string, userID uuid.UUID) error
+// entitlements.NamedGate satisfies it.
+type PremiumGate interface {
+	RequirePremium(ctx context.Context, feature string, userID uuid.UUID) error
+}
+
+// PremiumFunc adapts a plain function to PremiumGate.
+type PremiumFunc func(ctx context.Context, feature string, userID uuid.UUID) error
+
+// RequirePremium implements PremiumGate.
+func (f PremiumFunc) RequirePremium(ctx context.Context, feature string, userID uuid.UUID) error {
+	return f(ctx, feature, userID)
+}
 
 // Feature mounts the market routes.
 type Feature struct {
 	// Service overrides the environment-built service (tests).
 	Service *marketdata.Service
-	// Premium gates the Pro-only routes. While it is nil those routes are
-	// not registered, so the strangler keeps sending them to Vapor.
-	Premium PremiumGate
+	// Premium builds the billing gate for the Pro-only routes. While it is
+	// nil those routes are not registered, so the strangler keeps sending
+	// them to Vapor.
+	Premium func(d *server.Deps) PremiumGate
 }
 
 // Name implements server.Feature.
@@ -63,7 +70,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 			return err
 		}
 	}
-	h := &handlers{svc: svc, premium: f.Premium}
+	h := &handlers{svc: svc}
+	if f.Premium != nil {
+		h.premium = f.Premium(d)
+	}
 
 	// routes.swift wraps the controller in RateLimitMiddleware(100/60s)
 	// outside its authenticator, so that bucket is per client IP; the
@@ -155,7 +165,7 @@ func (h *handlers) requirePremium(feature string, next echo.HandlerFunc) echo.Ha
 		if err != nil {
 			return err
 		}
-		if err := h.premium(c.Request().Context(), feature, s.UserID); err != nil {
+		if err := h.premium.RequirePremium(c.Request().Context(), feature, s.UserID); err != nil {
 			return err
 		}
 		return next(c)
@@ -806,4 +816,3 @@ func (h *handlers) priceChartComparison(c *echo.Context) error {
 	}
 	return httpx.OK(c, resp)
 }
-

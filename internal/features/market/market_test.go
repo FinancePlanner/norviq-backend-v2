@@ -47,7 +47,10 @@ type env struct {
 func newEnv(t *testing.T, settings marketdata.Settings, premium market.PremiumGate) *env {
 	t.Helper()
 	var svc *marketdata.Service
-	feature := market.Feature{Premium: premium}
+	feature := market.Feature{}
+	if premium != nil {
+		feature.Premium = func(*server.Deps) market.PremiumGate { return premium }
+	}
 	app := testutil.NewApp(t, []server.Feature{lazyFeature{&feature, &svc, settings}})
 	user := app.CreateUser(uuid.NewString() + "@example.com")
 	return &env{app: app, token: app.Token(user), user: user}
@@ -95,20 +98,20 @@ func TestMarketRequiresAuth(t *testing.T) {
 func TestValidationReasons(t *testing.T) {
 	e := newEnv(t, marketdata.Settings{}, nil)
 	cases := map[string]string{
-		"/v1/market/details":                          "Missing query parameter `symbol`.",
-		"/v1/market/details?symbol=%20":               "Missing query parameter `symbol`.",
-		"/v1/market/history":                          "Missing query parameter `symbol`.",
-		"/v1/market/quote/batch":                      "Missing query parameter `symbols`.",
-		"/v1/market/quote/batch?symbols=,%20,":        "At least one symbol is required.",
-		"/v1/market/returns/batch":                    "Missing query parameter `symbols`.",
-		"/v1/market/search":                           "Missing query parameter `q`.",
-		"/v1/market/search?q=%20":                     "Query parameter `q` is required.",
-		"/v1/market/fx?pair=EURO":                     "Invalid FX pair. Use `EURUSD` or `EUR/USD`.",
-		"/v1/market/insider/AAPL?days=10":             "`days` must be between 30 and 1825.",
-		"/v1/market/congress/recent?limit=500":        "`limit` must be between 1 and 200.",
-		"/v1/market/price-chart/compare":              "Missing query parameter `symbols`.",
-		"/v1/market/history/archive?symbol=A&from=x":  "Invalid from. Expected YYYY-MM-DD.",
-		"/v1/market/price-chart/compare?symbols=,,,":  "At least one symbol is required.",
+		"/v1/market/details":                                 "Missing query parameter `symbol`.",
+		"/v1/market/details?symbol=%20":                      "Missing query parameter `symbol`.",
+		"/v1/market/history":                                 "Missing query parameter `symbol`.",
+		"/v1/market/quote/batch":                             "Missing query parameter `symbols`.",
+		"/v1/market/quote/batch?symbols=,%20,":               "At least one symbol is required.",
+		"/v1/market/returns/batch":                           "Missing query parameter `symbols`.",
+		"/v1/market/search":                                  "Missing query parameter `q`.",
+		"/v1/market/search?q=%20":                            "Query parameter `q` is required.",
+		"/v1/market/fx?pair=EURO":                            "Invalid FX pair. Use `EURUSD` or `EUR/USD`.",
+		"/v1/market/insider/AAPL?days=10":                    "`days` must be between 30 and 1825.",
+		"/v1/market/congress/recent?limit=500":               "`limit` must be between 1 and 200.",
+		"/v1/market/price-chart/compare":                     "Missing query parameter `symbols`.",
+		"/v1/market/history/archive?symbol=A&from=x":         "Invalid from. Expected YYYY-MM-DD.",
+		"/v1/market/price-chart/compare?symbols=,,,":         "At least one symbol is required.",
 		"/v1/market/price-chart/compare?symbols=a,b,c,d,e,f": "Maximum 5 symbols per comparison.",
 	}
 	for path, want := range cases {
@@ -237,16 +240,16 @@ func TestPremiumRoutesNeedGate(t *testing.T) {
 		t.Fatalf("ungated route mounted: %d", r.Status)
 	}
 	var calls atomic.Int32
-	deny := func(_ context.Context, feature string, _ uuid.UUID) error {
+	deny := market.PremiumFunc(func(_ context.Context, feature string, _ uuid.UUID) error {
 		calls.Add(1)
 		return httpx.CodedAbort(http.StatusPaymentRequired, "upgrade_required", "Upgrade for "+feature)
-	}
+	})
 	e := newEnv(t, marketdata.Settings{}, deny)
 	for path, feature := range map[string]string{
-		"/v1/market/basic-financials/AAPL":   market.PremiumMarketFundamentals,
-		"/v1/market/compare?symbols=AAPL":    market.PremiumPeerComparison,
-		"/v1/market/earnings/AAPL":           market.PremiumEarningsText,
-		"/v1/market/earnings/AAPL/transcript": market.PremiumEarningsText,
+		"/v1/market/basic-financials/AAPL":         market.PremiumMarketFundamentals,
+		"/v1/market/compare?symbols=AAPL":          market.PremiumPeerComparison,
+		"/v1/market/earnings/AAPL":                 market.PremiumEarningsText,
+		"/v1/market/earnings/AAPL/transcript":      market.PremiumEarningsText,
 		"/v1/market/historical-sector-performance": market.PremiumMarketFundamentals,
 	} {
 		r := e.app.Do("GET", path, e.token, nil)
@@ -254,7 +257,7 @@ func TestPremiumRoutesNeedGate(t *testing.T) {
 			t.Errorf("%s: %d %s", path, r.Status, r.Body)
 		}
 	}
-	allow := func(context.Context, string, uuid.UUID) error { return nil }
+	allow := market.PremiumFunc(func(context.Context, string, uuid.UUID) error { return nil })
 	ok := newEnv(t, marketdata.Settings{}, allow)
 	if r := ok.app.Do("GET", "/v1/market/compare", ok.token, nil); r.Status != 400 || reason(t, r) != "Missing symbols query parameter." {
 		t.Fatalf("compare %d %s", r.Status, r.Body)
@@ -272,9 +275,9 @@ func TestPremiumRoutesNeedGate(t *testing.T) {
 
 func TestFMPBackedRoutes(t *testing.T) {
 	up := upstream(t, map[string]string{
-		"/stable/senate-latest":               `[{"symbol":"NVDA","transactionDate":"2024-05-02","firstName":"A","lastName":"S","type":"Sale"}]`,
-		"/stable/house-latest":                `[{"symbol":"AAPL","transactionDate":"2024-05-03","office":"Rep. H","type":"Purchase","amount":"$1,001 - $15,000"}]`,
-		"/stable/earnings":                    `[{"symbol":"AAPL","date":"2024-10-30","epsActual":1.6,"epsEstimated":1.5}]`,
+		"/stable/senate-latest":                 `[{"symbol":"NVDA","transactionDate":"2024-05-02","firstName":"A","lastName":"S","type":"Sale"}]`,
+		"/stable/house-latest":                  `[{"symbol":"AAPL","transactionDate":"2024-05-03","office":"Rep. H","type":"Purchase","amount":"$1,001 - $15,000"}]`,
+		"/stable/earnings":                      `[{"symbol":"AAPL","date":"2024-10-30","epsActual":1.6,"epsEstimated":1.5}]`,
 		"/stable/earning-call-transcript-dates": `[]`,
 	})
 	e := newEnv(t, marketdata.Settings{FMPAPIKey: "test", FMPBaseURL: up.URL}, nil)

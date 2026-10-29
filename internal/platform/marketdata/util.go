@@ -17,9 +17,13 @@ func notFound(reason string) *httpx.Error { return httpx.Abort(http.StatusNotFou
 
 func badGateway(reason string) *httpx.Error { return httpx.Abort(http.StatusBadGateway, reason) }
 
-func unavailable(reason string) *httpx.Error { return httpx.Abort(http.StatusServiceUnavailable, reason) }
+func unavailable(reason string) *httpx.Error {
+	return httpx.Abort(http.StatusServiceUnavailable, reason)
+}
 
-func paymentRequired(reason string) *httpx.Error { return httpx.Abort(http.StatusPaymentRequired, reason) }
+func paymentRequired(reason string) *httpx.Error {
+	return httpx.Abort(http.StatusPaymentRequired, reason)
+}
 
 func ptr[T any](v T) *T { return &v }
 

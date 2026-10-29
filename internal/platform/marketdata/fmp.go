@@ -313,16 +313,16 @@ func (f *FMP) EarningsCalendar(ctx context.Context, from, to *time.Time) ([]Earn
 // quarter failed the whole decode. Plain *int reproduces that.
 type fmpTranscriptDateItem struct {
 	Date    *string `json:"date,omitempty"`
-	Quarter *int   `json:"quarter,omitempty"`
-	Year    *int   `json:"year,omitempty"`
+	Quarter *int    `json:"quarter,omitempty"`
+	Year    *int    `json:"year,omitempty"`
 }
 
 type fmpTranscriptItem struct {
 	Symbol  *string `json:"symbol,omitempty"`
 	Date    *string `json:"date,omitempty"`
 	Period  *string `json:"period,omitempty"`
-	Year    *int   `json:"year,omitempty"`
-	Quarter *int   `json:"quarter,omitempty"`
+	Year    *int    `json:"year,omitempty"`
+	Quarter *int    `json:"quarter,omitempty"`
 	Content *string `json:"content,omitempty"`
 }
 

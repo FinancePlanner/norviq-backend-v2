@@ -555,11 +555,11 @@ type FMPInstitutionalHolder struct {
 
 // FMPInstitutionalPositionsSummary is one symbol-positions-summary row.
 type FMPInstitutionalPositionsSummary struct {
-	Symbol           *string  `json:"symbol,omitempty"`
-	Date             *string  `json:"date,omitempty"`
-	InvestorsHolding *int     `json:"investorsHolding,omitempty"`
+	Symbol            *string  `json:"symbol,omitempty"`
+	Date              *string  `json:"date,omitempty"`
+	InvestorsHolding  *int     `json:"investorsHolding,omitempty"`
 	NumberOf13Fshares *float64 `json:"numberOf13Fshares,omitempty"`
-	OwnershipPercent *float64 `json:"ownershipPercent,omitempty"`
+	OwnershipPercent  *float64 `json:"ownershipPercent,omitempty"`
 }
 
 // TechnicalMACD is the MACD block; Sign is positive|negative.

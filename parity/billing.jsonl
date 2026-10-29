@@ -1,0 +1,46 @@
+# Billing and entitlements. Load parity/billing-setup.sql first, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18102 -jwt-secret parity-secret \
+#     -cases parity/billing.jsonl -ignore requestId,generatedAt
+# Both backends without RevenueCat secrets (the shared Vapor has none), so
+# restore, management-url and the webhook answer their 503s here; the
+# webhook's accepted paths are in parity/billing-webhook.jsonl.
+{"name":"me-free","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000001"}
+{"name":"me-trial","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000002"}
+{"name":"me-lapsed-trial","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000003"}
+{"name":"me-had-trial","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000004"}
+{"name":"me-pro-yearly","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000005"}
+{"name":"me-cancelled-active","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000006"}
+{"name":"me-lifetime","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000007"}
+{"name":"me-billing-issue-grace","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000008"}
+{"name":"me-pending-plan","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000009"}
+{"name":"me-expired-sub","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-000000000013"}
+{"name":"me-unknown-user","path":"/v1/billing/me","as":"0b111000-0000-4000-8000-0000000000ff"}
+{"name":"me-anonymous","path":"/v1/billing/me"}
+{"name":"restore-unconfigured","method":"POST","path":"/v1/billing/restore","as":"0b111000-0000-4000-8000-000000000001"}
+{"name":"restore-anonymous","method":"POST","path":"/v1/billing/restore"}
+{"name":"management-url-unconfigured","method":"POST","path":"/v1/billing/management-url","as":"0b111000-0000-4000-8000-000000000005"}
+{"name":"management-url-anonymous","method":"POST","path":"/v1/billing/management-url"}
+{"name":"coupon-trial-success","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000010","body":{"code":" parity-trial "}}
+{"name":"coupon-lifetime-success","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000012","body":{"code":"PARITY-LIFE"}}
+{"name":"coupon-already-redeemed","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000011","body":{"code":"PARITY-DONE"}}
+{"name":"coupon-invalid","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-NOPE"}}
+{"name":"coupon-blank","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"   "}}
+{"name":"coupon-inactive","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-OFF"}}
+{"name":"coupon-expired","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-OLD"}}
+{"name":"coupon-max-uses","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-FULL"}}
+{"name":"coupon-lifetime-misconfigured","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-LIFE3"}}
+{"name":"coupon-trial-too-long","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-LONG"}}
+{"name":"coupon-unknown-user","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-0000000000ff","body":{"code":"PARITY-TRIAL"}}
+{"name":"coupon-missing-code","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{}}
+{"name":"coupon-code-number","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":5}}
+{"name":"coupon-code-null","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":null}}
+{"name":"coupon-code-bool","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":true}}
+{"name":"coupon-body-array","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":[1]}
+{"name":"coupon-body-null","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":null}
+{"name":"coupon-text-plain","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"x"},"headers":{"Content-Type":"text/plain"}}
+{"name":"coupon-xml","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"x"},"headers":{"Content-Type":"application/xml"}}
+{"name":"coupon-empty-body","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001","headers":{"Content-Type":"application/json"}}
+{"name":"coupon-no-content-type","method":"POST","path":"/v1/billing/coupon/redeem","as":"0b111000-0000-4000-8000-000000000001"}
+{"name":"coupon-anonymous","method":"POST","path":"/v1/billing/coupon/redeem","body":{"code":"PARITY-TRIAL"}}
+{"name":"coupon-plural-route-proxied","method":"POST","path":"/v1/billing/coupons/redeem","as":"0b111000-0000-4000-8000-000000000001","body":{"code":"PARITY-TRIAL"}}
+{"name":"webhook-unconfigured","method":"POST","path":"/webhooks/revenuecat","body":{"event":{"id":"parity-x","type":"TEST","app_user_id":"x"}},"headers":{"Authorization":"whatever"}}

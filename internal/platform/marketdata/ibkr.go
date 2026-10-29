@@ -84,7 +84,7 @@ func (p *IBKR) History(ctx context.Context, rawSymbol string, from, to *time.Tim
 		return History{}, badGateway("IBKR history request failed with status " + strconv.Itoa(resp.status) + ".")
 	}
 	var payload struct {
-		Currency *string         `json:"currency,omitempty"`
+		Currency *string          `json:"currency,omitempty"`
 		Data     []ibkrHistoryBar `json:"data"`
 	}
 	if err := decodeBody(resp.body, &payload); err != nil {

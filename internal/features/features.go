@@ -14,10 +14,12 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/badges"
+	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/server"
 )
 
@@ -25,17 +27,20 @@ import (
 // matters (a route registered twice is an error, not an override).
 func All() []server.Feature {
 	return []server.Feature{
-		// Earnings preferences wait for billing's premium gate
-		// (notifications.Feature.Premium); assets search waits for market
-		// data (assets.Feature.Search). Both stay on Vapor until wired.
-		notifications.Feature{},
+		billing.Feature{},
+		notifications.Feature{Premium: func(d *server.Deps) notifications.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
+		// Assets search waits for market data (assets.Feature.Search) and
+		// stays on Vapor until wired.
 		activity.Feature{},
 		badges.Feature{},
 		feedback.Feature{},
 		assets.Feature{},
 		aiplatform.Feature{},
-		// Pro-gated market routes wait for billing (market.Feature.Premium).
-		market.Feature{},
+		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
 		earnings.Feature{},
 	}
 }
@@ -50,7 +55,9 @@ type Job interface {
 // AllJobs returns every ported background job.
 func AllJobs() []Job {
 	return []Job{
-		market.HistoryIngestionJob{},}
+		billing.TrialExpirationJob{},
+		market.HistoryIngestionJob{},
+	}
 }
 
 // Jobs tracks running jobs for shutdown.

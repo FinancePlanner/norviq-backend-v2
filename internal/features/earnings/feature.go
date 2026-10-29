@@ -186,4 +186,3 @@ func (p *provider) fetchCalendar(ctx context.Context, q Query) ([]ItemResponse, 
 	}
 	return nil, httpx.Abort(http.StatusBadGateway, reason)
 }
-

@@ -54,7 +54,9 @@ func nonEmptyTrimmed(p *string) *string {
 // ---- Insider activity -------------------------------------------------------
 
 // ClampInsiderWindow is InsiderActivityConfig.clampWindowDays.
-func ClampInsiderWindow(days int) int { return min(max(days, InsiderMinWindowDays), InsiderMaxWindowDays) }
+func ClampInsiderWindow(days int) int {
+	return min(max(days, InsiderMinWindowDays), InsiderMaxWindowDays)
+}
 
 func insiderCutoffDay(windowDays int, asOf time.Time) string {
 	return FormatDateOnly(asOf.UTC().AddDate(0, 0, -windowDays))

@@ -1,0 +1,90 @@
+{
+  "version": "2026.2",
+  "effectiveFrom": "2026-07-18",
+  "entries": [
+    {
+      "sourceSymbols": ["VOO", "SPY", "IVV"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "VTI",
+	  "replacementName": "Vanguard Total Stock Market ETF",
+	  "replacementExchange": "ARCA",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0003,
+      "priority": 10,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://investor.vanguard.com/investment-products/etfs/profile/voo | https://investor.vanguard.com/investment-products/etfs/profile/vti | https://www.irs.gov/publications/p550"
+    },
+    {
+      "sourceSymbols": ["VTI"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "VOO",
+	  "replacementName": "Vanguard S&P 500 ETF",
+	  "replacementExchange": "ARCA",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0003,
+      "priority": 10,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://investor.vanguard.com/investment-products/etfs/profile/vti | https://investor.vanguard.com/investment-products/etfs/profile/voo | https://www.irs.gov/publications/p550"
+    },
+    {
+      "sourceSymbols": ["QQQ", "QQQM"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "SCHG",
+	  "replacementName": "Schwab U.S. Large-Cap Growth ETF",
+	  "replacementExchange": "ARCA",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0004,
+      "priority": 20,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://www.invesco.com/qqq-etf/en/innovation/why-consider-investing-in-large-cap-growth-stocks.html | https://www.schwabassetmanagement.com/products/schg | https://www.irs.gov/publications/p550"
+    },
+    {
+      "sourceSymbols": ["BND", "AGG"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "IUSB",
+	  "replacementName": "iShares Core Total USD Bond Market ETF",
+	  "replacementExchange": "NASDAQ",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0006,
+      "priority": 30,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://investor.vanguard.com/investment-products/etfs/profile/bnd | https://www.ishares.com/us/products/264615/ishares-core-total-usd-bond-market-etf | https://www.irs.gov/publications/p550"
+    },
+    {
+      "sourceSymbols": ["SCHD"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "VYM",
+	  "replacementName": "Vanguard High Dividend Yield ETF",
+	  "replacementExchange": "ARCA",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0006,
+      "priority": 40,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://www.schwabassetmanagement.com/products/schd | https://investor.vanguard.com/investment-products/etfs/profile/vym | https://www.irs.gov/publications/p550"
+    },
+    {
+      "sourceSymbols": ["VYM"],
+      "sourceTaxIdentityGroup": null,
+      "replacementSymbol": "SCHD",
+	  "replacementName": "Schwab U.S. Dividend Equity ETF",
+	  "replacementExchange": "ARCA",
+	  "replacementCurrency": "USD",
+	  "replacementInstrumentType": "etf",
+      "eligibleJurisdictions": ["US"],
+      "expenseRatio": 0.0006,
+      "priority": 40,
+      "reviewedAt": "2026-07-18",
+      "reviewReference": "https://investor.vanguard.com/investment-products/etfs/profile/vym | https://www.schwabassetmanagement.com/products/schd | https://www.irs.gov/publications/p550"
+    }
+  ]
+}

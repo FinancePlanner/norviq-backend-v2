@@ -21,6 +21,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/tax"
 	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
@@ -53,6 +54,8 @@ func All() []server.Feature {
 		// Watchlist, lists, CSV import, price targets, smart screens and
 		// holding risk profiles.
 		watchlist.Feature{},
+		// TaxController (/v1/tax/*).
+		tax.Feature{},
 		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},

@@ -9,7 +9,7 @@
 --     an accepted one (...604) with a draft (...701), contributions, snapshots;
 --     dashboard goals ...801 and ...802
 --   2 pro: goal ...302 running ahead (GET suggestions generates exactly one),
---     paused goals ...303 (PUT/bulk target) and ...304 (DELETE target)
+--     paused goals ...303 (complete: no suggestions; PUT/bulk target) and ...304 (DELETE target)
 --   3 empty (free): no portfolio
 -- Triggers re-insert the rows the DELETE cases remove, so Vapor and v2 both
 -- answer 204.
@@ -54,7 +54,7 @@ INSERT INTO financial_goals (id, user_id, portfolio_list_id, name, goal_type, ta
    'Parity ahead', 'custom', 50000, '2031-01-15T00:00:00Z', 'USD', 40000, 1000, 0, 0, 'aggressive', 0.08, 'active',
    '2026-02-10T12:00:00Z', '2026-02-10T12:00:00Z'),
   ('e0a10000-0000-4000-8000-000000000303', 'e0a10000-0000-4000-8000-000000000002', 'e0a10000-0000-4000-8000-000000000103',
-   'Parity paused', 'education', 20000, '2032-01-15T00:00:00Z', 'GBP', 0, 250, 0, 0.02, 'conservative', 0.04, 'paused',
+   'Parity paused', 'education', 20000, '2032-01-15T00:00:00Z', 'GBP', 25000, 250, 0, 0.02, 'conservative', 0.04, 'paused',
    '2026-03-10T12:00:00Z', '2026-03-10T12:00:00Z'),
   ('e0a10000-0000-4000-8000-000000000304', 'e0a10000-0000-4000-8000-000000000002', 'e0a10000-0000-4000-8000-000000000103',
    'Parity delete me', 'custom', 1000, '2032-01-15T00:00:00Z', 'USD', 0, 10, 0, 0.02, 'moderate', 0.06, 'paused',

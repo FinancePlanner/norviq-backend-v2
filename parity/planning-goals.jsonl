@@ -1,3 +1,5 @@
+# /v1/financial-goals and /v1/goals (planning-goals). Seed first: psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/planning-goals-setup.sql
+# Run: go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18168 -jwt-secret parity-secret -cases parity/planning-goals.jsonl -ignore requestId,calculatedAt
 {"name":"fg list main","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000001"}
 {"name":"fg list pro","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000002"}
 {"name":"fg list empty","method":"GET","path":"/v1/financial-goals","as":"e0a10000-0000-4000-8000-000000000003"}

@@ -10,6 +10,7 @@ import (
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/platform/push"
 	"norviq-api/internal/server"
+	"norviq-api/internal/store/boardsdb"
 	"norviq-api/internal/testutil"
 
 	"github.com/google/uuid"
@@ -750,5 +751,100 @@ func TestBlockedCannotNotify(t *testing.T) {
 	e.do(http.MethodGet, "/v1/community/notifications", ana, nil).JSON(t, &page)
 	if len(page.Items) != 0 || len(e.pushes.titles()) != 0 {
 		t.Fatalf("notified: %+v %v", page.Items, e.pushes.titles())
+	}
+}
+
+func TestDailyPostPinnedAndFlagged(t *testing.T) {
+	e := newEnv(t)
+	alice := e.member("alice")
+	s := &boards.Service{DB: e.app.Deps.DB, Q: boardsdb.New(e.app.Deps.DB)}
+	ctx := context.Background()
+	body := "NVDA closed at 131.2, up 4.2%.\n\nWritten by Norviq AI from the latest market data. Not financial advice."
+	nvda := boards.DailyCandidate{Topic: boards.TopicStock, Symbol: "NVDA"}
+	if _, err := s.InsertDaily(ctx, "2026-10-15", boards.DailyCandidate{Topic: boards.TopicETF, Symbol: "SPY"}, "SPY is up 9.1% this year", body); err != nil {
+		t.Fatal(err)
+	}
+	if o, err := s.InsertDaily(ctx, "2026-10-16", nvda, "NVDA rose 4.2%", body); err != nil || o.String() != "published stock" {
+		t.Fatalf("%v %v", o, err)
+	}
+	if o, _ := s.InsertDaily(ctx, "2026-10-16", nvda, "Second", body); o.String() != "already published" {
+		t.Fatalf("second: %v", o)
+	}
+	e.exec(`UPDATE boards SET description = 'old words' WHERE slug = 'daily'`)
+	if _, _, err := s.EnsureDaily(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var desc string
+	_ = e.app.Deps.DB.QueryRow(ctx, `SELECT description FROM boards WHERE slug='daily'`).Scan(&desc)
+	if desc != boards.DailyDescription {
+		t.Fatalf("description: %q", desc)
+	}
+
+	var listed boards.BoardListResponse
+	e.do(http.MethodGet, "/v1/boards", alice, nil).JSON(t, &listed)
+	daily := listed.DailyPost
+	if daily == nil || !daily.AIGenerated || daily.AITopic == nil || *daily.AITopic != "stock" || *daily.AuthorUsername != "norviq" || daily.Title != "NVDA rose 4.2%" {
+		t.Fatalf("dailyPost: %+v", daily)
+	}
+	if strings.Join(daily.Tags, ",") != "stock,nvda,ai" {
+		t.Fatalf("tags: %v", daily.Tags)
+	}
+	// A cursor (even an unusable one) drops the pin.
+	listed = boards.BoardListResponse{}
+	e.do(http.MethodGet, "/v1/boards?cursor=x", alice, nil).JSON(t, &listed)
+	if listed.DailyPost != nil {
+		t.Fatal("pinned with cursor")
+	}
+	if top := e.list("daily/posts?sort=top", alice); top.Items[0].ID != daily.ID {
+		t.Fatal("top not pinned")
+	}
+	if mine := e.createPost("daily", alice, boards.KindText, "My own take", nil, nil); mine.AIGenerated {
+		t.Fatal("member post flagged")
+	}
+	mixed := e.list("daily/posts", alice)
+	if mixed.Items[0].ID != daily.ID || len(mixed.Items) != 3 {
+		t.Fatalf("mixed: %v", ids(mixed.Items))
+	}
+	var spy *boards.BoardPostSummary
+	for i := range mixed.Items {
+		if mixed.Items[i].Title == "SPY is up 9.1% this year" {
+			spy = &mixed.Items[i]
+		}
+	}
+	// The ETF topic is not a BoardAITopic case, so it encodes no aiTopic.
+	if spy == nil || !spy.AIGenerated || spy.AITopic != nil {
+		t.Fatalf("older daily post: %+v", spy)
+	}
+	if asks := e.list("daily/posts?kind=ask", alice); len(asks.Items) != 0 {
+		t.Fatalf("asks: %v", ids(asks.Items))
+	}
+	if r := e.do(http.MethodPost, "/v1/community/blocks", alice, map[string]any{"username": "norviq"}); r.Status != http.StatusBadRequest {
+		t.Fatalf("block norviq: %d", r.Status)
+	}
+	var d boards.BoardPostDetail
+	e.do(http.MethodGet, "/v1/board-posts/"+daily.ID.String(), alice, nil).JSON(t, &d)
+	if d.Body == nil || !strings.Contains(*d.Body, "Not financial advice.") || !d.Post.AIGenerated {
+		t.Fatalf("detail: %+v", d)
+	}
+	if r := e.comment(daily.ID.Std(), alice, nil, "A reply"); r.Status != http.StatusOK {
+		t.Fatalf("comment: %d", r.Status)
+	}
+	if err := s.ResetDaily(ctx, "2026-10-16"); err != nil {
+		t.Fatal(err)
+	}
+	listed = boards.BoardListResponse{}
+	e.do(http.MethodGet, "/v1/boards", alice, nil).JSON(t, &listed)
+	if listed.DailyPost == nil || listed.DailyPost.Title != "SPY is up 9.1% this year" {
+		t.Fatalf("after reset: %+v", listed.DailyPost)
+	}
+	if o, _ := s.InsertDaily(ctx, "2026-10-16", nvda, "Rewritten", body); o.String() != "published stock" {
+		t.Fatalf("rewrite: %v", o)
+	}
+	if o, _ := s.InsertDaily(ctx, "2026-10-17", boards.DailyCandidate{Topic: boards.TopicNews, URL: ptr("javascript:x")}, "News", body); o.String() != "skipped (headline link rejected)" {
+		t.Fatalf("news: %v", o)
+	}
+	hist, err := s.DailyHistory(ctx, "2026-10-18")
+	if err != nil || len(hist) != 2 || hist[0].Day != "2026-10-16" || *hist[1].Topic != "etf" {
+		t.Fatalf("history: %+v %v", hist, err)
 	}
 }

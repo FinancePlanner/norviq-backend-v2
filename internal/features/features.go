@@ -21,6 +21,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/reporting"
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
@@ -56,6 +57,7 @@ func All() []server.Feature {
 		statistics.Feature{},
 		// BudgetingEngineController (drift, reallocations, templates).
 		budgeting.Feature{},
+		reporting.Feature{},
 	}
 }
 
@@ -88,6 +90,8 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		reporting.WorkerJob{},
+		reporting.RetentionJob{},
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/assets"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
+	"norviq-api/internal/features/banking"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
@@ -134,6 +135,8 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// BankController, the hosted-link callbacks and the Plaid webhook.
+		banking.Feature{},
 	}
 }
 
@@ -194,6 +197,8 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// Bank reconcile sync (bank_sync_job).
+		banking.SyncJob{},
 	}
 }
 

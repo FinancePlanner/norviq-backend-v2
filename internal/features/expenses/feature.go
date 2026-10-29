@@ -42,8 +42,8 @@ type Feature struct {
 	Overview func(d *server.Deps) OverviewSource
 	// Service overrides the shared service (tests).
 	Service *Service
-	// Entitlements overrides the environment-built service (tests).
-	Entitlements *entitlements.Service
+	// Entitlements overrides the environment's billing config (tests).
+	Entitlements *entitlements.Config
 	Now          func() time.Time
 }
 
@@ -65,9 +65,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.Drift != nil {
 		svc.SetDriftEvaluator(f.Drift(d))
 	}
-	ent := f.Entitlements
-	if ent == nil {
-		ent = entitlements.NewFromEnv(d.DB)
+	ent := entitlements.NewFromEnv(d.DB)
+	if f.Entitlements != nil {
+		ent = entitlements.New(d.DB, *f.Entitlements)
 	}
 	now := f.Now
 	if now == nil {

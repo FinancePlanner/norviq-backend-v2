@@ -37,7 +37,7 @@ func All() []server.Feature {
 		feedback.Feature{},
 		assets.Feature{},
 		aiplatform.Feature{},
-		// Identity: auth, tokens, OAuth server, profile, AI consent and
+		// Identity: auth, tokens, OAuth server, profile and
 		// onboarding.
 		identity.Feature{},
 	}

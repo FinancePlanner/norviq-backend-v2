@@ -1,0 +1,66 @@
+# Market data wave: /v1/market/* (minus brief, news, chart-builder) and /v1/earnings.
+# Needs only the notifications seed user (parity/notifications.seed.sql); a free plan, so
+# the Pro routes answer the billing upgrade error. Fewer than 100 cases: the market
+# routes share a 100/min per-IP limiter, so wait a minute between runs.
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18103 -jwt-secret parity-secret \
+#     -cases parity/market.jsonl -ignore requestId
+{"name": "quote-unauth", "method": "GET", "path": "/v1/market/quote/AAPL"}
+{"name": "earnings-unauth", "method": "GET", "path": "/v1/earnings"}
+{"name": "quote", "method": "GET", "path": "/v1/market/quote/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "quote-lower", "method": "GET", "path": "/v1/market/quote/aapl", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "quote-batch-missing", "method": "GET", "path": "/v1/market/quote/batch", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "quote-batch-blank", "method": "GET", "path": "/v1/market/quote/batch?symbols=,%20,", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "quote-batch", "method": "GET", "path": "/v1/market/quote/batch?symbols=AAPL,MSFT", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "quote-batch-51", "method": "GET", "path": "/v1/market/quote/batch?symbols=S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20,S21,S22,S23,S24,S25,S26,S27,S28,S29,S30,S31,S32,S33,S34,S35,S36,S37,S38,S39,S40,S41,S42,S43,S44,S45,S46,S47,S48,S49,S50", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "details-missing", "method": "GET", "path": "/v1/market/details", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "details-blank", "method": "GET", "path": "/v1/market/details?symbol=%20", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "details", "method": "GET", "path": "/v1/market/details?symbol=aapl", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "history-missing", "method": "GET", "path": "/v1/market/history", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "history-query", "method": "GET", "path": "/v1/market/history?symbol=AAPL&from=2024-01-01&to=2024-02-01", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "history-path", "method": "GET", "path": "/v1/market/history/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "history-archive", "method": "GET", "path": "/v1/market/history/archive?symbol=AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "history-archive-bad-from", "method": "GET", "path": "/v1/market/history/archive?symbol=AAPL&from=nope", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "search-missing", "method": "GET", "path": "/v1/market/search", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "search-blank", "method": "GET", "path": "/v1/market/search?q=%20", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "search", "method": "GET", "path": "/v1/market/search?q=apple", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "fx-bad", "method": "GET", "path": "/v1/market/fx?pair=EURO", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "fx", "method": "GET", "path": "/v1/market/fx?pair=EUR/USD", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "fx-missing", "method": "GET", "path": "/v1/market/fx", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "profile", "method": "GET", "path": "/v1/market/profile/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "overview", "method": "GET", "path": "/v1/market/overview", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "pressure", "method": "GET", "path": "/v1/market/pressure/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "returns", "method": "GET", "path": "/v1/market/returns/aapl", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "returns-batch-missing", "method": "GET", "path": "/v1/market/returns/batch", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "returns-batch", "method": "GET", "path": "/v1/market/returns/batch?symbols=AAPL,MSFT", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "returns-batch-21", "method": "GET", "path": "/v1/market/returns/batch?symbols=S0,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "technicals", "method": "GET", "path": "/v1/market/technicals/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "technicals-blank", "method": "GET", "path": "/v1/market/technicals/%20", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "recent-earnings", "method": "GET", "path": "/v1/market/earnings/AAPL/recent", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "insider", "method": "GET", "path": "/v1/market/insider/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "insider-days-low", "method": "GET", "path": "/v1/market/insider/AAPL?days=10", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "insider-days-garbage", "method": "GET", "path": "/v1/market/insider/AAPL?days=abc", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "congress", "method": "GET", "path": "/v1/market/congress/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "congress-recent", "method": "GET", "path": "/v1/market/congress/recent", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "congress-recent-limit-high", "method": "GET", "path": "/v1/market/congress/recent?limit=500", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "congress-recent-limit-garbage", "method": "GET", "path": "/v1/market/congress/recent?limit=abc", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "institutional", "method": "GET", "path": "/v1/market/institutional/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "price-chart", "method": "GET", "path": "/v1/market/price-chart/AAPL?range=1M", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "price-chart-compare-missing", "method": "GET", "path": "/v1/market/price-chart/compare", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "price-chart-compare-6", "method": "GET", "path": "/v1/market/price-chart/compare?symbols=a,b,c,d,e,f", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-calendar", "method": "GET", "path": "/v1/market/earnings-calendar", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "basic-financials-free", "method": "GET", "path": "/v1/market/basic-financials/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "analysis-free", "method": "GET", "path": "/v1/market/analysis/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "compare-free", "method": "GET", "path": "/v1/market/compare?symbols=AAPL,MSFT", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "ratios-ttm-free", "method": "GET", "path": "/v1/market/ratios-ttm/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-text-free", "method": "GET", "path": "/v1/market/earnings/AAPL", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "transcript-free", "method": "GET", "path": "/v1/market/earnings/AAPL/transcript", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "sector-free", "method": "GET", "path": "/v1/market/historical-sector-performance", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings", "method": "GET", "path": "/v1/earnings", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-garbage", "method": "GET", "path": "/v1/earnings?international=maybe", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-off", "method": "GET", "path": "/v1/earnings?international=off", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-no", "method": "GET", "path": "/v1/earnings?international=no", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-empty", "method": "GET", "path": "/v1/earnings?international=", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-flag", "method": "GET", "path": "/v1/earnings?international", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-upper", "method": "GET", "path": "/v1/earnings?international=TRUE", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-zero", "method": "GET", "path": "/v1/earnings?international=0", "as": "0e000000-0000-4000-8000-0000000000a1"}
+{"name": "earnings-intl-true", "method": "GET", "path": "/v1/earnings?international=true&symbol=aapl", "as": "0e000000-0000-4000-8000-0000000000a1"}

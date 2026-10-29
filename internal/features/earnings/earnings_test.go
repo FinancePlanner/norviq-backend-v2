@@ -39,9 +39,16 @@ func TestEarningsWithoutKey(t *testing.T) {
 	if r.Status != 501 || reason(t, r) != "Earnings provider fetch is not configured." {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	r = app.Do("GET", "/v1/earnings?international=maybe", token, nil)
-	if r.Status != 400 || reason(t, r) != "Value of type 'Bool' required for key 'international'." {
-		t.Fatalf("%d %s", r.Status, r.Body)
+	for _, v := range []string{"maybe", "off", "no", ""} {
+		r = app.Do("GET", "/v1/earnings?international="+v, token, nil)
+		if r.Status != 400 || reason(t, r) != "Value was not of type 'Bool' at path 'international'. Data found at 'international' was not Bool." {
+			t.Fatalf("%q: %d %s", v, r.Status, r.Body)
+		}
+	}
+	for _, v := range []string{"international", "international=TRUE", "international=0"} {
+		if r = app.Do("GET", "/v1/earnings?"+v, token, nil); r.Status != 501 {
+			t.Fatalf("%q: %d %s", v, r.Status, r.Body)
+		}
 	}
 }
 

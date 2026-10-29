@@ -86,27 +86,14 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	return nil
 }
 
-// decodeQuery is `req.query.decode(EarningsQueryRequest.self)`: the strings
-// are taken as-is and a malformed `international` is a 400.
+// decodeQuery is `req.query.decode(EarningsQueryRequest.self)`: strings as
+// sent (last of repeated keys), `international` read like Vapor's form
+// decoder (true/1/on, false/0, a bare flag is true) and any other value a 400.
 func decodeQuery(c *echo.Context) (Query, error) {
-	values := c.QueryParams()
-	get := func(name string) *string {
-		if v, ok := values[name]; ok && len(v) > 0 {
-			return &v[0]
-		}
-		return nil
-	}
-	q := Query{From: get("from"), To: get("to"), Symbol: get("symbol")}
-	if raw := get("international"); raw != nil {
-		var b bool
-		switch strings.ToLower(*raw) {
-		case "true", "1", "on":
-			b = true
-		case "false", "0", "off":
-		default:
-			return q, httpx.BadRequest("Value of type 'Bool' required for key 'international'.")
-		}
-		q.International = &b
+	q := Query{From: httpx.QueryString(c, "from"), To: httpx.QueryString(c, "to"), Symbol: httpx.QueryString(c, "symbol")}
+	q.International = httpx.QueryOptionalBool(c, "international")
+	if q.International == nil && httpx.QueryString(c, "international") != nil {
+		return q, httpx.BadRequest("Value was not of type 'Bool' at path 'international'. Data found at 'international' was not Bool.")
 	}
 	return q, nil
 }

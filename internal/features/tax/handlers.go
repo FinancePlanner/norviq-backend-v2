@@ -206,15 +206,21 @@ func (h *handlers) saveFundAnnualInput(c *echo.Context) error {
 	return httpx.OK(c, out)
 }
 
-// queryKeyMissing is the URL-query decoder's keyNotFound reason.
-func queryKeyMissing(key string) error {
-	return httpx.BadRequest("No such key '" + key + "' at path ''. No value associated with key CodingKeys(stringValue: \"" + key + "\", intValue: nil) (\"" + key + "\").")
+// queryKeyMissing is the URL-query decoder's valueNotFound reason; it
+// decodes a UUID through String.
+func queryKeyMissing(key, swiftType string) error {
+	return httpx.BadRequest("No value found (expected type '" + swiftType + "') at path '" + key + "'. No " + swiftType + " was found at '" + key + "'.")
+}
+
+// queryIntMismatch is the URL-query decoder's typeMismatch reason for Int.
+func queryIntMismatch(key string) error {
+	return httpx.BadRequest("Value was not of type 'Int' at path '" + key + "'. Data found at '" + key + "' was not Int.")
 }
 
 func queryUUID(c *echo.Context, key string) (uuid.UUID, error) {
 	raw, ok := lastQueryValue(c, key)
 	if !ok {
-		return uuid.UUID{}, queryKeyMissing(key)
+		return uuid.UUID{}, queryKeyMissing(key, "String")
 	}
 	id, ok := parseUUID(raw)
 	if !ok {
@@ -238,11 +244,11 @@ func (h *handlers) getFundAnnualInput(c *echo.Context) error {
 	}
 	raw, ok := lastQueryValue(c, "calculationYear")
 	if !ok {
-		return queryKeyMissing("calculationYear")
+		return queryKeyMissing("calculationYear", "Int")
 	}
 	year, err := strconv.Atoi(raw)
 	if err != nil {
-		return httpx.BadRequest("Data corrupted at path 'calculationYear'. Unable to convert data '" + raw + "' to Int.")
+		return queryIntMismatch("calculationYear")
 	}
 	out, err := h.svc.fundAnnualInput(c.Request().Context(), s.UserID, accountID, instrumentID, year)
 	if err != nil {

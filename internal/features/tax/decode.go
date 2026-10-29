@@ -124,7 +124,7 @@ func validate(t reflect.Type, v any, path []string, enum string) error {
 		if enum != "" {
 			set := enumSets[enum]
 			if !oneOf(s, set.cases) {
-				return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s",
+				return httpx.BadRequest(fmt.Sprintf("Data corrupted at path '%s'. Cannot initialize %s from invalid String value %s.",
 					joinCodingPath(path), set.name, s))
 			}
 		}
@@ -230,14 +230,14 @@ func decodeTaxQuery(c *echo.Context) (taxQuery, error) {
 	if raw, ok := lastQueryValue(c, "jurisdiction"); ok {
 		j := Jurisdiction(raw)
 		if !j.valid() {
-			return q, httpx.BadRequest("Data corrupted at path 'jurisdiction'. Cannot initialize TaxJurisdiction from invalid String value " + raw)
+			return q, httpx.BadRequest("Data corrupted at path 'jurisdiction'. Cannot initialize TaxJurisdiction from invalid String value " + raw + ".")
 		}
 		q.Jurisdiction = &j
 	}
 	if raw, ok := lastQueryValue(c, "taxYear"); ok {
 		n, err := strconv.Atoi(raw)
 		if err != nil {
-			return q, httpx.BadRequest("Data corrupted at path 'taxYear'. Unable to convert data '" + raw + "' to Int.")
+			return q, queryIntMismatch("taxYear")
 		}
 		q.TaxYear = &n
 	}

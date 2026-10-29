@@ -114,8 +114,15 @@ func TestCapabilitiesAndAuth(t *testing.T) {
 	if len(caps) != 48 || caps[0].(map[string]any)["taxYear"].(float64) != 2025 {
 		t.Fatalf("capabilities %v", out)
 	}
-	if r := a.Do(http.MethodGet, "/v1/tax/capabilities?jurisdiction=XX", s.token, nil); r.Status != 400 {
-		t.Fatalf("bad jurisdiction = %d %s", r.Status, r.Body)
+	// The reasons are Vapor's URL-query decoder's (checked in parity).
+	for query, reason := range map[string]string{
+		"jurisdiction=XX": "Data corrupted at path 'jurisdiction'. Cannot initialize TaxJurisdiction from invalid String value XX.",
+		"taxYear=soon":    "Value was not of type 'Int' at path 'taxYear'. Data found at 'taxYear' was not Int.",
+	} {
+		r := a.Do(http.MethodGet, "/v1/tax/capabilities?"+query, s.token, nil)
+		if r.Status != 400 || !strings.Contains(string(r.Body), reason) {
+			t.Fatalf("%s = %d %s", query, r.Status, r.Body)
+		}
 	}
 }
 

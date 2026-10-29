@@ -1,0 +1,106 @@
+# Boards parity (BoardsController). Boards are not flag-gated, so the shared
+# no-flags Vapor serves them. Reset the fixtures first, every run:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/boards-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18143 -jwt-secret parity-secret \
+#     -cases parity/boards.jsonl -ignore requestId,id,createdAt
+# (id/createdAt are only volatile on the create-post and create-comment
+# cases; every read case also passes without that ignore, see the report.)
+# Reads come first; the writes after them are idempotent or error paths, so
+# Vapor (first) and v2 (second) see the same state. Order-dependent writes
+# (create board, vote, delete) are in parity/boards-ordered.jsonl.
+# Users: alice ...001, bob ...002, fresh ...003 (no guidelines), nouser
+# ...004, muted ...005, banned ...006, suspended ...007, carol ...008.
+{"name":"me-alice","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"me-banned","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000006"}
+{"name":"me-suspended","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000007"}
+{"name":"me-muted","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000005"}
+{"name":"me-nouser","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-000000000004"}
+{"name":"me-unauthenticated","path":"/v1/community/me"}
+{"name":"me-missing-user","path":"/v1/community/me","as":"b0a4d000-0000-4000-8000-0000000009ff"}
+{"name":"banned-boards-403","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000006"}
+{"name":"suspended-boards-403","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000007"}
+{"name":"notifications-alice","path":"/v1/community/notifications","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"notifications-bad-cursor","path":"/v1/community/notifications?cursor=zzz","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"notifications-bob","path":"/v1/community/notifications","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"unread-alice","path":"/v1/community/notifications/unread-count","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"settings-default","path":"/v1/community/notification-settings","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"settings-bob","path":"/v1/community/notification-settings","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"boards-list","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"boards-list-cursor","path":"/v1/boards?cursor=junk","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"board-get","path":"/v1/boards/parity-etfs","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"board-get-upper","path":"/v1/boards/PARITY-ETFS","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"board-get-deleted-404","path":"/v1/boards/parity-gone","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"board-get-missing-404","path":"/v1/boards/nope","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"posts-new","path":"/v1/boards/parity-etfs/posts","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-top","path":"/v1/boards/parity-etfs/posts?sort=top","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-active","path":"/v1/boards/parity-etfs/posts?sort=active","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"posts-bogus-sort","path":"/v1/boards/parity-etfs/posts?sort=TOP","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-kind","path":"/v1/boards/parity-etfs/posts?kind=ask","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-tag","path":"/v1/boards/parity-etfs/posts?tag=%23Vanguard","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-bad-tag-400","path":"/v1/boards/parity-etfs/posts?tag=bad%20tag","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-blocked-hidden","path":"/v1/boards/parity-etfs/posts","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"posts-top-cursor","path":"/v1/boards/parity-etfs/posts?sort=top&cursor=top-2","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-missing-board","path":"/v1/boards/parity-gone/posts","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"post-detail-carol","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"post-detail-blocked-404","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e3","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"post-detail-gone-board-404","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e5","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"post-detail-bad-id-400","path":"/v1/board-posts/xyz","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"create-board-guidelines","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000003","body":{"slug":"parity-x","name":"Parity X","description":""}}
+{"name":"create-board-nouser","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000004","body":{"slug":"parity-x","name":"Parity X","description":""}}
+{"name":"create-board-muted","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000005","body":{"slug":"parity-x","name":"Parity X","description":""}}
+{"name":"create-board-reserved","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000001","body":{"slug":"Daily","name":"Parity X","description":""}}
+{"name":"create-board-bad-slug","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000001","body":{"slug":"-x-","name":"Parity X","description":""}}
+{"name":"create-board-taken","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":{"slug":"parity-gone","name":"Parity X","description":""}}
+{"name":"create-board-name","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":{"slug":"parity-new","name":" x ","description":""}}
+{"name":"create-board-missing-key","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":{"slug":"parity-new"}}
+{"name":"create-board-null","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":{"slug":null,"name":"x","description":"y"}}
+{"name":"create-board-array","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":[]}
+{"name":"accept-guidelines","method":"POST","path":"/v1/community/guidelines/accept","as":"b0a4d000-0000-4000-8000-000000000003"}
+{"name":"accept-guidelines-banned","method":"POST","path":"/v1/community/guidelines/accept","as":"b0a4d000-0000-4000-8000-000000000006"}
+{"name":"update-board","method":"PATCH","path":"/v1/boards/parity-etfs","as":"b0a4d000-0000-4000-8000-000000000001","body":{"description":"  About ETFs  "}}
+{"name":"update-board-not-creator","method":"PATCH","path":"/v1/boards/parity-etfs","as":"b0a4d000-0000-4000-8000-000000000002","body":{"description":"x"}}
+{"name":"update-board-missing","method":"PATCH","path":"/v1/boards/nope","as":"b0a4d000-0000-4000-8000-000000000001","body":{"description":"x"}}
+{"name":"block","method":"POST","path":"/v1/community/blocks","as":"b0a4d000-0000-4000-8000-000000000001","body":{"username":" @parity_brd_fresh "}}
+{"name":"block-self","method":"POST","path":"/v1/community/blocks","as":"b0a4d000-0000-4000-8000-000000000001","body":{"username":"parity_brd_alice"}}
+{"name":"block-unknown","method":"POST","path":"/v1/community/blocks","as":"b0a4d000-0000-4000-8000-000000000001","body":{"username":"nobody_here"}}
+{"name":"block-missing-key","method":"POST","path":"/v1/community/blocks","as":"b0a4d000-0000-4000-8000-000000000001","body":{}}
+{"name":"unblock","method":"DELETE","path":"/v1/community/blocks/parity_brd_fresh","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"unblock-unknown","method":"DELETE","path":"/v1/community/blocks/nobody_here","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"mark-read-empty","method":"POST","path":"/v1/community/notifications/read","as":"b0a4d000-0000-4000-8000-000000000001","body":{"ids":[]}}
+{"name":"mark-read-bad-id","method":"POST","path":"/v1/community/notifications/read","as":"b0a4d000-0000-4000-8000-000000000001","body":{"ids":["zz"]}}
+{"name":"mark-read-not-array","method":"POST","path":"/v1/community/notifications/read","as":"b0a4d000-0000-4000-8000-000000000001","body":{"ids":"zz"}}
+{"name":"mark-read-all-carol","method":"POST","path":"/v1/community/notifications/read","as":"b0a4d000-0000-4000-8000-000000000008","body":{}}
+{"name":"mark-read-no-content-type","method":"POST","path":"/v1/community/notifications/read","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"settings-put","method":"PUT","path":"/v1/community/notification-settings","as":"b0a4d000-0000-4000-8000-000000000003","body":{"reply_push":false,"upvotePush":true}}
+{"name":"settings-put-missing","method":"PUT","path":"/v1/community/notification-settings","as":"b0a4d000-0000-4000-8000-000000000003","body":{"replyPush":true}}
+{"name":"settings-put-type","method":"PUT","path":"/v1/community/notification-settings","as":"b0a4d000-0000-4000-8000-000000000003","body":{"replyPush":1,"upvotePush":true}}
+{"name":"create-post","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"link","title":"  A   parity   link ","url":"https://WWW.Example.org/a?b=1","tags":["#ETF","dca","etf"," "]}}
+{"name":"create-post-text-url","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"text","title":"Text post","url":"https://example.com","tags":[]}}
+{"name":"create-post-bad-link","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"link","title":"Bad link","url":"https://localhost","tags":[]}}
+{"name":"create-post-short-title","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"text","title":"ab","tags":[]}}
+{"name":"create-post-too-many-tags","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"text","title":"abc","tags":["a","b","c","d","e","f"]}}
+{"name":"create-post-missing-tags","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"text","title":"abc"}}
+{"name":"create-post-bad-kind","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"bogus","title":"abc","tags":[]}}
+{"name":"create-post-muted","method":"POST","path":"/v1/boards/parity-quiet/posts","as":"b0a4d000-0000-4000-8000-000000000005","body":{"kind":"text","title":"abc","tags":[]}}
+{"name":"create-post-no-board","method":"POST","path":"/v1/boards/nope/posts","as":"b0a4d000-0000-4000-8000-000000000001","body":{"kind":"text","title":"abc","tags":[]}}
+{"name":"vote-muted","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1/vote","as":"b0a4d000-0000-4000-8000-000000000005"}
+{"name":"vote-bad-id","method":"POST","path":"/v1/board-posts/xyz/vote","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"vote-gone-board","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e5/vote","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"comment","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e2/comments","as":"b0a4d000-0000-4000-8000-000000000002","body":{"parentId":null,"body":"  A parity reply  "}}
+{"name":"comment-reply","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1/comments","as":"b0a4d000-0000-4000-8000-000000000001","body":{"parent_id":"b0a4d000-0000-4000-8000-0000000000f1","body":"Reply to bob"}}
+{"name":"comment-blocked","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e3/comments","as":"b0a4d000-0000-4000-8000-000000000008","body":{"body":"hi"}}
+{"name":"comment-parent-gone","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1/comments","as":"b0a4d000-0000-4000-8000-000000000001","body":{"parentId":"b0a4d000-0000-4000-8000-0000000000f2","body":"hi"}}
+{"name":"comment-empty","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1/comments","as":"b0a4d000-0000-4000-8000-000000000001","body":{"body":"   "}}
+{"name":"comment-muted","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1/comments","as":"b0a4d000-0000-4000-8000-000000000005","body":{"body":"hi"}}
+{"name":"delete-comment-forbidden","method":"DELETE","path":"/v1/board-comments/b0a4d000-0000-4000-8000-0000000000f1","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"delete-comment-gone","method":"DELETE","path":"/v1/board-comments/b0a4d000-0000-4000-8000-0000000000f2","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"delete-comment-bad-id","method":"DELETE","path":"/v1/board-comments/nope","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"delete-post-forbidden","method":"DELETE","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"delete-post-gone-board","method":"DELETE","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e5","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"report-post","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000005","body":{"postId":"b0a4d000-0000-4000-8000-0000000000e1","reason":"spam","note":"  "}}
+{"name":"report-comment","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"commentId":"b0a4d000-0000-4000-8000-0000000000f1","reason":"harassment","note":"Not nice"}}
+{"name":"report-both","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"postId":"b0a4d000-0000-4000-8000-0000000000e1","commentId":"b0a4d000-0000-4000-8000-0000000000f1","reason":"spam"}}
+{"name":"report-neither","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"reason":"spam"}}
+{"name":"report-missing-comment","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"commentId":"b0a4d000-0000-4000-8000-0000000000f2","reason":"spam"}}
+{"name":"report-bad-reason","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"postId":"b0a4d000-0000-4000-8000-0000000000e1","reason":"nope"}}
+{"name":"report-bad-uuid","method":"POST","path":"/v1/board-reports","as":"b0a4d000-0000-4000-8000-000000000001","body":{"postId":"zz","reason":"spam"}}

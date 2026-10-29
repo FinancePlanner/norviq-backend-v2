@@ -1,0 +1,24 @@
+# Order-dependent boards cases: the first backend to run creates, toggles or
+# deletes, so the second sees the next state. Run twice, once per order,
+# resetting the fixtures before each run:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/boards-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18143 -jwt-secret parity-secret -cases parity/boards-ordered.jsonl -ignore requestId,id,createdAt
+#   (reset again)
+#   go run ./cmd/parity -a http://127.0.0.1:18143 -b http://127.0.0.1:8081 -jwt-secret parity-secret -cases parity/boards-ordered.jsonl -ignore requestId,id,createdAt
+# Expected, in both orders, the same diffs: whichever backend runs first gets
+#   create-board 200 / 409, vote-on {score:2,voted:true} / {score:1,voted:false},
+#   vote-again the reverse, delete-post 204 / 404, delete-comment 204 / 404,
+#   board-cap: carol's 3rd board 200 / 429 board_limit_reached;
+# and the follow-up reads (board-after, posts-after) match exactly.
+{"name":"create-board","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000002","body":{"slug":" Parity-New ","name":"  Parity   new ","description":" Fresh "}}
+{"name":"board-cap-1","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000008","body":{"slug":"parity-c1","name":"Carol one","description":""}}
+{"name":"board-cap-2","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000008","body":{"slug":"parity-c2","name":"Carol two","description":""}}
+{"name":"board-cap-3","method":"POST","path":"/v1/boards","as":"b0a4d000-0000-4000-8000-000000000008","body":{"slug":"parity-c3","name":"Carol three","description":""}}
+{"name":"vote-on","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e3/vote","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"vote-again","method":"POST","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e3/vote","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"delete-comment","method":"DELETE","path":"/v1/board-comments/b0a4d000-0000-4000-8000-0000000000f1","as":"b0a4d000-0000-4000-8000-000000000002"}
+{"name":"delete-post","method":"DELETE","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e4","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"board-after","path":"/v1/boards/parity-etfs","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"posts-after","path":"/v1/boards/parity-etfs/posts","as":"b0a4d000-0000-4000-8000-000000000001"}
+{"name":"detail-after","path":"/v1/board-posts/b0a4d000-0000-4000-8000-0000000000e1","as":"b0a4d000-0000-4000-8000-000000000008"}
+{"name":"notifications-after","path":"/v1/community/notifications","as":"b0a4d000-0000-4000-8000-000000000002"}

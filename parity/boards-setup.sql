@@ -77,6 +77,14 @@ INSERT INTO board_votes (id, post_id, user_id, created_at) VALUES
 INSERT INTO board_post_views (id, post_id, user_id, last_seen_comment_count, last_seen_at) VALUES
   ('b0a4d000-0000-4000-8000-000000000201', 'b0a4d000-0000-4000-8000-0000000000e1', 'b0a4d000-0000-4000-8000-000000000001', 1, '2026-10-19T00:00:00Z');
 
+-- Carol saw e1 at its current count, so her detail view is repeatable.
+INSERT INTO board_post_views (id, post_id, user_id, last_seen_comment_count, last_seen_at) VALUES
+  ('b0a4d000-0000-4000-8000-000000000202', 'b0a4d000-0000-4000-8000-0000000000e1', 'b0a4d000-0000-4000-8000-000000000008', 2, '2026-10-19T00:00:00Z');
+
+-- Bob blocked Carol.
+INSERT INTO social_blocks (id, blocker_id, blocked_id, created_at) VALUES
+  ('b0a4d000-0000-4000-8000-000000000501', 'b0a4d000-0000-4000-8000-000000000002', 'b0a4d000-0000-4000-8000-000000000008', '2026-10-01T00:00:00Z');
+
 INSERT INTO board_notifications (id, recipient_id, kind, actor_id, post_id, comment_id, created_at, read_at) VALUES
   ('b0a4d000-0000-4000-8000-000000000301', 'b0a4d000-0000-4000-8000-000000000001', 'reply', 'b0a4d000-0000-4000-8000-000000000002', 'b0a4d000-0000-4000-8000-0000000000e1', 'b0a4d000-0000-4000-8000-0000000000f1', '2026-10-19T00:00:00Z', NULL),
   ('b0a4d000-0000-4000-8000-000000000302', 'b0a4d000-0000-4000-8000-000000000001', 'upvote', 'b0a4d000-0000-4000-8000-000000000002', 'b0a4d000-0000-4000-8000-0000000000e1', NULL, '2026-10-19T00:00:00Z', '2026-10-19T01:00:00Z'),

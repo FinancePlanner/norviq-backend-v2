@@ -25,6 +25,7 @@ import (
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
+	"norviq-api/internal/features/groups"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
@@ -134,6 +135,10 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// Groups (GroupsController, GroupMessagesController) and the
+		// realtime stream; behind SOCIAL_ENABLED and GROUPS_ENABLED, read
+		// per request.
+		groups.Feature{},
 	}
 }
 

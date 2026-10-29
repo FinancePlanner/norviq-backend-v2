@@ -143,7 +143,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatal(r.Status)
 	}
 	expectError(t, app.Do(http.MethodPatch, "/v1/pilot-follows/"+created.ID, tok, map[string]any{"status": "gone"}), http.StatusBadRequest,
-		"Cannot initialize PilotFollowStatus from invalid String value gone")
+		"Data corrupted at path 'status'. Cannot initialize PilotFollowStatus from invalid String value gone.")
 	expectError(t, app.Do(http.MethodPatch, "/v1/pilot-follows/"+created.ID, tok, map[string]any{}), http.StatusBadRequest, "")
 
 	if r := app.Do(http.MethodDelete, "/v1/pilot-follows/"+created.ID, tok, nil); r.Status != http.StatusNoContent {
@@ -162,9 +162,9 @@ func TestCreateValidation(t *testing.T) {
 	app := newApp(t)
 	user := app.CreateUser("pilot-val@example.com")
 	tok := app.Token(user)
-	expectError(t, app.Do(http.MethodPost, "/v1/pilot-follows", tok, map[string]any{"targetKind": "watchlist"}), http.StatusBadRequest, "No such key 'pilotSlug' at path ''.")
+	expectError(t, app.Do(http.MethodPost, "/v1/pilot-follows", tok, map[string]any{"targetKind": "watchlist"}), http.StatusBadRequest, "No such key 'pilotSlug' at path ''. No value associated with key CodingKeys(stringValue: \"pilotSlug\", intValue: nil) (\"pilotSlug\").")
 	expectError(t, app.Do(http.MethodPost, "/v1/pilot-follows", tok, map[string]any{"pilotSlug": "nancy-pelosi", "targetKind": "fund"}), http.StatusBadRequest,
-		"Cannot initialize PilotFollowTargetKind from invalid String value fund")
+		"Data corrupted at path 'targetKind'. Cannot initialize PilotFollowTargetKind from invalid String value fund.")
 	expectError(t, app.Do(http.MethodPost, "/v1/pilot-follows", tok, map[string]any{"pilotSlug": "nancy-pelosi", "targetKind": "watchlist"}), http.StatusConflict,
 		"This pilot has no disclosures yet. Try again later.")
 	addVersion(t, app.Deps.DB, pelosiID(t, app), 1, map[string]float64{"NVDA": 1})

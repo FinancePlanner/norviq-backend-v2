@@ -1,0 +1,15 @@
+# Flag off: the shared Vapor on :8081 (no flags) vs v2 without PILOTS_ENABLED,
+# both on the scratch DB norviq:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18147 -jwt-secret parity-secret -cases parity/pilots-flagoff.jsonl
+{"name":"off-list","method":"GET","path":"/v1/pilots","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-list-unauth","method":"GET","path":"/v1/pilots"}
+{"name":"off-detail","method":"GET","path":"/v1/pilots/nancy-pelosi","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-follows","method":"GET","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-follow","method":"GET","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-events","method":"GET","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01/events","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-snapshots","method":"GET","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01/snapshots","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-create","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{"pilotSlug":"nancy-pelosi","targetKind":"watchlist"}}
+{"name":"off-create-bad-body","method":"POST","path":"/v1/pilot-follows","as":"91107000-0000-4000-8000-000000000001","body":{}}
+{"name":"off-patch","method":"PATCH","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000001","body":{"status":"paused"}}
+{"name":"off-delete","method":"DELETE","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01","as":"91107000-0000-4000-8000-000000000001"}
+{"name":"off-delete-unauth","method":"DELETE","path":"/v1/pilot-follows/91107000-0000-4000-8000-000000000F01"}

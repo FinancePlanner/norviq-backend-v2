@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"norviq-api/internal/apijson"
@@ -291,18 +292,20 @@ func (h *handlers) getFollow(c *echo.Context) error {
 
 func required(field string, present bool) error {
 	if !present {
-		return httpx.BadRequest("No such key '" + field + "' at path ''.")
+		return httpx.BadRequest(fmt.Sprintf(
+			"No such key '%s' at path ''. No value associated with key CodingKeys(stringValue: %q, intValue: nil) (%q).",
+			field, field, field))
 	}
 	return nil
 }
 
-func oneOf(typeName, v string, allowed ...string) error {
+func oneOf(field, typeName, v string, allowed ...string) error {
 	for _, a := range allowed {
 		if v == a {
 			return nil
 		}
 	}
-	return httpx.BadRequest("Cannot initialize " + typeName + " from invalid String value " + v)
+	return httpx.BadRequest("Data corrupted at path '" + field + "'. Cannot initialize " + typeName + " from invalid String value " + v + ".")
 }
 
 func (h *handlers) createFollow(c *echo.Context) error {
@@ -323,7 +326,7 @@ func (h *handlers) createFollow(c *echo.Context) error {
 	if err := required("targetKind", body.TargetKind != nil); err != nil {
 		return err
 	}
-	if err := oneOf("PilotFollowTargetKind", *body.TargetKind, TargetPortfolio, TargetWatchlist); err != nil {
+	if err := oneOf("targetKind", "PilotFollowTargetKind", *body.TargetKind, TargetPortfolio, TargetWatchlist); err != nil {
 		return err
 	}
 	req := CreateRequest{PilotSlug: *body.PilotSlug, TargetKind: *body.TargetKind, PortfolioListID: body.PortfolioListID, WatchlistListID: body.WatchlistListID}
@@ -376,7 +379,7 @@ func (h *handlers) updateFollow(c *echo.Context) error {
 	if err := required("status", body.Status != nil); err != nil {
 		return err
 	}
-	if err := oneOf("PilotFollowStatus", *body.Status, StatusActive, StatusPaused); err != nil {
+	if err := oneOf("status", "PilotFollowStatus", *body.Status, StatusActive, StatusPaused); err != nil {
 		return err
 	}
 	ctx := c.Request().Context()

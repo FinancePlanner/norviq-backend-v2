@@ -27,6 +27,7 @@ import (
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/integrations"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/pilots"
@@ -137,6 +138,8 @@ func All() []server.Feature {
 		financing.Feature{},
 		// BankController, the hosted-link callbacks and the Plaid webhook.
 		banking.Feature{},
+		// MessagingController (/v1/integrations/telegram).
+		integrations.Feature{},
 	}
 }
 

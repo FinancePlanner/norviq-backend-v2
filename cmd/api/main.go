@@ -110,13 +110,23 @@ func openDB(ctx context.Context, cfg config.Base) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Retry for up to 30 s: on the cluster a fresh pod can get "connection
+	// refused" until kube-router has applied the NetworkPolicy for its IP,
+	// and failing at once costs a container restart on every rollout.
+	pingCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("database: %w", err)
+	for {
+		err := pool.Ping(pingCtx)
+		if err == nil {
+			return pool, nil
+		}
+		select {
+		case <-pingCtx.Done():
+			pool.Close()
+			return nil, fmt.Errorf("database: %w", err)
+		case <-time.After(time.Second):
+		}
 	}
-	return pool, nil
 }
 
 func openRedis(cfg config.Base, logger *slog.Logger) redis.UniversalClient {

@@ -353,7 +353,16 @@ func decodeSettings(o obj) (BlockSettings, error) {
 	if out.ShowDetails, err = reqBool(s, "showDetails"); err != nil {
 		return out, err
 	}
-	if out.ShowSourceURLs, err = reqBool(s, "showSourceURLs"); err != nil {
+	// Deliberate fix: snake_case "show_source_urls" is rewritten to
+	// "showSourceUrls", which Vapor never matched against showSourceURLs,
+	// so snake_case clients always got a 400. Accept the rewritten key.
+	sourceKey := "showSourceURLs"
+	if _, ok := s.fields[sourceKey]; !ok {
+		if _, alt := s.fields["showSourceUrls"]; alt {
+			sourceKey = "showSourceUrls"
+		}
+	}
+	if out.ShowSourceURLs, err = reqBool(s, sourceKey); err != nil {
 		return out, err
 	}
 	if out.MaximumRows, err = optInt(s, "maximumRows"); err != nil {

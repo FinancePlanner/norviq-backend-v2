@@ -174,6 +174,23 @@ func TestTemplateLifecycle(t *testing.T) {
 	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/schedules/"+sched.ID, tok, nil), http.StatusNotFound)
 }
 
+func TestTemplateAcceptsSnakeCaseShowSourceURLs(t *testing.T) {
+	a := newApp(t)
+	owner := a.user("owner", true)
+	tok := a.Token(owner)
+	p := a.portfolio(owner, "Main")
+
+	// snake_case show_source_urls is accepted (Vapor: 400 "No such key 'showSourceURLs'").
+	snake := templateBody("Snake case", p)
+	block := snake["blocks"].([]any)[0].(map[string]any)
+	block["settings"] = map[string]any{"visualization": "automatic", "show_legend": true, "show_details": true, "show_source_urls": true}
+	r := a.Do(http.MethodPost, "/v1/reporting/templates", tok, snake)
+	expectStatus(t, r, http.StatusCreated)
+	if got := decodeJSON[Template](t, r); !got.Input.Blocks[0].Settings.ShowSourceURLs {
+		t.Fatalf("snake template = %+v", got)
+	}
+}
+
 func TestValidationReasons(t *testing.T) {
 	a := newApp(t)
 	owner := a.user("owner", true)

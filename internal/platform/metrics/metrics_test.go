@@ -1,29 +1,59 @@
 package metrics
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v5"
 )
 
-func TestNegativeDurationsLandInTheFirstBucket(t *testing.T) {
+func TestDurationsAreCumulativeWithTheFullSum(t *testing.T) {
 	r := &Registry{}
-	// The middleware measures end -> start: always negative.
-	r.RecordRequestDuration(-3 * time.Millisecond)
-	r.RecordRequestDuration(-1500 * time.Millisecond)
+	r.RecordRequestDuration(3 * time.Millisecond)
+	r.RecordRequestDuration(1500 * time.Millisecond)
 	out := r.Render()
 	for _, want := range []string{
-		"http_request_duration_seconds_bucket{le=\"0.005\"} 2\n",
-		"http_request_duration_seconds_bucket{le=\"0.010\"} 0\n", // not cumulative
-		"http_request_duration_seconds_bucket{le=\"10.000\"} 0\n",
+		"http_request_duration_seconds_bucket{le=\"0.005\"} 1\n",
+		"http_request_duration_seconds_bucket{le=\"1.000\"} 1\n",
+		"http_request_duration_seconds_bucket{le=\"2.500\"} 2\n", // cumulative
+		"http_request_duration_seconds_bucket{le=\"10.000\"} 2\n",
 		"http_request_duration_seconds_bucket{le=\"+Inf\"} 2\n",
-		// Only the sub-second parts: -0.003 + -0.5.
-		"http_request_duration_seconds_sum -0.503000\n",
+		"http_request_duration_seconds_sum 1.503000\n", // whole seconds included
 		"http_request_duration_seconds_count 2\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
+	}
+}
+
+// The middleware measures start -> end: a slow handler is a positive
+// duration in the right bucket (Vapor recorded it negative).
+func TestMiddlewareRecordsPositiveDuration(t *testing.T) {
+	r := &Registry{}
+	e := echo.New()
+	e.Use(HTTPMiddleware(r))
+	e.GET("/", func(c *echo.Context) error {
+		time.Sleep(20 * time.Millisecond)
+		return c.NoContent(http.StatusNoContent)
+	})
+	e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
+	out := r.Render()
+	for _, want := range []string{
+		"http_request_duration_seconds_bucket{le=\"0.010\"} 0\n",
+		"http_request_duration_seconds_bucket{le=\"10.000\"} 1\n",
+		"http_requests_total 1\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if r.latencySum.Load() < int64(20*time.Millisecond) {
+		t.Fatalf("sum %d ns", r.latencySum.Load())
 	}
 }
 

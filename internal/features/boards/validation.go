@@ -185,10 +185,6 @@ func charCount(s string) int {
 	return len(graphemes(s))
 }
 
-// CharCount is charCount for other domains that port a Swift `String.count`
-// check (terminal positions, research).
-func CharCount(s string) int { return charCount(s) }
-
 // prefixChars is Swift's String(s.prefix(n)).
 func prefixChars(s string, n int) string {
 	g := graphemes(s)

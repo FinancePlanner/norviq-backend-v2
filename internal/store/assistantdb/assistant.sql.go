@@ -26,12 +26,101 @@ func (q *Queries) BindMessagingLinks(ctx context.Context, arg BindMessagingLinks
 	return err
 }
 
+const budgetSnapshotForMonth = `-- name: BudgetSnapshotForMonth :one
+SELECT net_salary FROM budget_snapshots WHERE user_id = $1 AND month_start = $2 LIMIT 1
+`
+
+type BudgetSnapshotForMonthParams struct {
+	UserID     uuid.UUID
+	MonthStart time.Time
+}
+
+func (q *Queries) BudgetSnapshotForMonth(ctx context.Context, arg BudgetSnapshotForMonthParams) (float64, error) {
+	row := q.db.QueryRow(ctx, budgetSnapshotForMonth, arg.UserID, arg.MonthStart)
+	var net_salary float64
+	err := row.Scan(&net_salary)
+	return net_salary, err
+}
+
+const claimDueWatches = `-- name: ClaimDueWatches :many
+UPDATE assistant_watches AS w
+SET next_run_at = w.next_run_at + make_interval(
+        mins => (w.interval_minutes * (floor(extract(epoch FROM (now() - w.next_run_at)) / 60 / w.interval_minutes) + 1))::int
+    ),
+    last_run_at = now(),
+    updated_at = now()
+WHERE w.id IN (
+    SELECT id FROM assistant_watches
+    WHERE enabled AND next_run_at <= now()
+    ORDER BY next_run_at
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING w.id
+`
+
+func (q *Queries) ClaimDueWatches(ctx context.Context, batch int32) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, claimDueWatches, batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countTipsSince = `-- name: CountTipsSince :one
+SELECT count(*) FROM ai_tips WHERE user_id = $1 AND created_at >= $2
+`
+
+type CountTipsSinceParams struct {
+	UserID    uuid.UUID
+	CreatedAt *time.Time
+}
+
+func (q *Queries) CountTipsSince(ctx context.Context, arg CountTipsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTipsSince, arg.UserID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteConversation = `-- name: DeleteConversation :exec
 DELETE FROM ai_conversations WHERE id = $1
 `
 
 func (q *Queries) DeleteConversation(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteConversation, id)
+	return err
+}
+
+const deleteExpiredConversations = `-- name: DeleteExpiredConversations :exec
+
+DELETE FROM ai_conversations WHERE expires_at < $1
+`
+
+// Retention (AIAssistantRetentionJob).
+func (q *Queries) DeleteExpiredConversations(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.Exec(ctx, deleteExpiredConversations, expiresAt)
+	return err
+}
+
+const deleteExpiredTips = `-- name: DeleteExpiredTips :exec
+DELETE FROM ai_tips WHERE expires_at < $1
+`
+
+func (q *Queries) DeleteExpiredTips(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.Exec(ctx, deleteExpiredTips, expiresAt)
 	return err
 }
 
@@ -53,12 +142,63 @@ func (q *Queries) DeleteMemo(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteOldAudits = `-- name: DeleteOldAudits :exec
+DELETE FROM ai_action_audits WHERE created_at < $1
+`
+
+func (q *Queries) DeleteOldAudits(ctx context.Context, createdAt *time.Time) error {
+	_, err := q.db.Exec(ctx, deleteOldAudits, createdAt)
+	return err
+}
+
+const deleteOldPendingActions = `-- name: DeleteOldPendingActions :exec
+DELETE FROM ai_pending_actions WHERE created_at < $1
+`
+
+func (q *Queries) DeleteOldPendingActions(ctx context.Context, createdAt *time.Time) error {
+	_, err := q.db.Exec(ctx, deleteOldPendingActions, createdAt)
+	return err
+}
+
+const deleteOldUsage = `-- name: DeleteOldUsage :exec
+DELETE FROM ai_usage_monthly WHERE month_start < $1
+`
+
+func (q *Queries) DeleteOldUsage(ctx context.Context, monthStart time.Time) error {
+	_, err := q.db.Exec(ctx, deleteOldUsage, monthStart)
+	return err
+}
+
+const disableWatch = `-- name: DisableWatch :exec
+UPDATE assistant_watches SET enabled = false, updated_at = $2 WHERE id = $1
+`
+
+type DisableWatchParams struct {
+	ID        uuid.UUID
+	UpdatedAt *time.Time
+}
+
+func (q *Queries) DisableWatch(ctx context.Context, arg DisableWatchParams) error {
+	_, err := q.db.Exec(ctx, disableWatch, arg.ID, arg.UpdatedAt)
+	return err
+}
+
 const dismissTip = `-- name: DismissTip :exec
 UPDATE ai_tips SET is_dismissed = true WHERE id = $1
 `
 
 func (q *Queries) DismissTip(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, dismissTip, id)
+	return err
+}
+
+const expirePendingActions = `-- name: ExpirePendingActions :exec
+UPDATE ai_pending_actions SET status = 'expired', updated_at = $1
+WHERE status = 'pending' AND expires_at < $1
+`
+
+func (q *Queries) ExpirePendingActions(ctx context.Context, now *time.Time) error {
+	_, err := q.db.Exec(ctx, expirePendingActions, now)
 	return err
 }
 
@@ -237,6 +377,31 @@ func (q *Queries) GetPreference(ctx context.Context, userID uuid.UUID) (AiPrefer
 		&i.ProactiveTipsEnabled,
 		&i.PushEnabled,
 		&i.Timezone,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getWatch = `-- name: GetWatch :one
+SELECT id, user_id, conversation_id, title_encrypted, spec_encrypted, condition_encrypted, schedule_human, interval_minutes, next_run_at, last_run_at, enabled, created_at, updated_at FROM assistant_watches WHERE id = $1
+`
+
+func (q *Queries) GetWatch(ctx context.Context, id uuid.UUID) (AssistantWatch, error) {
+	row := q.db.QueryRow(ctx, getWatch, id)
+	var i AssistantWatch
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ConversationID,
+		&i.TitleEncrypted,
+		&i.SpecEncrypted,
+		&i.ConditionEncrypted,
+		&i.ScheduleHuman,
+		&i.IntervalMinutes,
+		&i.NextRunAt,
+		&i.LastRunAt,
+		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -473,6 +638,43 @@ func (q *Queries) InsertTip(ctx context.Context, arg InsertTipParams) error {
 		arg.ActionPath,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertWatch = `-- name: InsertWatch :exec
+
+INSERT INTO assistant_watches (id, user_id, conversation_id, title_encrypted, spec_encrypted, condition_encrypted,
+    schedule_human, interval_minutes, next_run_at, last_run_at, enabled, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, true, $10, $10)
+`
+
+type InsertWatchParams struct {
+	ID                 uuid.UUID
+	UserID             uuid.UUID
+	ConversationID     uuid.UUID
+	TitleEncrypted     []byte
+	SpecEncrypted      []byte
+	ConditionEncrypted []byte
+	ScheduleHuman      string
+	IntervalMinutes    int64
+	NextRunAt          time.Time
+	Now                *time.Time
+}
+
+// Standing tasks (AIAssistantWatch, AIAssistantWatchJob).
+func (q *Queries) InsertWatch(ctx context.Context, arg InsertWatchParams) error {
+	_, err := q.db.Exec(ctx, insertWatch,
+		arg.ID,
+		arg.UserID,
+		arg.ConversationID,
+		arg.TitleEncrypted,
+		arg.SpecEncrypted,
+		arg.ConditionEncrypted,
+		arg.ScheduleHuman,
+		arg.IntervalMinutes,
+		arg.NextRunAt,
+		arg.Now,
 	)
 	return err
 }
@@ -740,6 +942,42 @@ func (q *Queries) MarkTipSeen(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const monthExpensesForTip = `-- name: MonthExpensesForTip :many
+SELECT amount, user_share_percent FROM expenses
+WHERE user_id = $1 AND occurred_on >= $2 AND occurred_on < $3
+`
+
+type MonthExpensesForTipParams struct {
+	UserID     uuid.UUID
+	MonthStart time.Time
+	NextMonth  time.Time
+}
+
+type MonthExpensesForTipRow struct {
+	Amount           float64
+	UserSharePercent float64
+}
+
+func (q *Queries) MonthExpensesForTip(ctx context.Context, arg MonthExpensesForTipParams) ([]MonthExpensesForTipRow, error) {
+	rows, err := q.db.Query(ctx, monthExpensesForTip, arg.UserID, arg.MonthStart, arg.NextMonth)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MonthExpensesForTipRow{}
+	for rows.Next() {
+		var i MonthExpensesForTipRow
+		if err := rows.Scan(&i.Amount, &i.UserSharePercent); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const newestConversation = `-- name: NewestConversation :one
 SELECT id, user_id, title_encrypted, created_at, updated_at, expires_at FROM ai_conversations
 WHERE user_id = $1 AND expires_at > $2
@@ -864,6 +1102,40 @@ type SetPendingActionStatusParams struct {
 func (q *Queries) SetPendingActionStatus(ctx context.Context, arg SetPendingActionStatusParams) error {
 	_, err := q.db.Exec(ctx, setPendingActionStatus, arg.ID, arg.Status, arg.UpdatedAt)
 	return err
+}
+
+const tipPreferences = `-- name: TipPreferences :many
+
+SELECT id, user_id, proactive_tips_enabled, push_enabled, timezone, created_at, updated_at FROM ai_preferences WHERE proactive_tips_enabled = true
+`
+
+// Daily tips (AIDailyTipJob).
+func (q *Queries) TipPreferences(ctx context.Context) ([]AiPreference, error) {
+	rows, err := q.db.Query(ctx, tipPreferences)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiPreference{}
+	for rows.Next() {
+		var i AiPreference
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ProactiveTipsEnabled,
+			&i.PushEnabled,
+			&i.Timezone,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchConversation = `-- name: TouchConversation :exec

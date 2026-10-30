@@ -9,6 +9,7 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/features/aiplatform"
+	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/tax"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/platform/crypto"
@@ -29,6 +30,9 @@ type Feature struct {
 	// Sources wires the other domains' services the AI surfaces read; see
 	// Sources. Nil leaves every source-dependent route on Vapor.
 	Sources SourcesFunc
+
+	// memo is PositionMemoService; tests inject one.
+	memo memoGenerator
 }
 
 // Name implements server.Feature.
@@ -44,6 +48,8 @@ type handlers struct {
 
 	src     Sources
 	actions *actionServices
+	reads   *readTools
+	memo    memoGenerator
 }
 
 func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*handlers, error) {
@@ -74,9 +80,15 @@ func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*ha
 	if err != nil {
 		return nil, err
 	}
-	return &handlers{
+	mkt, err := market.SharedService(d)
+	if err != nil {
+		return nil, err
+	}
+	h := &handlers{
 		d: d, q: q, pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now, src: src, actions: acts,
-	}, nil
+	}
+	h.reads = &readTools{src: &h.src, expenses: acts.expenses, market: mkt, db: d.DB, now: now}
+	return h, nil
 }
 
 // Register mounts the routes as routes.swift and each boot(routes:) did.
@@ -84,6 +96,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	h, err := newHandlers(d, f.Now, f.Sources)
 	if err != nil {
 		return err
+	}
+	if f.memo != nil {
+		h.memo = f.memo
 	}
 
 	// ActionCatalogController: any authenticated credential, no limiter.
@@ -111,6 +126,19 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.POST(a+"/tips/:id/seen", h.markTipSeen, write...)
 	r.V1.DELETE(a+"/tips/:id", h.dismissTip, write...)
 	r.V1.POST(a+"/actions/:id/cancel", h.cancelAction, write...)
+
+	// Turn surfaces read through AIReadToolRegistry and the memo writer, so
+	// they move to v2 only once every read source and the memo writer are
+	// wired; until then they stay on Vapor.
+	if h.turnsReady() {
+		r.V1.POST(a+"/conversations/:id/chat", h.chat, write...)
+		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, write...)
+		// /v1/ai/chat: SessionToken only, first-party, no scope middleware.
+		r.V1.POST("/ai/chat", h.aiChat, aiLimit, d.Auth.Session(), auth.Guard())
+	}
+	// Confirming executes whatever write the assistant proposed, so it stays
+	// first-party: SessionToken, guard, FirstPartyOnly (no scope check).
+	r.V1.POST(a+"/actions/:id/confirm", h.confirmAction, aiLimit, d.Auth.Session(), auth.Guard(), auth.FirstPartyOnly())
 
 	r.V1.GET("/ai/memos", h.listMemos, read...)
 	r.V1.GET("/ai/memos/:id", h.getMemo, read...)

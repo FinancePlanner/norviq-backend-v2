@@ -172,9 +172,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	o.POST("/flows/:flowID/deny", s.denyFlow, firstParty...)
 	r.Root.GET("/.well-known/oauth-authorization-server", s.wellKnown)
 
-	// UserProfileController. DELETE /v1/users and DELETE /v1/users/:id stay
-	// on Vapor: deleting an account revokes bank links through the banking
-	// providers and removes export files from Vapor's disk.
+	// UserProfileController. DELETE /v1/users and DELETE /v1/users/:id are
+	// the accountdeletion feature.
 	u := r.V1.Group("/users")
 	u.PUT("", s.updateProfile, firstParty...)
 	u.PATCH("/username", s.updateUsername, firstParty...)

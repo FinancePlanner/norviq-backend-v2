@@ -26,7 +26,8 @@ type Querier interface {
 	InsertAccount(ctx context.Context, arg InsertAccountParams) error
 	// BankController, BankCallbackController, PlaidWebhookController, the bank
 	// providers (Plaid, GoCardless, Enable Banking) and BankSyncJob.
-	// Fluent's `first()` is LIMIT 1 with no ORDER BY; `all()` has no ORDER BY.
+	// Vapor's Fluent `first()`/`all()` had no ORDER BY; where more than one row can
+	// match, v2 orders by created_at, id so lists and picks are stable.
 	InsertConnection(ctx context.Context, arg InsertConnectionParams) error
 	InsertLinkFlow(ctx context.Context, arg InsertLinkFlowParams) error
 	InsertTransaction(ctx context.Context, arg InsertTransactionParams) error

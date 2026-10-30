@@ -1,6 +1,7 @@
 -- BankController, BankCallbackController, PlaidWebhookController, the bank
 -- providers (Plaid, GoCardless, Enable Banking) and BankSyncJob.
--- Fluent's `first()` is LIMIT 1 with no ORDER BY; `all()` has no ORDER BY.
+-- Vapor's Fluent `first()`/`all()` had no ORDER BY; where more than one row can
+-- match, v2 orders by created_at, id so lists and picks are stable.
 
 -- name: InsertConnection :exec
 INSERT INTO bank_connections (
@@ -14,7 +15,7 @@ INSERT INTO bank_connections (
 );
 
 -- name: ListUserConnections :many
-SELECT * FROM bank_connections WHERE user_id = @user_id;
+SELECT * FROM bank_connections WHERE user_id = @user_id ORDER BY created_at, id;
 
 -- name: GetUserConnection :one
 SELECT * FROM bank_connections WHERE id = @id AND user_id = @user_id LIMIT 1;
@@ -68,7 +69,7 @@ SET provider_item_id = @provider_item_id, status = 'active',
 WHERE id = @id;
 
 -- name: ListConnectionAccounts :many
-SELECT * FROM bank_accounts WHERE connection_id = @connection_id;
+SELECT * FROM bank_accounts WHERE connection_id = @connection_id ORDER BY created_at, id;
 
 -- name: GetAccountByProviderID :one
 SELECT * FROM bank_accounts
@@ -79,6 +80,7 @@ LIMIT 1;
 SELECT * FROM bank_accounts
 WHERE connection_id = ANY(@connection_ids::uuid[])
   AND identification_hash = ANY(@hashes::text[])
+ORDER BY created_at, id
 LIMIT 1;
 
 -- name: InsertAccount :exec
@@ -121,6 +123,7 @@ LIMIT 1;
 -- name: GetUserTransactionByProviderTx :one
 SELECT * FROM bank_transactions
 WHERE provider_tx_id = @provider_tx_id AND user_id = @user_id
+ORDER BY created_at, id
 LIMIT 1;
 
 -- name: GetPendingAccountTransaction :one

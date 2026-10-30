@@ -272,7 +272,7 @@ func TestFilingPackRenderer(t *testing.T) {
 		t.Fatalf("quoting %s", csv)
 	}
 	pdf := string(renderFilingPDF(pack))
-	if !strings.HasPrefix(pdf, "%PDF") || !strings.Contains(pdf, "Anexo J") || !strings.Contains(pdf, "(Norviq ? IRS Modelo 3 ? Anexo J ? 2025) Tj") {
+	if !strings.HasPrefix(pdf, "%PDF") || !strings.Contains(pdf, "Anexo J") || !strings.Contains(pdf, `(Norviq \227 IRS Modelo 3 \227 Anexo J \227 2025) Tj`) {
 		t.Fatalf("pdf %s", pdf)
 	}
 }
@@ -288,6 +288,11 @@ func TestMinimalPDFLayout(t *testing.T) {
 	}
 	if !strings.Contains(pdf, `(line \(a\)) Tj`) || !strings.HasSuffix(pdf, "%%EOF\n") {
 		t.Fatal("escape / trailer")
+	}
+	// Latin-1 text is written in WinAnsi (Vapor: every non-ASCII scalar as "?").
+	accented := string(minimalPDF([]string{"Ação € Müller 日"}))
+	if !strings.Contains(accented, `(A\347\343o \200 M\374ller ?) Tj`) || !strings.Contains(accented, "/Encoding /WinAnsiEncoding") {
+		t.Fatalf("winansi %s", accented)
 	}
 	// The xref offsets point at each object.
 	idx := strings.Index(pdf, "xref\n")
@@ -646,18 +651,30 @@ func TestReportLifecycle(t *testing.T) {
 	}
 	part, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusPartialContent || string(part) != "\uFEFF\n" || !strings.HasSuffix(resp.Header.Get("Content-Range"), "/"+jsonNumber(len(body))) {
+	if resp.StatusCode != http.StatusPartialContent || string(part) != "\uFEFF\n" || !strings.HasSuffix(resp.Header.Get("Content-Range"), "/"+jsonNumber(len(body))) ||
+		resp.Header.Get("Accept-Ranges") != "bytes" || resp.Header.Get("Accept") != "" {
 		t.Fatalf("range %d %q %v", resp.StatusCode, part, resp.Header)
 	}
-	// An unsatisfiable range is Vapor's bare 400, still with the controller's headers.
+	// An unsatisfiable range is a 416 naming the size (Vapor: a bare 400).
 	req.Header.Set("Range", "bytes=50000-60000")
 	resp, err = a.Server.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest || resp.Header.Get("Content-Type") != "text/csv; charset=utf-8" || resp.Header.Get("ETag") != "" {
+	if resp.StatusCode != http.StatusRequestedRangeNotSatisfiable || resp.Header.Get("Content-Range") != "bytes */"+jsonNumber(len(body)) || resp.Header.Get("ETag") != "" {
 		t.Fatalf("bad range %d %v", resp.StatusCode, resp.Header)
+	}
+	// A malformed range is ignored: the whole file, advertising byte ranges.
+	req.Header.Set("Range", "bytes=abc")
+	resp, err = a.Server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(whole) != body || resp.Header.Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("malformed range %d %v", resp.StatusCode, resp.Header)
 	}
 	req.Header.Del("Range")
 	req.Header.Set("If-None-Match", d.Header.Get("ETag"))

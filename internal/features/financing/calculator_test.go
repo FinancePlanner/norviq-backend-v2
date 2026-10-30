@@ -192,6 +192,11 @@ func TestExtractLocalizedTerms(t *testing.T) {
 	if *r.Draft.MonthlyPayment != 615.25 || r.Draft.PurchaseAmount != nil || r.Draft.Confidence != 0.75 {
 		t.Fatalf("%+v", *r.Draft)
 	}
+	// Vapor read the European "42.000" as 42.
+	r = extractOffer("Preço 42.000 €. Prazo 84 meses. Mensalidade 1.050 €. TAEG 5.125%.", nil)
+	if *r.Draft.PurchaseAmount != 42000 || *r.Draft.MonthlyPayment != 1050 || *r.Draft.EffectiveAnnualRate != 5.125 {
+		t.Fatalf("%+v", *r.Draft)
+	}
 	r = extractOffer("Prazo 84 meses. Mensalidade 615,25 EUR. TAEG 6,8%. Preço 42.000,00 €", nil)
 	if *r.Draft.PurchaseAmount != 42000 || *r.Draft.Currency != "EUR" || r.Draft.Confidence != 1 {
 		t.Fatalf("%+v", *r.Draft)
@@ -202,6 +207,15 @@ func TestExtractUnrecognized(t *testing.T) {
 	r := extractOffer("Configure your purchase online.", nil)
 	if r.Recognized || r.Draft != nil {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestParseAmount(t *testing.T) {
+	cases := map[string]float64{"42.000": 42000, "1.250.000": 1250000, "42.000.": 42000, "42.000,50": 42000.5, "1,234.5": 1234.5, "615,25": 615.25, "704.12": 704.12, "42.0": 42, "12": 12}
+	for in, want := range cases {
+		if got := parseAmount(in); got == nil || *got != want {
+			t.Errorf("%q: %v", in, got)
+		}
 	}
 }
 

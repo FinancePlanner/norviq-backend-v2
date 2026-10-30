@@ -3,6 +3,7 @@ package budgeting
 import (
 	"context"
 	"math"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -33,9 +34,8 @@ type scope struct {
 	amount            float64
 }
 
-// Evaluate is BudgetDriftEvaluator.evaluate. Callers that treated it as best
-// effort in Swift (ExpensesService, the bulk importer) log and ignore its
-// error; the bulk-target route returns it.
+// Evaluate is BudgetDriftEvaluator.evaluate. Callers treat it as best
+// effort: they log and ignore its error.
 func (v *Evaluator) Evaluate(ctx context.Context, userID uuid.UUID, monthStart time.Time, notify bool) error {
 	e := v.Engine
 	q := e.q(nil)
@@ -75,7 +75,9 @@ func (v *Evaluator) Evaluate(ctx context.Context, userID uuid.UUID, monthStart t
 			}
 			if notify && snap.AlertsEnabled && v.AlertsEnabled && !wasRed && v.Publisher != nil {
 				month := dateString(snap.MonthStart)
-				link := "norviq://expenses?month=" + month + "&scope=" + s.key
+				// The scope can be an unbudgeted title ("unbudgeted-title:car & fuel"),
+				// so it is query-escaped. (Vapor sent it raw.)
+				link := "norviq://expenses?month=" + month + "&scope=" + url.QueryEscape(s.key)
 				sid := uuidString(snap.ID)
 				if _, err := v.Publisher.PublishAndPush(ctx, inbox.Message{
 					UserID:           userID,

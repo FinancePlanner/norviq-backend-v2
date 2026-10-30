@@ -158,14 +158,20 @@ func TestConnectModeAndScopeGuard(t *testing.T) {
 	}
 }
 
-func TestTokenResponseNeverDecodes(t *testing.T) {
-	for _, body := range []string{
-		`{"access_token":"a","refresh_token":"r","expires_in":60}`,
-		`{"accessToken":"a"}`,
-	} {
+// Vapor rewrote access_token to accessToken before looking it up, so no
+// token response ever decoded. v2 reads the snake_case keys as sent.
+func TestTokenResponseDecodesSnakeCase(t *testing.T) {
+	tok, ok := decodeTokenResponse("application/json", []byte(`{"access_token":"a","refresh_token":"r","expires_in":60}`))
+	if !ok || tok.accessToken != "a" || tok.refreshToken == nil || *tok.refreshToken != "r" || tok.expiresIn == nil || *tok.expiresIn != 60 {
+		t.Fatalf("tok=%+v ok=%v", tok, ok)
+	}
+	for _, body := range []string{`{"accessToken":"a"}`, `{"access_token":1}`, `{"access_token":"a","expires_in":"x"}`} {
 		if _, ok := decodeTokenResponse("application/json", []byte(body)); ok {
-			t.Errorf("%s decoded; Vapor never decoded a token response", body)
+			t.Errorf("%s decoded", body)
 		}
+	}
+	if _, ok := decodeTokenResponse("text/plain", []byte(`{"access_token":"a"}`)); ok {
+		t.Error("non-JSON content type decoded")
 	}
 }
 

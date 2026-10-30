@@ -627,21 +627,21 @@ func (h *handlers) downloadArtifact(c *echo.Context) error {
 			allowed = nil
 		}
 	}
-	recipientString := ""
-	if recipient != nil {
-		recipientString = formatUUID(*recipient)
-	}
+	// Deliberate fix: Vapor compared the stored recipient strings
+	// case-sensitively with the uppercase UUID (a recipient saved in
+	// lowercase could never download) and answered a bare 403 "Forbidden"
+	// here but "invalid or expired" above for the same broken link.
 	permitted := false
-	if found {
-		permitted = recipient != nil && *recipient == run.RequestedByUserID
+	if found && recipient != nil {
+		permitted = *recipient == run.RequestedByUserID
 		for _, v := range allowed {
-			if v == recipientString {
+			if id, ok := parseSwiftUUID(v); ok && id == *recipient {
 				permitted = true
 			}
 		}
 	}
 	if !permitted {
-		return httpx.Forbidden("")
+		return httpx.Forbidden("This report link is invalid or expired.")
 	}
 	data, err := h.storage.Load(a.StorageKey)
 	if err != nil {

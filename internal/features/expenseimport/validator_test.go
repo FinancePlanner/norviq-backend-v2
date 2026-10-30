@@ -167,3 +167,20 @@ func TestClampsConfidence(t *testing.T) {
 		t.Errorf("low %v", r.Confidence)
 	}
 }
+
+// Excluding a row of another sheet must not skip the same row number of the
+// imported sheet (Vapor dropped sheetName when storing skippedRows).
+func TestSkippedRowsFollowSelectedSheet(t *testing.T) {
+	decision := DecisionRequest{
+		Sheets: []ImportSheet{{Name: "Resumo", Include: false}, {Name: "Gastos", Include: true}},
+		RowOverrides: []RowOverride{
+			{SheetName: "Resumo", Row: 7, Include: false},
+			{SheetName: "Gastos", Row: 9, Include: false},
+			{SheetName: "Gastos", Row: 10, Include: true},
+		},
+	}
+	got := applyDecision(decision, StoredMapping{SkippedRows: []int{}})
+	if got.SelectedSheet == nil || *got.SelectedSheet != "Gastos" || len(got.SkippedRows) != 1 || got.SkippedRows[0] != 9 {
+		t.Fatalf("selected %v skipped %v", got.SelectedSheet, got.SkippedRows)
+	}
+}

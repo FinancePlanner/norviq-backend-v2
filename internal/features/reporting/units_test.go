@@ -46,11 +46,12 @@ func TestMonthlyRecurrenceClampsDay(t *testing.T) {
 	}
 }
 
-func TestRecurrenceQuirksAndErrors(t *testing.T) {
+func TestRecurrenceAndErrors(t *testing.T) {
 	start := mustTime(t, "2026-01-05T10:00:00Z")
-	// The loop starts one step ahead, so the current month's date is skipped.
+	// The current month's date is used while it is still ahead (Vapor
+	// stepped a month first and answered 2026-02-20).
 	next, err := nextRun(start, Recurrence{Frequency: freqMonthly, TimeZone: "UTC", LocalTime: "09:00", DayOfMonth: intp(20)})
-	if err != nil || next.UTC().Format(time.RFC3339) != "2026-02-20T09:00:00Z" {
+	if err != nil || next.UTC().Format(time.RFC3339) != "2026-01-20T09:00:00Z" {
 		t.Fatalf("monthly = %v %v", next, err)
 	}
 	// Quarterly in a zone: local wall time.
@@ -58,10 +59,21 @@ func TestRecurrenceQuirksAndErrors(t *testing.T) {
 	if err != nil || next.UTC().Format(time.RFC3339) != "2026-04-01T08:00:00Z" {
 		t.Fatalf("quarterly = %v %v", next, err)
 	}
-	// Yearly with an anchor month.
+	// Yearly with an anchor month: this year's March is still ahead (Vapor: 2027).
 	next, err = nextRun(start, Recurrence{Frequency: freqYearly, TimeZone: "UTC", LocalTime: "07:15", DayOfMonth: intp(3), AnchorMonth: intp(3)})
-	if err != nil || next.UTC().Format(time.RFC3339) != "2027-03-03T07:15:00Z" {
+	if err != nil || next.UTC().Format(time.RFC3339) != "2026-03-03T07:15:00Z" {
 		t.Fatalf("yearly = %v %v", next, err)
+	}
+	// The day clamps to the anchor month (Vapor clamped to January's 31 and
+	// rolled Feb 31 over into 2027-03-03).
+	next, err = nextRun(start, Recurrence{Frequency: freqYearly, TimeZone: "UTC", LocalTime: "07:15", DayOfMonth: intp(31), AnchorMonth: intp(2)})
+	if err != nil || next.UTC().Format(time.RFC3339) != "2026-02-28T07:15:00Z" {
+		t.Fatalf("yearly clamp = %v %v", next, err)
+	}
+	// Quarterly once this quarter's date has passed: three months on.
+	next, err = nextRun(mustTime(t, "2026-01-25T10:00:00Z"), Recurrence{Frequency: freqQuarterly, TimeZone: "UTC", LocalTime: "09:00", DayOfMonth: intp(20)})
+	if err != nil || next.UTC().Format(time.RFC3339) != "2026-04-20T09:00:00Z" {
+		t.Fatalf("quarterly passed = %v %v", next, err)
 	}
 	cases := map[string]Recurrence{
 		"Invalid report schedule time zone.":                           {Frequency: freqWeekly, TimeZone: "Mars/Olympus", LocalTime: "09:00", Weekday: intp(1)},

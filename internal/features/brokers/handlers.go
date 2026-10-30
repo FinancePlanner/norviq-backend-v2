@@ -435,8 +435,7 @@ func (h *handlers) screenshotCommit(c *echo.Context) error {
 		return httpx.BadRequest("No rows to import.")
 	}
 	if len(body.Items) > maxScreenshotRows {
-		// Vapor's message really does lack the closing parenthesis.
-		return httpx.BadRequest("Too many rows in one import (max " + itoa(maxScreenshotRows) + ".")
+		return httpx.BadRequest("Too many rows in one import (max " + itoa(maxScreenshotRows) + ").")
 	}
 	items := make([]PreviewItem, len(body.Items))
 	for i, it := range body.Items {

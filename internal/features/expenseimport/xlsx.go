@@ -536,9 +536,9 @@ var (
 	builtInDateFormatIDs = map[int]bool{14: true, 15: true, 16: true, 17: true, 18: true, 19: true, 20: true, 21: true, 22: true, 45: true, 46: true, 47: true}
 	workbookPrRe         = regexp.MustCompile(`<workbookPr[^>]*>`)
 	date1904Re           = regexp.MustCompile(`date1904="(1|true)"`)
-	numFmtRe             = regexp.MustCompile(`<numFmt [^>]*/?>`)
-	cellXfsRe            = regexp.MustCompile(`(?i)<cellXfs[^>]*>.*?</cellXfs>`)
-	xfRe                 = regexp.MustCompile(`<xf [^>]*?/?>`)
+	numFmtRe             = regexp.MustCompile(`<numFmt\s[^>]*/?>`)
+	cellXfsRe            = regexp.MustCompile(`(?is)<cellXfs[^>]*>.*?</cellXfs>`)
+	xfRe                 = regexp.MustCompile(`<xf\s[^>]*?/?>`)
 	formatLiteralRe      = regexp.MustCompile(`"[^"]*"|\[[^\]]*\]`)
 	dateTokenRe          = regexp.MustCompile(`(?i)[ymdhs]`)
 )
@@ -565,8 +565,9 @@ func usesDate1904(a archive) bool {
 }
 
 // dateStyleIndexes maps a cell style index to whether its number format is
-// a date, from xl/styles.xml's cellXfs. The patterns are Vapor's regexes,
-// including `.` not crossing newlines.
+// a date, from xl/styles.xml's cellXfs. Unlike Vapor's regexes, the patterns
+// span newlines and any whitespace after the tag name, so a pretty-printed
+// styles.xml keeps its date styles.
 func dateStyleIndexes(a archive) map[int]bool {
 	x, ok := a.text("xl/styles.xml")
 	if !ok {

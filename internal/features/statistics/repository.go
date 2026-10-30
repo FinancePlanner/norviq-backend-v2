@@ -3,6 +3,7 @@ package statistics
 import (
 	"context"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -787,8 +788,11 @@ func SectorFromFinnhubIndustry(raw string) (string, bool) {
 }
 
 // inferSector is inferSector: keyword search over the notes, then the
-// sector-ETF prefixes, else "Unknown". ("ai" matches inside any word, as in
-// Vapor.)
+// sector-ETF prefixes, else "Unknown". Deliberate fix: Vapor matched "ai"
+// inside any word, so notes mentioning "retail", "maintain" or "said" made a
+// stock Technology; "ai" now has to be a whole word.
+var aiWord = regexp.MustCompile(`\bai\b`)
+
 func inferSector(symbol string, notes []note) string {
 	parts := make([]string, 0, len(notes)*4)
 	for _, n := range notes {
@@ -806,7 +810,7 @@ func inferSector(symbol string, notes []note) string {
 	switch {
 	case has("bank", "insurance", "financial"):
 		return "Financials"
-	case has("semiconductor", "software", "cloud", "ai"):
+	case has("semiconductor", "software", "cloud") || aiWord.MatchString(blob):
 		return "Technology"
 	case has("oil", "gas", "energy"):
 		return "Energy"

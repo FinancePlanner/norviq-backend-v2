@@ -64,6 +64,7 @@ FROM users
 WHERE trial_tier IS NOT NULL
   AND trial_started_at IS NOT NULL
   AND trial_days IS NOT NULL
+ORDER BY trial_started_at + trial_days * interval '1 day', id
 LIMIT 500
 `
 
@@ -73,8 +74,10 @@ type ExpiredTrialCandidatesRow struct {
 	TrialDays      *int64
 }
 
-// Vapor's query: any 500 users with trial fields set, in no particular order,
-// expired or not. Expiry is decided in Go.
+// Up to 500 users with trial fields set, earliest trial end first, expired
+// or not; expiry is decided in Go. Vapor had no ORDER BY, so with more than
+// 500 running trials an expired one could be skipped tick after tick. Swept
+// users lose their trial fields, so the ordering always reaches the rest.
 func (q *Queries) ExpiredTrialCandidates(ctx context.Context) ([]ExpiredTrialCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, expiredTrialCandidates)
 	if err != nil {

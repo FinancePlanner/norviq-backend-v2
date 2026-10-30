@@ -30,9 +30,9 @@ var (
 func extractOffer(text string, sourceDomain *string) ImportResponse {
 	normalized := strings.ReplaceAll(text, " ", " ")
 	term := firstInt(termPatterns, normalized)
-	effective := firstDouble(effectivePatterns, normalized)
-	monthly := firstDouble(monthlyPatterns, normalized)
-	price := firstDouble(pricePatterns, normalized)
+	effective := firstDouble(effectivePatterns, normalized, parseNumber)
+	monthly := firstDouble(monthlyPatterns, normalized, parseAmount)
+	price := firstDouble(pricePatterns, normalized, parseAmount)
 	var currency *string
 	switch {
 	case strings.Contains(normalized, "R$"):
@@ -88,10 +88,28 @@ func firstInt(patterns []*regexp.Regexp, text string) *int {
 	return &v
 }
 
-func firstDouble(patterns []*regexp.Regexp, text string) *float64 {
+func firstDouble(patterns []*regexp.Regexp, text string, parse func(string) *float64) *float64 {
 	raw, ok := firstCapture(patterns, text)
 	if !ok {
 		return nil
+	}
+	return parse(raw)
+}
+
+// thousandsDots is a money amount grouped with dots only: "42.000",
+// "1.250.000".
+var thousandsDots = regexp.MustCompile(`^[0-9]{1,3}(\.[0-9]{3})+$`)
+
+// parseAmount parses a money amount (price, monthly payment). Vapor used
+// parseNumber, which reads a dot-only number as a decimal, so the European
+// "42.000" (forty-two thousand) became 42 and "1.250.000" did not parse. v2
+// reads dot groups of exactly three digits as thousands, the same rule
+// parseNumber already applies to commas. Rates keep parseNumber, since
+// "5.125%" is a rate with three decimals.
+func parseAmount(raw string) *float64 {
+	value := strings.TrimRight(strings.ReplaceAll(raw, " ", ""), ".")
+	if thousandsDots.MatchString(value) {
+		return swiftDouble(strings.ReplaceAll(value, ".", ""))
 	}
 	return parseNumber(raw)
 }

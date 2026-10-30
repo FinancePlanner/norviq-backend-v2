@@ -669,20 +669,28 @@ func TestBase64URLDecode(t *testing.T) {
 	}
 }
 
-// TestPlaidResponsesFailBackendAPIDecoding pins a Vapor bug ported as is:
-// backendAPI rewrites link_token to linkToken before the snake_case
-// CodingKey is looked up, so the link token never decodes.
-func TestPlaidResponsesFailBackendAPIDecoding(t *testing.T) {
-	var tb *testBank
-	tb = newTestBank(t, func(s *Settings) {
+func plaidTestBank(t *testing.T) *testBank {
+	t.Helper()
+	tb := newTestBank(t, func(s *Settings) {
 		s.PlaidClientID, s.PlaidSecret = "client", "secret"
 	})
 	plaid, _ := tb.bank.Registry.Provider(KindPlaid)
 	plaid.(*PlaidProvider).client.config.BaseURL = tb.stub.srv.URL
+	return tb
+}
+
+// Vapor decoded Plaid responses through JSONDecoder.backendAPI, which
+// rewrote link_token to linkToken before the snake_case CodingKey was looked
+// up, so the link token never decoded (400 "No such key 'link_token'"). v2
+// decodes the keys as Plaid spells them.
+func TestPlaidLinkSessionDecodesSnakeCase(t *testing.T) {
+	tb := plaidTestBank(t)
 	tb.stub.on("POST /link/token/create", ok(`{"link_token":"link-sandbox-1","expiration":"2026-10-29T12:00:00Z","request_id":"r"}`))
 	userID := tb.app.CreateUser("plaid-link@example.com")
 	r := tb.app.Do(http.MethodPost, "/v1/banks/link-session", tb.app.Token(userID), nil)
-	if r.Status != http.StatusBadRequest || !strings.Contains(string(r.Body), "No such key 'link_token'") {
+	var got map[string]any
+	r.JSON(t, &got)
+	if r.Status != http.StatusOK || got["provider"] != "plaid" || got["linkToken"] != "link-sandbox-1" || got["expiration"] != "2026-10-29T12:00:00Z" {
 		t.Fatalf("got %d %s", r.Status, r.Body)
 	}
 	reqs := tb.stub.requests("POST /link/token/create")
@@ -693,6 +701,48 @@ func TestPlaidResponsesFailBackendAPIDecoding(t *testing.T) {
 	_ = json.Unmarshal(reqs[0].Body, &body)
 	if body["client_id"] != "client" || body["secret"] != "secret" || fmt.Sprint(body["products"]) != "[transactions]" {
 		t.Fatalf("body %v", body)
+	}
+
+	// A body Plaid sends without a required key is Plaid's fault: 502.
+	tb.stub.on("POST /link/token/create", ok(`{"request_id":"r"}`))
+	if r := tb.app.Do(http.MethodPost, "/v1/banks/link-session", tb.app.Token(userID), nil); r.Status != http.StatusBadGateway {
+		t.Fatalf("undecodable %d %s", r.Status, r.Body)
+	}
+}
+
+// Exchange and sync work end to end. The initial sync also returns a
+// transaction on an account Plaid only lists on the second /accounts/get:
+// Vapor cached the account and skipped the transaction; v2 imports it.
+func TestPlaidExchangeAndSyncImportsNewAccountTransaction(t *testing.T) {
+	tb := plaidTestBank(t)
+	tb.stub.on("POST /item/public_token/exchange", ok(`{"access_token":"access-sandbox-1","item_id":"item-1","request_id":"r"}`))
+	tb.stub.on("POST /accounts/get",
+		ok(`{"accounts":[{"account_id":"acc-1","name":"Checking","mask":"0000","type":"depository","balances":{"current":100.5,"iso_currency_code":"USD"}}]}`),
+		ok(`{"accounts":[{"account_id":"acc-1","name":"Checking","mask":"0000","type":"depository","balances":{"current":100.5,"iso_currency_code":"USD"}},{"account_id":"acc-2","name":"Savings","balances":{"current":5,"iso_currency_code":"USD"}}]}`))
+	tb.stub.on("POST /transactions/sync", ok(`{"added":[`+
+		`{"transaction_id":"tx-1","account_id":"acc-1","amount":12.5,"iso_currency_code":"USD","date":"2026-10-20","name":"COFFEE","merchant_name":"Cafe","pending":false,"category":["Food","Coffee"]},`+
+		`{"transaction_id":"tx-2","account_id":"acc-2","amount":40,"iso_currency_code":"USD","date":"2026-10-21","name":"Groceries","pending":false}`+
+		`],"modified":[],"removed":[],"next_cursor":"cur-1","has_more":false}`))
+	userID := tb.app.CreateUser("plaid-exchange@example.com")
+	r := tb.app.Do(http.MethodPost, "/v1/banks/connections", tb.app.Token(userID), map[string]any{"publicToken": "public-sandbox-1"})
+	if r.Status != http.StatusOK {
+		t.Fatalf("exchange %d %s", r.Status, r.Body)
+	}
+	if n := tb.count(t, "bank_accounts"); n != 2 {
+		t.Fatalf("accounts %d", n)
+	}
+	rows := tb.transactions(t)
+	got := map[string]bool{}
+	for _, row := range rows {
+		got[row.ProviderTxID] = true
+	}
+	if len(rows) != 2 || !got["tx-1"] || !got["tx-2"] {
+		t.Fatalf("rows %+v", rows)
+	}
+	var cursor *string
+	_ = tb.app.Deps.DB.QueryRow(context.Background(), `SELECT sync_cursor FROM bank_connections WHERE provider_item_id = 'item-1'`).Scan(&cursor)
+	if deref(cursor) != "cur-1" {
+		t.Fatalf("cursor %v", cursor)
 	}
 }
 

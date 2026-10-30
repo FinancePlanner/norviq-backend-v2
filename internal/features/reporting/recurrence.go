@@ -54,25 +54,6 @@ func daysIn(year int, month time.Month, loc *time.Location) int {
 	return time.Date(year, month+1, 0, 12, 0, 0, 0, loc).Day()
 }
 
-// addMonths is Calendar.date(byAdding: .month, value:, to:): the day clamps
-// to the target month's last day and the wall-clock time is kept.
-func addMonths(t time.Time, n int, loc *time.Location) time.Time {
-	l := t.In(loc)
-	y, m, d := l.Date()
-	total := int(m) - 1 + n
-	ty := y + total/12
-	tm := total % 12
-	if tm < 0 {
-		tm += 12
-		ty--
-	}
-	month := time.Month(tm + 1)
-	if dim := daysIn(ty, month, loc); d > dim {
-		d = dim
-	}
-	return time.Date(ty, month, d, l.Hour(), l.Minute(), l.Second(), l.Nanosecond(), loc)
-}
-
 // nextRun is ReportRecurrenceCalculator.next(after:recurrence:).
 func nextRun(after time.Time, r Recurrence) (time.Time, error) {
 	loc, ok := loadTimeZone(r.TimeZone)
@@ -109,17 +90,20 @@ func nextRun(after time.Time, r Recurrence) (time.Time, error) {
 		case freqQuarterly:
 			step = 3
 		}
-		candidate := after
-		for range 24 {
-			candidate = addMonths(candidate, step, loc)
-			l := candidate.In(loc)
-			year, month := l.Year(), l.Month()
+		// Deliberate fix: Vapor stepped ahead before its first check, so the
+		// current period's date was skipped even when still in the future,
+		// and with an anchor month it clamped the day to the candidate's
+		// month (Feb 31 rolled over into March). Each candidate is now
+		// computed from after's month, starting with the current period,
+		// and the day clamps to the month actually used.
+		l := after.In(loc)
+		for k := 0; k <= 24; k++ {
+			total := int(l.Month()) - 1 + k*step
+			year, month := l.Year()+total/12, time.Month(total%12+1)
 			if r.Frequency == freqYearly && r.AnchorMonth != nil {
 				month = time.Month(min(max(*r.AnchorMonth, 1), 12))
 			}
-			// Quirk kept: the day clamps to the candidate's month, not the
-			// anchor month; time.Date then rolls over as Calendar.date(from:) did.
-			day := min(*r.DayOfMonth, daysIn(l.Year(), l.Month(), loc))
+			day := min(*r.DayOfMonth, daysIn(year, month, loc))
 			result := time.Date(year, month, day, hour, minute, 0, 0, loc)
 			if result.After(after) {
 				return result, nil

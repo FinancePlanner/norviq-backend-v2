@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -328,6 +329,10 @@ func (s *service) match(ctx context.Context, userID, planID uuid.UUID, installme
 	if err := s.q.InsertMatch(ctx, financingdb.InsertMatchParams{
 		ID: id, PlanID: planID, InstallmentNumber: int64(installment), ExpenseID: e.ID, CreatedAt: &now,
 	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return MatchResponse{}, httpx.Conflict("This installment or expense is already matched.")
+		}
 		return MatchResponse{}, err
 	}
 	return MatchResponse{

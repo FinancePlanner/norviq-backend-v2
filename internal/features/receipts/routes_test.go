@@ -228,6 +228,8 @@ func TestOCRWithStubbedVisionModel(t *testing.T) {
 	expectReason(t, e.raw("/v1/receipts/ocr", token, "image/jpeg", nil), http.StatusBadRequest, "Missing image body.")
 	body, ct = form(t, upload{"file", "big.jpg", make([]byte, maxImageBytes+1)})
 	expectReason(t, e.raw("/v1/receipts/ocr", token, ct, body), http.StatusRequestEntityTooLarge, "Receipt image must be 8 MB or smaller.")
+	// A raw body has the same 8 MB cap (Vapor let it reach 10 MB).
+	expectReason(t, e.raw("/v1/receipts/ocr", token, "image/jpeg", make([]byte, maxImageBytes+1)), http.StatusRequestEntityTooLarge, "Receipt image must be 8 MB or smaller.")
 }
 
 func TestOCRUpstreamFailureIs502(t *testing.T) {

@@ -158,6 +158,18 @@ func TestSniffsAmounts(t *testing.T) {
 			t.Errorf("%s -> %+v %v", raw, a, ok)
 		}
 	}
+	// Plain text with a space, or the letters of "kr"/"zł"/"Kč" on their
+	// own, is not a currency symbol (Vapor's CharacterSet said it was).
+	for _, raw := range []string{"1 234", "12 Rua", "Ref 42"} {
+		if a, ok := LooksLikeAmount(raw); ok && a.HadCurrencySymbol {
+			t.Errorf("%q has no currency symbol: %+v", raw, a)
+		}
+	}
+	for _, raw := range []string{"12 kr", "R$ 10", "5 zł", "€3", "10 EUR"} {
+		if a, ok := LooksLikeAmount(raw); !ok || !a.HadCurrencySymbol {
+			t.Errorf("%q has a currency symbol: %+v %v", raw, a, ok)
+		}
+	}
 	for _, raw := range []string{"", "Continente"} {
 		if _, ok := LooksLikeAmount(raw); ok {
 			t.Errorf("%q should not be an amount", raw)

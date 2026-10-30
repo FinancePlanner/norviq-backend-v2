@@ -119,7 +119,10 @@ DELETE FROM scenario_runs
 WHERE expires_at < $1 AND state IN ('completed', 'failed', 'cancelled');
 
 -- name: ListUnsavedScenarioDefinitionIDs :many
-SELECT id FROM scenario_definitions WHERE is_saved = false;
+-- Unsaved scenarios older than the cutoff: a scenario created moments ago
+-- is about to get its first run (Vapor deleted those too).
+SELECT id FROM scenario_definitions
+WHERE is_saved = false AND (created_at IS NULL OR created_at < sqlc.arg(cutoff)::timestamptz);
 
 -- name: CountScenarioRunsForDefinition :one
 SELECT COUNT(*)::int FROM scenario_runs WHERE scenario_id = $1;

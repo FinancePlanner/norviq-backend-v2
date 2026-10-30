@@ -539,6 +539,40 @@ func TestWorkerStopsWhenRunIsCanceledMidway(t *testing.T) {
 	}
 }
 
+func TestWorkerLeavesARunReclaimedByAnotherWorker(t *testing.T) {
+	e := newEnv(t, true)
+	owner := e.proUser("reclaimed@example.com")
+	list := e.portfolio(owner)
+	sc := e.scenario(owner, map[string]any{
+		"portfolioListId": list, "name": "Big", "kind": "monte_carlo",
+		"configuration": map[string]any{"values": map[string]any{"distribution": "normal", "path_count": 50000, "horizon_months": 600}},
+	})
+	snap := e.snapshot(owner, list, map[string]any{"total_value": 1000})
+	run := e.createRun(owner, sc["id"].(string), snap, 1, 202)
+	w := scenarios.NewRunWorker(e.Deps, scenarios.WorkerSettings{})
+	scenarios.SetHeartbeat(w, 20*time.Millisecond)
+	done := make(chan struct{})
+	go func() { w.RunOnce(context.Background()); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for e.getRun(owner, run.ID).State != "running" {
+		if time.Now().After(deadline) {
+			t.Fatal("never claimed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Another worker reclaims the run (its lease expired).
+	e.exec(`UPDATE scenario_runs SET lease_owner = 'other-worker', lease_expires_at = now() + interval '1 minute' WHERE id = $1`, run.ID)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("simulation was not stopped")
+	}
+	// Vapor marked it failed with "CancellationError()" under the new owner.
+	if got := e.getRun(owner, run.ID); got.State != "running" || got.ErrorMessage != nil {
+		t.Fatalf("run %+v %v", got, got.ErrorMessage)
+	}
+}
+
 func TestRetentionJob(t *testing.T) {
 	e := newEnv(t, true)
 	owner := e.proUser("retention@example.com")
@@ -555,6 +589,11 @@ func TestRetentionJob(t *testing.T) {
 		"portfolioListId": list, "name": "c", "kind": "custom",
 		"configuration": map[string]any{"values": map[string]any{}},
 	})
+	unsavedFresh := e.scenario(owner, map[string]any{
+		"portfolioListId": list, "name": "d", "kind": "custom", "isSaved": false,
+		"configuration": map[string]any{"values": map[string]any{}},
+	})
+	e.exec(`UPDATE scenario_definitions SET created_at = CASE WHEN id = $1 THEN now() ELSE now() - interval '2 days' END`, unsavedFresh["id"].(string))
 	snap := e.snapshot(owner, list, map[string]any{"total_value": 10})
 	expired := e.createRun(owner, unsavedWithRun["id"].(string), snap, 1, 202)
 	queuedExpired := e.createRun(owner, unsavedWithRun["id"].(string), snap, 2, 202)
@@ -574,7 +613,8 @@ func TestRetentionJob(t *testing.T) {
 		ids = append(ids, strings.ToUpper(id))
 	}
 	got := strings.Join(ids, ",")
-	for _, keep := range []string{queuedExpired.ID, unsavedWithRun["id"].(string), saved["id"].(string)} {
+	// unsavedFresh has no run yet but was created moments ago (Vapor deleted it).
+	for _, keep := range []string{queuedExpired.ID, unsavedWithRun["id"].(string), saved["id"].(string), unsavedFresh["id"].(string)} {
 		if !strings.Contains(got, keep) {
 			t.Errorf("%s deleted", keep)
 		}

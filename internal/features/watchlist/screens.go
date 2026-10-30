@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
@@ -20,22 +21,13 @@ import (
 
 // Smart screens (WealthAutomationController, /v1/watchlist/screens*).
 //
-// Vapor bug, ported faithfully: WealthAutomationCoding.json/decode round-trip
-// screen groups and results through ScenarioJSON, whose wire shape is
-// {"values": {...}}. Encoding an envelope ({"groups": [...]}) and decoding it
-// as ScenarioJSON always fails (no "values" key), and decoding a stored
-// ScenarioJSON back into an envelope always fails (no "groups"/"matches").
-// So in Vapor 37128c4:
-//   - create and update validate the request, then answer 400 "No such key
-//     'values'" without saving anything;
-//   - any read of an existing screen answers 400 "No such key 'groups'" (or a
-//     500 from Fluent when the stored jsonb is not ScenarioJSON-shaped);
-//   - history answers [] for a screen without evaluations, else 400 "No such
-//     key 'matches'";
-//   - evaluate never reaches the market data lookups: it fails decoding the
-//     screen definition first. The evaluation pipeline (quotes, ratios,
-//     inbox alerts) is therefore unreachable and not ported here.
-// Only the catalog, an empty list, delete, and the 404s behave as designed.
+// v2 fix: Vapor 37128c4 round-tripped screen groups and results through
+// WealthAutomationCoding, whose ScenarioJSON decode always failed (no
+// "values" key), so create/update never saved (400 "No such key 'values'"),
+// every stored screen answered 400 "No such key 'groups'", and evaluation
+// (quotes, ratios, inbox alerts) was unreachable. v2 stores groups and
+// results as {"values": {...snake_case...}} (screenCodingJSON) and reads them
+// back (screenCodingDecode); evaluation is in screens_eval.go.
 
 // Screen enum raw values (StockPlanShared).
 var (
@@ -74,7 +66,7 @@ type screenCondition struct {
 	Metric     string           `json:"metric"`
 	Comparison screenComparison `json:"comparison"`
 	Period     screenPeriod     `json:"period"`
-	Value      *float64         `json:"value"`
+	Value      *float64         `json:"value,omitempty"`
 }
 
 // screenGroup is WatchlistScreenGroup.
@@ -145,21 +137,51 @@ func (h *handlers) requireSmartScreening(c *echo.Context) (*auth.Session, error)
 	return s, nil
 }
 
-// errScreenGroupsDecode is WealthAutomationCoding.decode(ScreenGroupsEnvelope)
-// on any stored ScenarioJSON.
-var errScreenGroupsDecode = keyNotFound("groups", "")
+// watchlistScreen is StockPlanShared.WatchlistScreen.
+type watchlistScreen struct {
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	WatchlistListIDs []string              `json:"watchlistListIds"`
+	LogicalOperator  screenLogicalOperator `json:"logicalOperator"`
+	Groups           []screenGroup         `json:"groups"`
+	AlertsEnabled    bool                  `json:"alertsEnabled"`
+	LastEvaluatedAt  *string               `json:"lastEvaluatedAt,omitempty"`
+	CreatedAt        *string               `json:"createdAt,omitempty"`
+	UpdatedAt        *string               `json:"updatedAt,omitempty"`
+}
 
-// errScreenResultsDecode is the same for ScreenResultsEnvelope.
-var errScreenResultsDecode = keyNotFound("matches", "")
+// screenGroupsEnvelope is the controller's private ScreenGroupsEnvelope.
+type screenGroupsEnvelope struct {
+	Groups []screenGroup `json:"groups"`
+}
 
-// errScreenGroupsEncode is WealthAutomationCoding.json(ScreenGroupsEnvelope).
-var errScreenGroupsEncode = keyNotFound("values", "")
-
-// loadScreen is Fluent loading a watchlist_screens row: its groups column
-// must decode as ScenarioJSON.
-func loadScreen(m watchlistdb.WatchlistScreen) error {
-	_, err := loadScenarioJSON(m.Groups, "groups")
-	return err
+// screenResponse is WealthAutomationController.screenResponse.
+func screenResponse(m watchlistdb.WatchlistScreen) (watchlistScreen, error) {
+	stored, err := loadScenarioJSON(m.Groups, "groups")
+	if err != nil {
+		return watchlistScreen{}, err
+	}
+	var envelope screenGroupsEnvelope
+	if err := screenCodingDecode(stored, &envelope); err != nil {
+		return watchlistScreen{}, err
+	}
+	if envelope.Groups == nil {
+		envelope.Groups = []screenGroup{}
+	}
+	ids := make([]string, len(m.WatchlistListIds))
+	for i, id := range m.WatchlistListIds {
+		ids[i] = apijson.FormatUUID(id)
+	}
+	op := screenLogicalOperator(m.LogicalOperator)
+	if !slices.Contains(screenLogicalOperators, m.LogicalOperator) {
+		op = "all"
+	}
+	return watchlistScreen{
+		ID: apijson.FormatUUID(m.ID), Name: m.Name, WatchlistListIDs: ids, LogicalOperator: op,
+		Groups: envelope.Groups, AlertsEnabled: m.AlertsEnabled,
+		LastEvaluatedAt: formatISOSeconds(m.LastEvaluatedAt), CreatedAt: formatISOSeconds(m.CreatedAt),
+		UpdatedAt: formatISOSeconds(m.UpdatedAt),
+	}, nil
 }
 
 // ownedScreen is WealthAutomationController.ownedScreen.
@@ -172,10 +194,7 @@ func (h *handlers) ownedScreen(c *echo.Context, userID uuid.UUID) (watchlistdb.W
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, httpx.NotFound("")
 	}
-	if err != nil {
-		return m, err
-	}
-	return m, loadScreen(m)
+	return m, err
 }
 
 func (h *handlers) screenCatalog(c *echo.Context) error {
@@ -194,15 +213,15 @@ func (h *handlers) listScreens(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	out := make([]watchlistScreen, 0, len(rows))
 	for i := range rows {
-		if err := loadScreen(rows[i]); err != nil {
+		screen, err := screenResponse(rows[i])
+		if err != nil {
 			return err
 		}
+		out = append(out, screen)
 	}
-	if len(rows) > 0 {
-		return errScreenGroupsDecode
-	}
-	return httpx.OK(c, []any{})
+	return httpx.OK(c, out)
 }
 
 func (h *handlers) getScreen(c *echo.Context) error {
@@ -210,10 +229,15 @@ func (h *handlers) getScreen(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := h.ownedScreen(c, s.UserID); err != nil {
+	m, err := h.ownedScreen(c, s.UserID)
+	if err != nil {
 		return err
 	}
-	return errScreenGroupsDecode
+	screen, err := screenResponse(m)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, screen)
 }
 
 func (h *handlers) screenHistory(c *echo.Context) error {
@@ -231,15 +255,15 @@ func (h *handlers) screenHistory(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	out := make([]screenEvaluation, 0, len(evals))
 	for _, e := range evals {
-		if _, err := loadScenarioJSON(e.Result, "result"); err != nil {
+		ev, err := screenEvaluationResponse(e)
+		if err != nil {
 			return err
 		}
+		out = append(out, ev)
 	}
-	if len(evals) > 0 {
-		return errScreenResultsDecode
-	}
-	return httpx.OK(c, []any{})
+	return httpx.OK(c, out)
 }
 
 // validateScreen is WealthAutomationController.validateScreen.
@@ -312,6 +336,24 @@ func validateScreenShape(in screenUpsertRequest) string {
 	return ""
 }
 
+// screenRow is the controller's apply(_:to:userId:).
+func screenRow(in screenUpsertRequest) (name string, ids []uuid.UUID, groups []byte, err error) {
+	for _, raw := range in.WatchlistListIDs {
+		if id, ok := parseSwiftUUID(raw); ok {
+			ids = append(ids, id)
+		}
+	}
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
+	stored, err := screenCodingJSON(screenGroupsEnvelope{Groups: in.Groups})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	groups, err = json.Marshal(stored)
+	return strings.TrimSpace(in.Name), ids, groups, err
+}
+
 func (h *handlers) createScreen(c *echo.Context) error {
 	s, err := h.requireSmartScreening(c)
 	if err != nil {
@@ -324,7 +366,26 @@ func (h *handlers) createScreen(c *echo.Context) error {
 	if err := h.validateScreen(c, in, s.UserID); err != nil {
 		return err
 	}
-	return errScreenGroupsEncode
+	name, ids, groups, err := screenRow(in)
+	if err != nil {
+		return err
+	}
+	now := h.now()
+	m := watchlistdb.WatchlistScreen{
+		ID: uuid.New(), UserID: s.UserID, Name: name, WatchlistListIds: ids, LogicalOperator: string(in.LogicalOperator),
+		Groups: groups, AlertsEnabled: in.AlertsEnabled, CreatedAt: &now, UpdatedAt: &now,
+	}
+	if err := h.q.InsertWatchlistScreen(c.Request().Context(), watchlistdb.InsertWatchlistScreenParams{
+		ID: m.ID, UserID: m.UserID, Name: m.Name, WatchlistListIds: m.WatchlistListIds, LogicalOperator: m.LogicalOperator,
+		Groups: m.Groups, AlertsEnabled: m.AlertsEnabled, Now: &now,
+	}); err != nil {
+		return err
+	}
+	screen, err := screenResponse(m)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, screen)
 }
 
 func (h *handlers) updateScreen(c *echo.Context) error {
@@ -332,7 +393,8 @@ func (h *handlers) updateScreen(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := h.ownedScreen(c, s.UserID); err != nil {
+	m, err := h.ownedScreen(c, s.UserID)
+	if err != nil {
 		return err
 	}
 	var in screenUpsertRequest
@@ -342,7 +404,31 @@ func (h *handlers) updateScreen(c *echo.Context) error {
 	if err := h.validateScreen(c, in, s.UserID); err != nil {
 		return err
 	}
-	return errScreenGroupsEncode
+	name, ids, groups, err := screenRow(in)
+	if err != nil {
+		return err
+	}
+	now := h.now()
+	ctx := c.Request().Context()
+	if err := pgx.BeginFunc(ctx, h.d.DB, func(tx pgx.Tx) error {
+		q := h.q.WithTx(tx)
+		if err := q.DeleteScreenEvaluations(ctx, m.ID); err != nil {
+			return err
+		}
+		return q.UpdateWatchlistScreen(ctx, watchlistdb.UpdateWatchlistScreenParams{
+			ID: m.ID, Name: name, WatchlistListIds: ids, LogicalOperator: string(in.LogicalOperator),
+			Groups: groups, AlertsEnabled: in.AlertsEnabled, Now: &now,
+		})
+	}); err != nil {
+		return err
+	}
+	m.Name, m.WatchlistListIds, m.LogicalOperator, m.Groups = name, ids, string(in.LogicalOperator), groups
+	m.AlertsEnabled, m.LastEvaluatedAt, m.UpdatedAt = in.AlertsEnabled, nil, &now
+	screen, err := screenResponse(m)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, screen)
 }
 
 func (h *handlers) deleteScreen(c *echo.Context) error {
@@ -365,8 +451,17 @@ func (h *handlers) evaluateScreen(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := h.ownedScreen(c, s.UserID); err != nil {
+	m, err := h.ownedScreen(c, s.UserID)
+	if err != nil {
 		return err
 	}
-	return errScreenGroupsDecode
+	market, err := h.screenMarket()
+	if err != nil {
+		return err
+	}
+	out, err := evaluateScreen(c.Request().Context(), screenEvalDeps{d: h.d, q: h.q, market: market, now: h.now}, m, s.UserID, false)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, out)
 }

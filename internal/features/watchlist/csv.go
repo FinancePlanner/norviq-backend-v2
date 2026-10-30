@@ -375,10 +375,21 @@ func (h *handlers) importCSVCommit(c *echo.Context) error {
 		return err
 	}
 	newCount := 0
+	var newSymbols []string
 	for _, it := range unique {
 		if _, ok := existing[it.Symbol]; !ok {
 			newCount++
+			newSymbols = append(newSymbols, it.Symbol)
 		}
+	}
+	// Refuse before writing anything rather than failing half-way on the
+	// (user_id, symbol) constraint (see conflict.go).
+	clash, err := h.symbolsInOtherLists(ctx, s.UserID, listID, newSymbols)
+	if err != nil {
+		return err
+	}
+	if len(clash) > 0 {
+		return crossListConflictFor(clash)
 	}
 	if newCount > 0 {
 		current, err := h.q.CountWatchlistItems(ctx, s.UserID)
@@ -416,7 +427,7 @@ func (h *handlers) importCSVCommit(c *echo.Context) error {
 			Note: it.Note, Status: statusActive, Now: h.now(),
 		})
 		if err != nil {
-			return err
+			return crossListConflict(err)
 		}
 		inserted = append(inserted, makeItemResponse(created))
 	}

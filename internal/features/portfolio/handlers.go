@@ -3,8 +3,10 @@ package portfolio
 import (
 	"errors"
 	"math"
+	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
@@ -210,15 +212,19 @@ func (h *handlers) sectorExposure(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	stocks, err := filter.Stocks(ctx, h.d.DB)
+	// Vapor valued each stock row at cost (shares × buy price) and did not
+	// merge rows of the same symbol. v2 uses the portfolio valuation the
+	// summary uses: one position per symbol at its live price (cost when
+	// unpriced).
+	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation)
 	if err != nil {
 		return err
 	}
-	cash, err := filter.CashBalance(ctx, h.d.DB)
-	if err != nil {
-		return err
+	cash := v.CashBalance
+	symbols := make([]string, 0, len(v.Holdings))
+	for _, hd := range v.Holdings {
+		symbols = append(symbols, hd.Symbol)
 	}
-	symbols := UniqueSymbols(stockSymbols(stocks))
 	notesBySymbol := map[string][]portfoliodb.ResearchNote{}
 	if len(symbols) > 0 {
 		notes, err := portfoliodb.New(h.d.DB).ResearchNotesForSymbols(ctx, portfoliodb.ResearchNotesForSymbolsParams{UserID: filter.DataOwnerUserID, Symbols: symbols})
@@ -237,16 +243,14 @@ func (h *handlers) sectorExposure(c *echo.Context) error {
 	sectorValues := map[string]float64{}
 	var sectorOrder []string
 	holdingsBySector := map[string][]sectorHolding{}
-	for iSt := range stocks {
-		st := &stocks[iSt]
-		value := float64(st.Shares * st.BuyPrice)
-		sym := NormalizeSymbol(st.Symbol)
-		sector := inferSector(sym, notesBySymbol[sym])
+	for _, hd := range v.Holdings {
+		value := hd.MarketValue
+		sector := inferSector(hd.Symbol, notesBySymbol[hd.Symbol])
 		if _, ok := sectorValues[sector]; !ok {
 			sectorOrder = append(sectorOrder, sector)
 		}
 		sectorValues[sector] += value
-		holdingsBySector[sector] = append(holdingsBySector[sector], sectorHolding{Symbol: sym, Value: round2(value)})
+		holdingsBySector[sector] = append(holdingsBySector[sector], sectorHolding{Symbol: hd.Symbol, Value: round2(value)})
 	}
 	invested := 0.0
 	for _, sector := range sectorOrder {
@@ -295,9 +299,19 @@ func inferSector(symbol string, notes []portfoliodb.ResearchNote) string {
 		}
 	}
 	blob := strings.ToLower(strings.Join(parts, " "))
-	has := func(words ...string) bool {
-		for _, w := range words {
-			if strings.Contains(blob, w) {
+	words := strings.FieldsFunc(blob, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	// Vapor matched every keyword as a substring, so "ai" made any note
+	// containing "retail", "said" or "maintain" Technology. Short keywords
+	// now match whole words only.
+	has := func(keywords ...string) bool {
+		for _, k := range keywords {
+			if len(k) > 2 {
+				if strings.Contains(blob, k) {
+					return true
+				}
+				continue
+			}
+			if slices.Contains(words, k) {
 				return true
 			}
 		}
@@ -556,7 +570,7 @@ func (h *handlers) createPortfolioList(c *echo.Context) error {
 	}
 	list, err := portfoliocoredb.New(h.d.DB).InsertPortfolioList(ctx, portfolios.NewPortfolioListParams(s.UserID, name, false))
 	if err != nil {
-		return err
+		return portfolios.ListNameConflict(err)
 	}
 	// Vapor also bumped an in-process Prometheus counter
 	// (businessMetrics.incrementPortfoliosCreated); v2 has none.
@@ -602,7 +616,7 @@ func (h *handlers) updatePortfolioList(c *echo.Context) error {
 	now := portfolios.Now()
 	list, err := portfoliodb.New(h.d.DB).RenamePortfolioList(ctx, portfoliodb.RenamePortfolioListParams{ID: listID, Name: name, UpdatedAt: &now})
 	if err != nil {
-		return err
+		return portfolios.ListNameConflict(err)
 	}
 	return httpx.OK(c, listResponse(portfoliocoredb.PortfolioList(list)))
 }

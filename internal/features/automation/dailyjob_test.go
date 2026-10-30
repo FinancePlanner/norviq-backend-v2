@@ -2,6 +2,7 @@ package automation_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,48 +124,72 @@ func TestDailyJobLeaseAndBudgets(t *testing.T) {
 	}
 }
 
-func TestDailyJobRebalancingAndScreensNeverWrite(t *testing.T) {
-	e := newJobEnv(t)
+type priceMarket struct{}
+
+func (priceMarket) Quote(context.Context, string) (float64, string, error) { return 50, "USD", nil }
+func (priceMarket) Fx(context.Context, string) (float64, error)            { return 1, nil }
+func (priceMarket) CryptoQuote(context.Context, string) (float64, bool, error) {
+	return 0, false, nil
+}
+
+// Regression: in Vapor the stored policy never decoded, so a due policy never
+// produced an event or a push.
+func TestDailyJobRebalancingCreatesEventAndPush(t *testing.T) {
+	app := testutil.NewApp(t, []server.Feature{})
+	runner, err := automation.DailyJob{Market: priceMarket{}, Now: time.Now}.Runner(app.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &jobEnv{App: app, t: t, runner: runner}
 	owner := e.proUser("owner@example.com")
 	list := uuid.New()
 	e.exec(`INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'P', now())`, list, owner)
 	e.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
 		VALUES ($1, $2, 'ACME', 10, 40, '2024-01-01', now(), $3)`, uuid.New(), owner, list)
+	policy := uuid.New()
 	e.exec(`INSERT INTO rebalancing_policies (id, user_id, portfolio_list_id, base_currency, cadence, drift_threshold, targets, enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, 'USD', 'monthly', 0.01, $4::jsonb, true, '2026-01-01', '2026-01-01')`, uuid.New(), owner, list, storedTargets)
-	e.exec(`INSERT INTO watchlist_screens (id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled)
-		VALUES ($1, $2, 'S', '{}', 'all', '{"values":{"groups":[]}}', true)`, uuid.New(), owner)
-	snap := e.overBudget(owner)
+		VALUES ($1, $2, $3, 'USD', 'monthly', 0.01, $4::jsonb, true, '2026-01-01', '2026-01-01')`, policy, owner, list, storedTargets)
 
 	e.runner.RunOnce(context.Background())
-	// Vapor bug, ported: the stored policy never decodes, so no event and no push.
-	if n := e.count(`SELECT count(*) FROM rebalance_events`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM rebalance_events WHERE policy_id = $1 AND status = 'pending'`, policy); n != 1 {
 		t.Fatalf("events %d", n)
 	}
-	if n := e.count(`SELECT count(*) FROM notification_events WHERE kind = 'rebalancing'`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM rebalancing_policies WHERE id = $1 AND last_triggered_at IS NOT NULL`, policy); n != 1 {
+		t.Fatal("policy not marked triggered")
+	}
+	if n := e.count(`SELECT count(*) FROM notification_events WHERE user_id = $1 AND kind = 'rebalancing'`, owner); n != 1 {
 		t.Fatalf("rebalancing notifications %d", n)
 	}
-	if n := e.count(`SELECT count(*) FROM watchlist_screen_evaluations`); n != 0 {
-		t.Fatalf("screen evaluations %d", n)
+	// The stored event reads back through the API's decoder.
+	var preview string
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT preview::text FROM rebalance_events WHERE policy_id = $1`, policy).Scan(&preview); err != nil {
+		t.Fatal(err)
 	}
-	// Per-policy and per-screen failures do not stop the budget pass.
-	if n := e.count(`SELECT count(*) FROM budget_drift_alert_states WHERE snapshot_id = $1`, snap); n == 0 {
-		t.Fatal("budgets skipped")
+	if !strings.Contains(preview, `"values"`) || !strings.Contains(preview, `"trigger_reasons"`) {
+		t.Fatalf("stored preview %s", preview)
+	}
+	// Cooldown and the pending event stop a second event.
+	e.freeLease()
+	e.runner.RunOnce(context.Background())
+	if n := e.count(`SELECT count(*) FROM rebalance_events WHERE policy_id = $1`, policy); n != 1 {
+		t.Fatalf("second run created events: %d", n)
 	}
 }
 
-func TestDailyJobUndecodableRowAbortsRun(t *testing.T) {
+// Regression: in Vapor one row whose stored jsonb did not decode aborted the
+// whole run, budget pass included. v2 logs and skips that row.
+func TestDailyJobUndecodableRowIsSkipped(t *testing.T) {
 	e := newJobEnv(t)
 	owner := e.proUser("owner@example.com")
 	list := uuid.New()
 	e.exec(`INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'P', now())`, list, owner)
-	// Fluent's .all() decodes every policy's targets as ScenarioJSON; this one
-	// does not, so the whole run fails before the budget pass.
 	e.exec(`INSERT INTO rebalancing_policies (id, user_id, portfolio_list_id, base_currency, cadence, targets, enabled)
 		VALUES ($1, $2, $3, 'USD', 'monthly', '[1]', true)`, uuid.New(), owner, list)
+	e.exec(`INSERT INTO watchlist_screens (id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled)
+		VALUES ($1, $2, 'S', '{}', 'all', '[1]', true)`, uuid.New(), owner)
 	snap := e.overBudget(owner)
 	e.runner.RunOnce(context.Background())
-	if n := e.count(`SELECT count(*) FROM budget_drift_alert_states WHERE snapshot_id = $1`, snap); n != 0 {
-		t.Fatalf("budget pass ran: %d", n)
+	if n := e.count(`SELECT count(*) FROM budget_drift_alert_states WHERE snapshot_id = $1`, snap); n == 0 {
+		t.Fatal("budget pass skipped")
 	}
 }

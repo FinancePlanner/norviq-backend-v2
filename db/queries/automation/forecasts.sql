@@ -35,3 +35,9 @@ SELECT amount, user_share_percent FROM expenses WHERE user_id = $1 AND occurred_
 
 -- name: ForecastCryptoItemIDs :many
 SELECT id FROM crypto_portfolio_items WHERE user_id = $1;
+
+-- name: InsertNetWorthForecastRun :exec
+INSERT INTO net_worth_forecast_runs (
+    id, user_id, forecast_id, status, starting_value, assumptions, timeline, target_probability, seed,
+    failure_reason, created_at, completed_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);

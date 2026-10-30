@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -545,6 +546,11 @@ func (h *handler) acceptSuggestion(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Only a proposed suggestion can be accepted. Vapor accepted accepted
+	// and dismissed ones again, creating another draft each time.
+	if suggestion.Status != suggestionProposed {
+		return httpx.Conflict("Suggestion is no longer open")
+	}
 	ctx := c.Request().Context()
 	destination := destinationGoal
 	switch suggestion.Kind {
@@ -637,13 +643,21 @@ func (h *handler) bulkUpdate(c *echo.Context) error {
 	if err := swiftjson.DecodeRequest(c, &in); err != nil {
 		return err
 	}
+	// A repeated id counts once (Vapor answered 404 "Financial goal not
+	// found" for it); the response follows the request's order.
 	ids := make([]uuid.UUID, 0, len(in.GoalIDs))
+	position := map[uuid.UUID]int{}
 	for _, raw := range in.GoalIDs {
-		if id, ok := portfolios.ParseSwiftUUID(raw); ok {
+		id, ok := portfolios.ParseSwiftUUID(raw)
+		if !ok {
+			return httpx.BadRequest("Invalid goal ids")
+		}
+		if _, seen := position[id]; !seen {
+			position[id] = len(ids)
 			ids = append(ids, id)
 		}
 	}
-	if len(ids) != len(in.GoalIDs) || len(ids) == 0 {
+	if len(ids) == 0 {
 		return httpx.BadRequest("Invalid goal ids")
 	}
 	ctx := c.Request().Context()
@@ -654,6 +668,7 @@ func (h *handler) bulkUpdate(c *echo.Context) error {
 	if len(goals) != len(ids) {
 		return ownedGoalNotFound()
 	}
+	sort.Slice(goals, func(i, j int) bool { return position[goals[i].ID] < position[goals[j].ID] })
 	if in.Status == statusActive {
 		currentlyActive, err := h.svc.q.CountActiveFinancialGoalsNotIn(ctx, goalplanningdb.CountActiveFinancialGoalsNotInParams{UserID: s.UserID, Ids: ids})
 		if err != nil {

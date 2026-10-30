@@ -4,12 +4,10 @@
 // (forecasts.go). Watchlist screens and the notifications inbox in the same
 // Vapor controller belong to other porters.
 //
-// Vapor's rebalancing feature cannot work: WealthAutomationCoding round-trips
-// every stored value through ScenarioJSON, whose synthesized Codable wraps
-// the dictionary in a "values" key. So PUT always answers 400 before saving,
-// and reading any stored policy or event answers 400 (see codingJSON and
-// codingDecode). Ported faithfully; GET with no policy (404), events with no
-// policy or no events ([]) and DELETE are the paths that do work.
+// Stored targets and event previews are ScenarioJSON jsonb
+// ({"values": {...snake_case...}}), written by codingJSON and read back by
+// codingDecode. v2 fix: in Vapor that round trip could never succeed, so
+// PUT always answered 400 "No such key 'values'" and nothing was saved.
 package automation
 
 import (
@@ -161,11 +159,10 @@ func (h *handler) upsertPolicy(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	targets, err := codingJSON(input.Targets)
+	targets, err := codingJSON(rebalanceTargetsEnvelope{Targets: input.Targets})
 	if err != nil {
 		return err
 	}
-	// Unreachable while codingJSON fails (see the package doc); kept 1:1.
 	targetsJSON, err := apijson.Marshal(targets)
 	if err != nil {
 		return err
@@ -249,7 +246,7 @@ func (h *handler) makePreview(ctx context.Context, row automationdb.RebalancingP
 	}
 	out, err := Preview(policy, valuations, policy.BaseCurrency, time.Now())
 	if err != nil {
-		return RebalancePreview{}, err
+		return RebalancePreview{}, engineError(err)
 	}
 	out.Warnings = warnings
 	return out, nil
@@ -292,11 +289,11 @@ func (h *handler) events(c *echo.Context) error {
 
 // pendingEvent loads the policy and the user's pending event for the
 // confirm/dismiss handlers: 404 when any is missing, 409 unless pending.
-func (h *handler) pendingEvent(c *echo.Context) (automationdb.RebalancingPolicy, automationdb.RebalanceEvent, scenarios.ScenarioJSON, error) {
+func (h *handler) pendingEvent(c *echo.Context) (automationdb.RebalancingPolicy, automationdb.RebalanceEvent, RebalancePreview, error) {
 	var (
 		policy automationdb.RebalancingPolicy
 		event  automationdb.RebalanceEvent
-		none   scenarios.ScenarioJSON
+		none   RebalancePreview
 	)
 	userID, listID, err := h.rebalanceContext(c)
 	if err != nil {
@@ -321,8 +318,14 @@ func (h *handler) pendingEvent(c *echo.Context) (automationdb.RebalancingPolicy,
 	if err != nil {
 		return policy, event, none, err
 	}
-	preview, err := scenarios.ParseScenarioJSON(event.Preview)
+	stored, err := scenarios.ParseScenarioJSON(event.Preview)
 	if err != nil {
+		return policy, event, none, err
+	}
+	// Decoded before any write, so confirm/dismiss never write and then fail
+	// rendering the response (Vapor wrote first, then answered 400).
+	var preview RebalancePreview
+	if err := codingDecode(stored, &preview); err != nil {
 		return policy, event, none, err
 	}
 	if event.Status != string(StatusPending) {
@@ -354,11 +357,7 @@ func (h *handler) confirmEvent(c *echo.Context) error {
 		return err
 	}
 	event.Status, event.ConfirmedAt = string(StatusConfirmed), &now
-	out, err := eventResponse(event, preview)
-	if err != nil {
-		return err
-	}
-	return httpx.OK(c, out)
+	return httpx.OK(c, eventFromRow(event, preview))
 }
 
 func (h *handler) dismissEvent(c *echo.Context) error {
@@ -373,11 +372,7 @@ func (h *handler) dismissEvent(c *echo.Context) error {
 		return err
 	}
 	event.Status, event.DismissedAt = string(StatusDismissed), &now
-	out, err := eventResponse(event, preview)
-	if err != nil {
-		return err
-	}
-	return httpx.OK(c, out)
+	return httpx.OK(c, eventFromRow(event, preview))
 }
 
 // policyResponse is rebalancingPolicyResponse.
@@ -409,6 +404,11 @@ func eventResponse(row automationdb.RebalanceEvent, stored scenarios.ScenarioJSO
 	if err := codingDecode(stored, &preview); err != nil {
 		return RebalanceEvent{}, err
 	}
+	return eventFromRow(row, preview), nil
+}
+
+// eventFromRow builds the RebalanceEvent from a row and its decoded preview.
+func eventFromRow(row automationdb.RebalanceEvent, preview RebalancePreview) RebalanceEvent {
 	status := RebalanceEventStatus(row.Status)
 	switch status {
 	case StatusPending, StatusConfirmed, StatusDismissed:
@@ -423,7 +423,7 @@ func eventResponse(row automationdb.RebalanceEvent, stored scenarios.ScenarioJSO
 		ID: apijson.FormatUUID(row.ID), PolicyID: apijson.FormatUUID(row.PolicyID), Status: status,
 		Preview: preview, CreatedAt: created,
 		ConfirmedAt: timestamp(row.ConfirmedAt), DismissedAt: timestamp(row.DismissedAt),
-	}, nil
+	}
 }
 
 // timestamp is WealthAutomationCoding.timestamp: ISO8601DateFormatter()

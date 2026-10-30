@@ -2,13 +2,13 @@ package automation
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"sort"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/scenarios"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/portfolios"
@@ -149,10 +149,33 @@ type rebalanceTargetsEnvelope struct {
 }
 
 // ValidationError is WealthAutomationValidationError. Vapor rendered a
-// thrown case as a 500 whose reason (outside production) is the case name.
+// case thrown by the engine as a 500 whose reason is the case name; v2 maps
+// it to a 422 with a readable reason (engineError).
 type ValidationError string
 
 func (e ValidationError) Error() string { return string(e) }
+
+// engineError maps a ValidationError thrown by WealthRebalancingEngine to a
+// 422. v2 fix: Vapor answered 500 (e.g. "invalidAmount" for a portfolio
+// worth nothing).
+func engineError(err error) error {
+	var ve ValidationError
+	if !errors.As(err, &ve) {
+		return err
+	}
+	switch ve {
+	case ErrInvalidAmount:
+		return httpx.Unprocessable("Rebalancing requires a portfolio with a positive value.")
+	case ErrInvalidCurrency:
+		return httpx.Unprocessable("Rebalancing policy has an invalid base currency.")
+	case ErrMissingTrigger:
+		return httpx.Unprocessable("Rebalancing policy needs a cadence or a drift threshold.")
+	case ErrDuplicateAllocation:
+		return httpx.Unprocessable("Rebalancing policy has duplicate or incomplete targets.")
+	default:
+		return httpx.Unprocessable("Rebalancing policy targets are invalid.")
+	}
+}
 
 const (
 	ErrInvalidCurrency     ValidationError = "invalidCurrency"
@@ -410,37 +433,41 @@ func valuationsFromSnapshot(snap scenarios.Snapshot) ([]RebalanceValuation, []st
 	return out, warnings, nil
 }
 
-// codingJSON is WealthAutomationCoding.json(["targets": targets]): encode
-// with .convertToSnakeCase, then decode the bytes as ScenarioJSON. Since
-// ScenarioJSON's synthesized Codable wants a "values" key the dictionary
-// does not have, this always fails with Vapor's keyNotFound 400 (Vapor bug,
-// ported: PUT never saves).
-func codingJSON(targets []RebalanceTarget) (scenarios.ScenarioJSON, error) {
-	snake := make([]map[string]any, len(targets))
-	for i, t := range targets {
-		m := map[string]any{"id": t.ID, "kind": t.Kind, "target_weight": t.TargetWeight}
-		if t.Symbol != nil {
-			m["symbol"] = *t.Symbol
-		}
-		snake[i] = m
-	}
-	data, err := json.Marshal(map[string]any{"targets": snake})
+// codingJSON is WealthAutomationCoding.json(_:) as Vapor meant it: encode v
+// with .convertToSnakeCase and keep the resulting object as the ScenarioJSON
+// values, so the column is stored as {"values": {...snake_case...}}.
+//
+// v2 fix: Vapor decoded ScenarioJSON from the encoded object itself, which
+// has no "values" key, so every write failed with a 400 "No such key
+// 'values'" and nothing (policy, event, forecast run) was ever stored.
+func codingJSON(v any) (scenarios.ScenarioJSON, error) {
+	data, err := json.Marshal(v)
 	if err != nil {
+		// JSONEncoder refuses non-finite doubles: EncodingError -> 500.
 		return scenarios.ScenarioJSON{}, err
 	}
-	var out scenarios.ScenarioJSON
-	if err := portfolios.DecodeSwift(data, &out, portfolios.KeysConvertFromSnakeCase); err != nil {
+	var generic map[string]any
+	if err := json.Unmarshal(data, &generic); err != nil {
 		return scenarios.ScenarioJSON{}, err
 	}
-	return out, nil
+	values, _ := snakeKeys(generic).(map[string]any)
+	if values == nil {
+		values = map[string]any{}
+	}
+	return scenarios.ScenarioJSON{Values: values}, nil
 }
 
-// codingDecode is WealthAutomationCoding.decode(T.self, from:): it encodes
-// the ScenarioJSON itself ({"values": …}) and decodes T from that, so a T
-// without a "values" property fails on its first required key (Vapor bug,
-// ported: every stored policy and event answers 400).
+// codingDecode is WealthAutomationCoding.decode(T.self, from:) as Vapor meant
+// it: decode T (with .convertFromSnakeCase) from the ScenarioJSON values.
+//
+// v2 fix: Vapor encoded the ScenarioJSON wrapper itself ({"values": ...}) and
+// decoded T from that, so every stored policy, event and run answered 400.
 func codingDecode(value scenarios.ScenarioJSON, v any) error {
-	data, err := apijson.Marshal(value)
+	values := value.Values
+	if values == nil {
+		values = map[string]any{}
+	}
+	data, err := json.Marshal(values)
 	if err != nil {
 		return err
 	}

@@ -311,10 +311,12 @@ func TestSectorExposureAndDividends(t *testing.T) {
 	h.stock(user, list, "ZZZ", 1, 50)
 	h.stock(user, list, "ZERO", 0, 50)
 	h.exec(`INSERT INTO research_notes (id, user_id, symbol, title, thesis, created_at) VALUES ($1, $2, 'JPM', 'Big Bank', 'x', now())`, uuid.New(), user)
+	// "retail" contains "ai": Vapor's substring match made this Technology.
+	h.exec(`INSERT INTO research_notes (id, user_id, symbol, title, thesis, created_at) VALUES ($1, $2, 'ZZZ', 'Big retail chain', 'x', now())`, uuid.New(), user)
 
 	r := h.Do(http.MethodGet, "/v1/portfolio/sector-exposure", h.Token(user), nil)
 	ok(t, r, 200)
-	var s struct {
+	type exposure struct {
 		TotalValue    float64 `json:"totalValue"`
 		InvestedValue float64 `json:"investedValue"`
 		BenchmarkName string  `json:"benchmarkName"`
@@ -324,16 +326,34 @@ func TestSectorExposureAndDividends(t *testing.T) {
 			WeightPercent float64 `json:"weightPercent"`
 			Holdings      []struct {
 				Symbol        string  `json:"symbol"`
+				Value         float64 `json:"value"`
 				WeightPercent float64 `json:"weightPercent"`
 			} `json:"holdings"`
 		} `json:"sectors"`
 	}
+	var s exposure
 	r.JSON(t, &s)
 	if s.InvestedValue != 1450 || s.TotalValue != 1450 || s.BenchmarkName != "S&P 500" || len(s.Sectors) != 3 ||
 		s.Sectors[0].Sector != "Financials" || s.Sectors[0].Holdings[0].Symbol != "JPM" || s.Sectors[1].Sector != "Energy" ||
-		s.Sectors[2].Sector != "Unknown" || len(s.Sectors[2].Holdings) != 2 || s.Sectors[0].WeightPercent != 68.97 {
+		s.Sectors[2].Sector != "Consumer" || len(s.Sectors[2].Holdings) != 1 || s.Sectors[0].WeightPercent != 68.97 {
 		t.Fatalf("%s", r.Body)
 	}
+
+	// Rows of one symbol in two lists merge into one position, and a live
+	// quote values it at market (Vapor: one entry per row, at cost).
+	other := h.list(user, "Other", false)
+	h.stock(user, other, "JPM", 2, 100)
+	h.quotes.fail = false
+	h.quotes.quotes = map[string]marketdata.QuoteResponse{"XLE": {Symbol: "XLE", CurrentPrice: 100}}
+	r = h.Do(http.MethodGet, "/v1/portfolio/sector-exposure", h.Token(user), nil)
+	ok(t, r, 200)
+	s = exposure{}
+	r.JSON(t, &s)
+	if s.InvestedValue != 1750 || len(s.Sectors) != 3 || len(s.Sectors[0].Holdings) != 1 || s.Sectors[0].Holdings[0].Value != 1200 ||
+		s.Sectors[1].Value != 500 || s.Sectors[0].WeightPercent != 68.57 {
+		t.Fatalf("%s", r.Body)
+	}
+	h.quotes.fail = true
 
 	r = h.Do(http.MethodGet, "/v1/portfolio/dividends", h.Token(user), nil)
 	ok(t, r, 200)
@@ -354,8 +374,8 @@ func TestSectorExposureAndDividends(t *testing.T) {
 		perShare[u.Symbol] = u.AmountPerShare
 	}
 	// Row order is Postgres's (Vapor sorted nothing); the zero-share row is skipped.
-	if math.Abs(d.Annual-72.5) > 1e-9 || len(d.Upcoming) != 3 || perShare["jpm"] != 5 || perShare["XLE"] != 4 ||
-		len(d.Monthly) != 4 || d.Monthly[3].Month != "2027-04" || d.Monthly[0].Amount != 18.125 {
+	if math.Abs(d.Annual-82.5) > 1e-9 || len(d.Upcoming) != 4 || perShare["jpm"] != 5 || perShare["XLE"] != 4 ||
+		len(d.Monthly) != 4 || d.Monthly[3].Month != "2027-04" || d.Monthly[0].Amount != 20.625 {
 		t.Fatalf("%s", r.Body)
 	}
 }

@@ -91,7 +91,12 @@ the Vapor repo.** The faithfully ported bugs are fixed in Go, after cutover.
 | 3 | planning, scenarios, goals, retirement, rebalancing, automation, financing, statistics, reporting, recap, pilots, terminal positions, export, sharing, messaging, internal metrics | the remaining routes |
 | 4 | jobs flip, full parity sweep on staging, cutover, archive Vapor | |
 
-Progress: `scripts/coverage.sh`.
+Progress: `scripts/coverage.sh` (693/693 since 5fce96b).
+
+**The Vapor repo is archived** (GitHub `FinancePlanner/norviq-backend`, read-only
+since 2026-10-30). New backend features land here only. Vapor still runs as
+release `api` until cutover: the proxy target for prefixes not yet in
+`V2_NATIVE_PREFIXES`, and the owner of every background job and the schema.
 
 ## Hosting (platform/infra)
 
@@ -125,3 +130,17 @@ API-side needs from web-v2:
   preview host when it exists (config only).
 - **Staging access:** the staging API has no public ingress. A protected one
   for a hosted web-v2 preview is the owner's decision.
+
+## Removed from platform/infra at cutover (not before)
+
+Each item below is still load-bearing until Vapor scales to zero:
+
+- `norviq-api-{staging,production}` Argo Applications (Vapor release `api`)
+  and the Vapor migrate job. First fold the env and secrets api-v2 inherits
+  from `apps/norviq/api/values-*.yaml` into `apps/norviq/api-v2/`, because
+  api-v2 layers on them today.
+- `LEGACY_UPSTREAM_URL`, `V2_NATIVE_PREFIXES` and `V2_DISABLED_ROUTES` in the
+  api-v2 values; `V2_JOBS=all`; enable v2's migrate job (goose adoption).
+- `ingress.serviceName: api-v2` on the Vapor values: the ingress moves to the
+  api-v2 release itself, and the PVCs get owned by it.
+- The `api` option in `promote-norviq.yml`.

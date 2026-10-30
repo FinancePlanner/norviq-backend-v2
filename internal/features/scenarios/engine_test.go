@@ -337,3 +337,33 @@ func TestCanonicalJSONAndHashMatchSwift(t *testing.T) {
 		t.Fatalf("hash %s", hash)
 	}
 }
+
+func TestCanceledSimulationGoalProbabilityUsesCompletedPaths(t *testing.T) {
+	calls := 0
+	e := scenarios.Engine{Canceled: func() bool { calls++; return calls > 5 }}
+	target := 1.0
+	out := e.Simulate(scenarios.SimulationSpec{
+		InitialValue: 1000, AnnualReturn: 0.05, AnnualVolatility: 0.01, HorizonMonths: 12,
+		PathCount: 100, Seed: 7, TargetAmount: &target,
+	})
+	// Five paths ran, all above the target. Vapor divided by the requested
+	// 100 paths and reported 0.05.
+	if out.GoalProbability == nil || *out.GoalProbability != 1 {
+		t.Fatalf("goal probability %v", out.GoalProbability)
+	}
+}
+
+func TestHistoricalPresetReadsKeysInValidatorOrder(t *testing.T) {
+	for _, tc := range []struct {
+		config map[string]any
+		want   string
+	}{
+		{map[string]any{"catalogId": "gfc_2008", "catalog_id": "bogus"}, "gfc_2008"},
+		{map[string]any{"catalog_id": "covid_crash"}, "covid_crash"},
+		{map[string]any{}, "covid_crash"},
+	} {
+		if got := scenarios.HistoricalPreset(tc.config); got != tc.want {
+			t.Errorf("%v: got %q want %q", tc.config, got, tc.want)
+		}
+	}
+}

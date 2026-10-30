@@ -2,6 +2,8 @@ package goalplanning
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -93,23 +95,29 @@ type dailyRunner struct {
 	pub Publisher
 }
 
-// runOnce is GoalPlanningDailyJob.runOnceAsLeader: the first failing goal
-// aborts the run (and the prune), as the Swift loop's `try` did.
+// runOnce is GoalPlanningDailyJob.runOnceAsLeader, except that a failing
+// goal no longer aborts the run: the other goals and the prune still run,
+// and the failures come back joined. (In Vapor the loop's `try` let the
+// first failing goal stop everything, every day.)
 func (j *dailyRunner) runOnce(ctx context.Context) error {
 	goals, err := j.svc.q.ListAllActiveFinancialGoals(ctx)
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for i := range goals {
 		if ctx.Err() != nil {
 			break
 		}
 		if err := j.evaluate(ctx, &goals[i]); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("goal %s: %w", apijson.FormatUUID(goals[i].ID), err))
 		}
 	}
 	cutoff := j.svc.now().UTC().AddDate(0, 0, -400)
-	return j.svc.q.PruneDailySnapshots(ctx, cutoff)
+	if err := j.svc.q.PruneDailySnapshots(ctx, cutoff); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }
 
 func (j *dailyRunner) evaluate(ctx context.Context, goal *goalplanningdb.FinancialGoal) error {

@@ -162,6 +162,12 @@ func (w *RunWorker) execute(ctx context.Context, id uuid.UUID) {
 	if ferr != nil || run.State == stateCanceled {
 		return
 	}
+	// The heartbeat lost the lease: another worker reclaimed the run and is
+	// still running it. Vapor marked it failed with "CancellationError()"
+	// under that worker; leave it alone.
+	if run.State == "running" && run.LeaseOwner != nil && *run.LeaseOwner != w.workerID {
+		return
+	}
 	now := w.now()
 	_ = w.q.FailScenarioRun(ctx, scenariosdb.FailScenarioRunParams{ID: id, ErrorMessage: ptr(Describe(err)), CompletedAt: &now})
 	w.logger.Error("scenario_run failed", "id", apijson.FormatUUID(id), "error", Describe(err))
@@ -334,13 +340,19 @@ func (j RetentionJob) Run(ctx context.Context, d *server.Deps) {
 	}
 }
 
-// RetentionOnce is ScenarioRetentionJob.runOnce.
+// unsavedScenarioGrace keeps a fresh unsaved scenario that has no run yet.
+// Vapor deleted any unsaved scenario without runs, including one created a
+// moment before the pass, between the client's create and its first run.
+const unsavedScenarioGrace = 24 * time.Hour
+
+// RetentionOnce is ScenarioRetentionJob.runOnce, except that unsaved
+// scenarios younger than unsavedScenarioGrace are kept.
 func RetentionOnce(ctx context.Context, q *scenariosdb.Queries, logger *slog.Logger, now time.Time) {
 	err := func() error {
 		if err := q.DeleteExpiredScenarioRuns(ctx, &now); err != nil {
 			return err
 		}
-		unsaved, err := q.ListUnsavedScenarioDefinitionIDs(ctx)
+		unsaved, err := q.ListUnsavedScenarioDefinitionIDs(ctx, now.Add(-unsavedScenarioGrace))
 		if err != nil {
 			return err
 		}

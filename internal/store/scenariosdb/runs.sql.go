@@ -638,11 +638,14 @@ func (q *Queries) ListScenarioRunsByIDs(ctx context.Context, arg ListScenarioRun
 }
 
 const listUnsavedScenarioDefinitionIDs = `-- name: ListUnsavedScenarioDefinitionIDs :many
-SELECT id FROM scenario_definitions WHERE is_saved = false
+SELECT id FROM scenario_definitions
+WHERE is_saved = false AND (created_at IS NULL OR created_at < $1::timestamptz)
 `
 
-func (q *Queries) ListUnsavedScenarioDefinitionIDs(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listUnsavedScenarioDefinitionIDs)
+// Unsaved scenarios older than the cutoff: a scenario created moments ago
+// is about to get its first run (Vapor deleted those too).
+func (q *Queries) ListUnsavedScenarioDefinitionIDs(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnsavedScenarioDefinitionIDs, cutoff)
 	if err != nil {
 		return nil, err
 	}

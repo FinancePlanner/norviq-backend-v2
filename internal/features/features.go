@@ -70,6 +70,7 @@ import (
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
+	"norviq-api/internal/store/cryptodb"
 
 	"github.com/google/uuid"
 )
@@ -315,8 +316,9 @@ func AllJobs() []Job {
 }
 
 // assistantSources wires the other domains' services the AI surfaces read
-// (assistant.Sources). A nil field keeps the routes that need it on Vapor
-// and the standing-task job off; fill each one in as its domain lands.
+// (assistant.Sources): Vapor's app.insightsService, dashboardService,
+// macroService, cryptoService and marketNewsArchiveService. Tax is filled by
+// the assistant itself (tax.SharedDashboard).
 func assistantSources(d *server.Deps) (assistant.Sources, error) {
 	var src assistant.Sources
 	ins, err := insights.SharedService(d)
@@ -325,6 +327,62 @@ func assistantSources(d *server.Deps) (assistant.Sources, error) {
 	}
 	src.InsightsSummary = func(ctx context.Context, days int) (any, error) {
 		return ins.Summary(ctx, days)
+	}
+
+	// dashboardService.dashboard / .insights.
+	dash, err := dashboard.SharedService(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	src.Dashboard = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return dash.Dashboard(ctx, userID)
+	}
+	src.DashboardInsights = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return dash.Insights(ctx, userID)
+	}
+
+	// macroService.currentInflation / .economy / .policyWatch. The assistant
+	// passes MacroCountry's raw value, already validated.
+	mac, err := macro.SharedService(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	country := func(raw string) macro.Country {
+		if c, ok := macro.ParseCountry(&raw); ok {
+			return c
+		}
+		return macro.US
+	}
+	src.Inflation = func(ctx context.Context, c string) (any, error) {
+		return mac.CurrentInflation(ctx, country(c))
+	}
+	src.Economy = func(ctx context.Context, c string) (any, error) {
+		return mac.Economy(ctx, country(c))
+	}
+	src.PolicyWatch = func(ctx context.Context, c string) (any, error) {
+		return mac.PolicyWatch(ctx, country(c))
+	}
+
+	// cryptoService.listPortfolio / .batchQuotes(short: true).
+	cp, err := crypto.SharedProvider(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	store := crypto.PortfolioStore{Q: cryptodb.New(d.DB)}
+	src.CryptoPortfolio = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return store.List(ctx, userID)
+	}
+	src.CryptoQuotesShort = func(ctx context.Context) (any, error) {
+		return cp.BatchQuotes(ctx, true)
+	}
+
+	// marketNewsArchiveService.news(symbol:limit:).
+	archive, err := market.SharedNewsArchive(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	src.StockNews = func(ctx context.Context, symbol string, limit int) (any, error) {
+		return archive.News(ctx, symbol, &limit)
 	}
 	return src, nil
 }

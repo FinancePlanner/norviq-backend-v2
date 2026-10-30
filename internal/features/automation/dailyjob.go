@@ -185,10 +185,8 @@ func (r *DailyRunner) evaluateScreens(ctx context.Context) error {
 			return err
 		}
 	}
-	for i := range screens {
-		if ctx.Err() != nil {
-			return nil
-		}
+	// Task.isCancelled: stop quietly between items.
+	for i := 0; i < len(screens) && ctx.Err() == nil; i++ {
 		s := &screens[i]
 		err := r.h.premium.RequirePremium(ctx, entitlements.FeatureSmartScreening, s.UserID)
 		if err == nil {
@@ -215,10 +213,8 @@ func (r *DailyRunner) evaluateRebalancing(ctx context.Context) error {
 			return err
 		}
 	}
-	for i := range policies {
-		if ctx.Err() != nil {
-			return nil
-		}
+	// Task.isCancelled: stop quietly between items.
+	for i := 0; i < len(policies) && ctx.Err() == nil; i++ {
 		p := &policies[i]
 		if err := r.evaluatePolicy(ctx, p); err != nil {
 			r.h.d.Logger.Warn("rebalancing daily evaluation failed", "policy", apijson.FormatUUID(p.ID), "error", err)
@@ -297,10 +293,8 @@ func (r *DailyRunner) evaluateBudgets(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for i := range snapshots {
-		if ctx.Err() != nil {
-			return nil
-		}
+	// Task.isCancelled: stop quietly between items.
+	for i := 0; i < len(snapshots) && ctx.Err() == nil; i++ {
 		s := &snapshots[i]
 		if err := r.budgets.Evaluate(ctx, s.UserID, s.MonthStart, true); err != nil {
 			r.h.d.Logger.Warn("budget drift daily evaluation failed", "snapshot", apijson.FormatUUID(s.ID), "error", err)

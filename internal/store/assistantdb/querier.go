@@ -47,6 +47,8 @@ type Querier interface {
 	InsertGoal(ctx context.Context, arg InsertGoalParams) error
 	InsertMemo(ctx context.Context, arg InsertMemoParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) error
+	// last_update_id starts at the pairing update, so a redelivery of it is
+	// deduped instead of running as the first message (Vapor stored 0).
 	InsertMessagingLink(ctx context.Context, arg InsertMessagingLinkParams) error
 	InsertPendingAction(ctx context.Context, arg InsertPendingActionParams) error
 	InsertPreference(ctx context.Context, arg InsertPreferenceParams) error

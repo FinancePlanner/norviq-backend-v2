@@ -270,7 +270,7 @@ func (m *messenger) insertLink(ctx context.Context, userID uuid.UUID, in telegra
 		return f, err
 	}
 	insertErr := m.h.q.InsertMessagingLink(ctx, assistantdb.InsertMessagingLinkParams{
-		ID: uuid.New(), UserID: userID, Platform: in.Platform, ExternalID: in.ExternalID, Now: m.h.now(),
+		ID: uuid.New(), UserID: userID, Platform: in.Platform, ExternalID: in.ExternalID, LastUpdateID: in.UpdateID, Now: m.h.now(),
 	})
 	if insertErr == nil {
 		return redeemOK, nil

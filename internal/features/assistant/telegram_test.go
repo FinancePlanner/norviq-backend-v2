@@ -248,6 +248,17 @@ func TestTelegramPairingCommandsAndTurns(t *testing.T) {
 	if th.count(`SELECT count(*) FROM messaging_link_codes WHERE user_id = $1 AND redeemed_at IS NOT NULL`, user) != 1 {
 		t.Fatal("code not spent")
 	}
+	// A redelivery of the pairing update is deduped: the link's watermark
+	// starts at that update (Vapor stored 0, so it ran as a first message).
+	if th.count(`SELECT count(*) FROM messaging_links WHERE user_id = $1 AND last_update_id = $2`, user, th.update) != 1 {
+		t.Fatal("watermark not at the pairing update")
+	}
+	th.update--
+	th.text(chat, "/start abcd-2345")
+	time.Sleep(300 * time.Millisecond)
+	if n := len(th.tg.sent(t, 3)); n != 3 {
+		t.Fatalf("pairing redelivery answered: %d sends", n)
+	}
 
 	// /help, then its redelivery (same update_id), which is silent.
 	th.text(chat, "/help@NorviqBot")
@@ -425,5 +436,38 @@ func TestParseConfirmationAnswer(t *testing.T) {
 	}
 	if !constantTimeEquals("abc", "abc") || constantTimeEquals("abc", "abcd") || constantTimeEquals("abc", "abd") {
 		t.Error("constantTimeEquals")
+	}
+}
+
+// TestPollerSkipsUndecodableUpdate: one update that does not decode is
+// skipped and the offset moves past it. Swift decoded the batch as one
+// array, so the offset never moved and the bot fetched the same batch
+// forever.
+func TestPollerSkipsUndecodableUpdate(t *testing.T) {
+	th := newTGHarness(t, &telegram.Config{BotToken: "TOKEN"}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	offsets := make(chan float64, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+			return
+		}
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		offset, _ := body["offset"].(float64)
+		offsets <- offset
+		if offset == 0 {
+			_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":5,"message":{}}]}`))
+			return
+		}
+		cancel()
+		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer srv.Close()
+	TelegramPollerJob{Sources: stubSources, Config: &telegram.Config{BotToken: "TOKEN"}, BaseURL: srv.URL}.Run(ctx, th.Deps)
+	if first, second := <-offsets, <-offsets; first != 0 || second != 6 {
+		t.Fatalf("offsets %v then %v, want 0 then 6", first, second)
 	}
 }

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -356,19 +357,6 @@ func (j TelegramPollerJob) Run(ctx context.Context, d *server.Deps) {
 	var offset int64
 	for ctx.Err() == nil {
 		raws, err := b.client.GetUpdates(ctx, offset)
-		var updates []telegram.Update
-		if err == nil {
-			// One undecodable update fails the whole batch, as decoding the
-			// envelope's [TelegramUpdate] did.
-			for _, raw := range raws {
-				u, derr := telegram.DecodeUpdate(raw)
-				if derr != nil {
-					err = derr
-					break
-				}
-				updates = append(updates, u)
-			}
-		}
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -380,7 +368,22 @@ func (j TelegramPollerJob) Run(ctx context.Context, d *server.Deps) {
 			}
 			continue
 		}
-		for _, u := range updates {
+		for _, raw := range raws {
+			u, derr := telegram.DecodeUpdate(raw)
+			if derr != nil {
+				// Deliberate fix: Swift decoded the batch as one
+				// [TelegramUpdate], so a single undecodable update failed
+				// it, the offset never moved, and the same batch was
+				// fetched forever. Skip it, but move past it.
+				var id struct {
+					UpdateID int64 `json:"update_id"`
+				}
+				if json.Unmarshal(raw, &id) == nil && id.UpdateID > 0 {
+					offset = max(offset, id.UpdateID+1)
+				}
+				d.Logger.Warn(fmt.Sprintf("telegram_update_undecodable update_id=%d error=%T", id.UpdateID, derr))
+				continue
+			}
 			// Advance before dispatching: a crash mid-turn must not replay.
 			offset = max(offset, u.UpdateID+1)
 			b.dispatch(u)

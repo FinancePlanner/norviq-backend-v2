@@ -180,11 +180,18 @@ func applyDecision(decision DecisionRequest, m StoredMapping) StoredMapping {
 		}
 		updated.ExchangeRates = rates
 	}
+	// Only the selected sheet's exclusions are kept: SkippedRows holds bare
+	// row numbers for that sheet. (Vapor ignored sheetName, so excluding row
+	// 7 of another sheet also skipped row 7 of the imported one.)
 	skipped := []int{}
 	for _, o := range decision.RowOverrides {
-		if !o.Include {
-			skipped = append(skipped, o.Row)
+		if o.Include {
+			continue
 		}
+		if updated.SelectedSheet != nil && o.SheetName != *updated.SelectedSheet {
+			continue
+		}
+		skipped = append(skipped, o.Row)
 	}
 	updated.SkippedRows = skipped
 	return updated

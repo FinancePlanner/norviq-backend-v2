@@ -554,10 +554,25 @@ type AmountSniff struct {
 	HadCurrencySymbol bool
 }
 
-// currencySymbols is Vapor's CharacterSet(charactersIn:
-// "€$£¥₹R$kr zł Kč₺₽"): every character of that string, the space and the
-// letters R, k, r, z, K included.
-const currencySymbols = "€$£¥₹R$kr zł Kč₺₽"
+// currencySymbols are the single-character symbols; currencyTokens the
+// multi-character ones, matched whole. (Vapor built a CharacterSet from
+// "€$£¥₹R$kr zł Kč₺₽", so the space and the letters R, k, r, z, K each
+// counted as a currency symbol and any text with a space "had" one.)
+const currencySymbols = "€$£¥₹₺₽"
+
+var currencyTokens = []string{"R$", "kr", "zł", "Kč"}
+
+func hasCurrencySymbol(s string) bool {
+	if strings.ContainsAny(s, currencySymbols) {
+		return true
+	}
+	for _, t := range currencyTokens {
+		if strings.Contains(s, t) {
+			return true
+		}
+	}
+	return false
+}
 
 var (
 	currencyCodeRe = regexp.MustCompile(`(?i)\b(eur|usd|gbp|brl|chf|pln|sek|nok|dkk)\b`)
@@ -573,7 +588,7 @@ func LooksLikeAmount(raw string) (AmountSniff, bool) {
 	if trimmed == "" {
 		return AmountSniff{}, false
 	}
-	hadSymbol := strings.ContainsAny(trimmed, currencySymbols) || currencyCodeRe.MatchString(trimmed)
+	hadSymbol := hasCurrencySymbol(trimmed) || currencyCodeRe.MatchString(trimmed)
 	cleaned := trimmed
 	negative := false
 	if strings.HasPrefix(cleaned, "(") && strings.HasSuffix(cleaned, ")") && len(cleaned) >= 2 {

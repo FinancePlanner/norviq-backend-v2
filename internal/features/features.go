@@ -230,6 +230,8 @@ func AllJobs() []Job {
 		crypto.RefreshJob{},
 		// DataExportCleanupJob.
 		dataexport.CleanupJob{},
+		// DailyBoardPostJob (also needs DAILY_BOARD_POST_ENABLED, as in Vapor).
+		boards.DailyPostJob{},
 	}
 }
 

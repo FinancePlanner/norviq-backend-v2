@@ -16,9 +16,10 @@ import (
 
 // The database side of DailyBoardPost.swift: the Daily board's account and
 // board (DailyBoardIdentity), and DailyBoardPublisher's insert, skip, reset
-// and history. Composing the facts and drafting with the model (the
-// DailyBoardPostJob and the daily-board-post-generate command) stay on
-// Vapor for now; see the package report.
+// and history. Composing the facts and drafting with the model live in
+// daily_*.go; DailyBoardPostJob is DailyPostJob (daily_job.go). The
+// daily-board-post-generate command is not ported: v2 has no operator
+// command framework (cmd/api serves, migrates and lists routes only).
 
 // DailyDescription is DailyBoardIdentity.description.
 const DailyDescription = "One post every day: a Mag 7 stock, a hot stock, inflation, an ETF, or the week in markets. Members can post here too."
@@ -35,25 +36,37 @@ const (
 	TopicNews      = "news"
 )
 
-// DailyCandidate is the part of DailyBoardCandidate the publisher stores.
+// DailyCandidate is DailyBoardCandidate. The publisher stores Topic,
+// Symbol, Angle and URL; Name, Facts and Grounded feed the model and the
+// validator.
 type DailyCandidate struct {
-	Topic  string
+	Topic string
+	// Name is what the post is about, in words: "NVDA", "SPDR S&P 500 ETF Trust".
+	Name   string
 	Symbol string
-	Angle  *string
-	URL    *string
+	Facts  []DailyFact
+	// Grounded is every number the post may cite, built with the facts.
+	Grounded []float64
+	Angle    *string
+	URL      *string
 }
 
-// Tags is DailyBoardCandidate.tags: topic, ticker or angle, and "ai".
-func (c DailyCandidate) Tags() []string {
-	tags := []string{c.Topic}
+// symbolTag is DailyBoardHistory.tag(symbol): lowercased letters and digits.
+func (c DailyCandidate) symbolTag() string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(c.Symbol) {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
 			b.WriteRune(r)
 		}
 	}
-	if b.Len() > 0 {
-		tags = append(tags, b.String())
+	return b.String()
+}
+
+// Tags is DailyBoardCandidate.tags: topic, ticker or angle, and "ai".
+func (c DailyCandidate) Tags() []string {
+	tags := []string{c.Topic}
+	if t := c.symbolTag(); t != "" {
+		tags = append(tags, t)
 	}
 	if c.Angle != nil {
 		tags = append(tags, *c.Angle)

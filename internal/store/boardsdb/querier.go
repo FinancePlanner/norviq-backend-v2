@@ -87,6 +87,9 @@ type Querier interface {
 	BoardsCreatedSince(ctx context.Context, arg BoardsCreatedSinceParams) (int64, error)
 	BoardsList(ctx context.Context, arg BoardsListParams) ([]Board, error)
 	DailyDeleteRun(ctx context.Context, tradingDate string) error
+	// MarketBriefRepository.find(tradingDate:slot: .evening, language: "en"),
+	// which DailyBoardPostJob.waitingForBrief reads.
+	DailyEveningBrief(ctx context.Context, tradingDate string) ([]string, error)
 	// The last 60 daily posts before a date, newest first.
 	DailyHistory(ctx context.Context, tradingDate *string) ([]DailyHistoryRow, error)
 	DailyInsertRun(ctx context.Context, arg DailyInsertRunParams) error

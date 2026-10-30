@@ -180,12 +180,11 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 
 	r.V1.GET("/brokers", h.listBrokers, read...)
 	r.V1.GET("/brokers/holdings", h.listHoldings, holdingsRead...)
-	r.V1.GET("/brokers/:provider", h.getBroker, read...)
 	// Vapor keeps one trie per method and never falls back from a constant
 	// segment to a parameter. GET /v1/brokers/ibkr enters the "ibkr" node
 	// (from GET ibkr/sync/status), which has no handler of its own: Vapor's
 	// route-not-found 404, before any group middleware (no 401 unsigned).
-	r.V1.GET("/brokers/ibkr", routeNotFound)
+	r.V1.GET("/brokers/:provider", h.getBroker, append([]echo.MiddlewareFunc{shadowedByConstant("ibkr")}, read...)...)
 	r.V1.POST("/brokers/import/csv", h.csvPreview, holdingsWrite...)
 	r.V1.POST("/brokers/import/csv/commit", h.csvCommit, holdingsWrite...)
 	// Three 8 MB screenshots outrun the app-wide body cap.
@@ -203,9 +202,17 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	return nil
 }
 
-// routeNotFound is Vapor's 404 for a path no route matches.
-func routeNotFound(*echo.Context) error {
-	return httpx.Abort(http.StatusNotFound, "Not Found")
+// shadowedByConstant answers Vapor's route-not-found 404 when :provider is
+// a constant segment Vapor's router would have taken instead.
+func shadowedByConstant(segment string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if c.Param("provider") == segment {
+				return httpx.Abort(http.StatusNotFound, "Not Found")
+			}
+			return next(c)
+		}
+	}
 }
 
 func env(f Feature) func(string) string {

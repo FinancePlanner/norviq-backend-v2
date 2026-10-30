@@ -89,7 +89,7 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	}
 	content := trimSwiftSpace(payload.Content)
 
-	outcome, err := h.runCoordinator(c, s.UserID, conv.ID, stripAssistantAddress(content), s.Scope != nil, onEvent)
+	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), s.Scope != nil, onEvent)
 	if err != nil {
 		return turnResponse{}, err
 	}

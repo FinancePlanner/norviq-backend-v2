@@ -11,6 +11,7 @@ import (
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/joblock"
 	"norviq-api/internal/platform/push"
+	"norviq-api/internal/platform/telegram"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/goalplanningdb"
 	"norviq-api/internal/store/notificationsdb"
@@ -66,7 +67,7 @@ func (DailyJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	// Vapor offered the event to APNS then Telegram; the Telegram channel
 	// arrives with the messaging port.
-	job := &dailyRunner{svc: svc, pub: inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger)}
+	job := &dailyRunner{svc: svc, pub: inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger, telegram.Channels(d)...)}
 	interval := jobInterval()
 	select {
 	case <-ctx.Done():

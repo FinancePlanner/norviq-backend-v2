@@ -39,6 +39,10 @@ type Sources struct {
 	// with no news provider configured); the memo writer still runs.
 	StockNews func(ctx context.Context, symbol string, limit int) (any, error)
 
+	// ThesisFeed is thesisWatchService.feed(userId:scope: .forYou, sector:
+	// nil, limit:cursor: nil), for the Telegram /news command.
+	ThesisFeed func(ctx context.Context, userID uuid.UUID, limit int) (any, error)
+
 	// Tax is taxService.dashboard; Register fills it from the tax package.
 	Tax tax.DashboardFunc
 }

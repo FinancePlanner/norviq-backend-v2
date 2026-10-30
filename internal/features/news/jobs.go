@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/joblock"
 	"norviq-api/internal/platform/push"
+	"norviq-api/internal/platform/telegram"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/newsdb"
 	"norviq-api/internal/store/notificationsdb"
@@ -181,7 +182,7 @@ func (j NotificationJob) Run(ctx context.Context, d *server.Deps) {
 			d.Logger.Error("thesis_watch_notifications push", "error", err)
 			return
 		}
-		pub = inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger)
+		pub = inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger, telegram.Channels(d)...)
 	}
 	interval := max(envInt64("THESIS_WATCH_SYNC_SECONDS", 900), 300)
 	delay := j.InitialDelay

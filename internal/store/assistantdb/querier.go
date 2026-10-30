@@ -14,7 +14,12 @@ import (
 type Querier interface {
 	BindMessagingLinks(ctx context.Context, arg BindMessagingLinksParams) error
 	BudgetSnapshotForMonth(ctx context.Context, arg BudgetSnapshotForMonthParams) (float64, error)
+	CancelPendingActionIfPending(ctx context.Context, arg CancelPendingActionIfPendingParams) error
 	ClaimDueWatches(ctx context.Context, batch int32) ([]uuid.UUID, error)
+	// MessagingLinkService.claimCode: the first unspent, unexpired code with
+	// this hash, marked redeemed in the same transaction.
+	ClaimLinkCode(ctx context.Context, arg ClaimLinkCodeParams) (uuid.UUID, error)
+	ClaimMessagingUpdate(ctx context.Context, arg ClaimMessagingUpdateParams) error
 	CountTipsSince(ctx context.Context, arg CountTipsSinceParams) (int64, error)
 	DeleteConversation(ctx context.Context, id uuid.UUID) error
 	// Retention (AIAssistantRetentionJob).
@@ -25,6 +30,7 @@ type Querier interface {
 	DeleteOldAudits(ctx context.Context, createdAt *time.Time) error
 	DeleteOldPendingActions(ctx context.Context, createdAt *time.Time) error
 	DeleteOldUsage(ctx context.Context, monthStart time.Time) error
+	DeleteUserMessagingLinks(ctx context.Context, arg DeleteUserMessagingLinksParams) (int64, error)
 	DisableWatch(ctx context.Context, arg DisableWatchParams) error
 	DismissTip(ctx context.Context, id uuid.UUID) error
 	ExpirePendingActions(ctx context.Context, now *time.Time) error
@@ -41,11 +47,13 @@ type Querier interface {
 	InsertGoal(ctx context.Context, arg InsertGoalParams) error
 	InsertMemo(ctx context.Context, arg InsertMemoParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) error
+	InsertMessagingLink(ctx context.Context, arg InsertMessagingLinkParams) error
 	InsertPendingAction(ctx context.Context, arg InsertPendingActionParams) error
 	InsertPreference(ctx context.Context, arg InsertPreferenceParams) error
 	InsertTip(ctx context.Context, arg InsertTipParams) error
 	// Standing tasks (AIAssistantWatch, AIAssistantWatchJob).
 	InsertWatch(ctx context.Context, arg InsertWatchParams) error
+	LatestPendingActionInConversation(ctx context.Context, arg LatestPendingActionInConversationParams) (uuid.UUID, error)
 	ListConversationMessages(ctx context.Context, arg ListConversationMessagesParams) ([]AiMessage, error)
 	// AIAssistantController, PositionMemoService, AIAssistantTurnCoordinator and
 	// the assistant jobs. Fluent wrote created_at/updated_at from the client
@@ -57,6 +65,7 @@ type Querier interface {
 	ListMemos(ctx context.Context, arg ListMemosParams) ([]PositionMemo, error)
 	ListPendingActions(ctx context.Context, arg ListPendingActionsParams) ([]AiPendingAction, error)
 	ListTips(ctx context.Context, arg ListTipsParams) ([]AiTip, error)
+	LiveOwnedConversation(ctx context.Context, arg LiveOwnedConversationParams) (AiConversation, error)
 	MarkTipSeen(ctx context.Context, id uuid.UUID) error
 	// MarketNewsArchiveService.archivedRows: newest first.
 	MemoArchivedNews(ctx context.Context, arg MemoArchivedNewsParams) ([]MemoArchivedNewsRow, error)
@@ -65,12 +74,16 @@ type Querier interface {
 	// with no sort, so no ORDER BY here either).
 	MemoUserStocks(ctx context.Context, userID uuid.UUID) ([]MemoUserStocksRow, error)
 	MemoUserTargets(ctx context.Context, userID uuid.UUID) ([]MemoUserTargetsRow, error)
+	// MessagingService, MessagingConversations and the bot side of
+	// MessagingLinkService (redeem, unlink): the Telegram webhook and poller.
+	MessagingLinkByExternalID(ctx context.Context, arg MessagingLinkByExternalIDParams) (MessagingLink, error)
 	MonthExpensesForTip(ctx context.Context, arg MonthExpensesForTipParams) ([]MonthExpensesForTipRow, error)
 	NewestConversation(ctx context.Context, arg NewestConversationParams) (AiConversation, error)
 	RecentConversationMessages(ctx context.Context, arg RecentConversationMessagesParams) ([]AiMessage, error)
 	RenameGoal(ctx context.Context, arg RenameGoalParams) error
 	SetActionAuditStatus(ctx context.Context, arg SetActionAuditStatusParams) error
 	SetMemoBookmarked(ctx context.Context, arg SetMemoBookmarkedParams) error
+	SetMessagingLinkConversation(ctx context.Context, arg SetMessagingLinkConversationParams) error
 	SetPendingActionStatus(ctx context.Context, arg SetPendingActionStatusParams) error
 	// Daily tips (AIDailyTipJob).
 	TipPreferences(ctx context.Context) ([]AiPreference, error)

@@ -25,6 +25,7 @@ import (
 	"norviq-api/internal/auth"
 	"norviq-api/internal/config"
 	"norviq-api/internal/features"
+	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/middleware"
 	"norviq-api/internal/migrate"
 	"norviq-api/internal/platform/realtime"
@@ -200,6 +201,8 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 			logger.Error("shutdown", "error", err)
 		}
 	}
+	// TelegramTurnDrain: detached bot turns end before the pool closes.
+	assistant.DrainTelegramTurns()
 	jobs.Wait()
 	return nil
 }

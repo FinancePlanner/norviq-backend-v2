@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/labstack/echo/v5"
 )
 
 const assistantUnavailable = "The assistant is temporarily unavailable."
@@ -92,9 +91,10 @@ func (h *handlers) persistReply(ctx context.Context, userID, conversationID uuid
 	return id, isoTimestamp(&now, now), tx.Commit(ctx)
 }
 
-// runCoordinator is AIAssistantTurnCoordinator.run.
-func (h *handlers) runCoordinator(c *echo.Context, userID, conversationID uuid.UUID, content string, scoped bool, onEvent eventSink) (turnOutcome, error) {
-	ctx := c.Request().Context()
+// runCoordinator is AIAssistantTurnCoordinator.run. requireConsent is
+// AIConsent.require for the caller: the request check (with the legacy-iOS
+// grace) over HTTP, the strict check for Telegram's synthetic request.
+func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, scoped bool, onEvent eventSink) (turnOutcome, error) {
 	if content == "" || graphemeLen(content) > maxMessageCharacters {
 		return turnOutcome{}, httpx.BadRequest("Message must contain 1 to 12,000 characters.")
 	}
@@ -104,7 +104,7 @@ func (h *handlers) runCoordinator(c *echo.Context, userID, conversationID uuid.U
 			return h.proposeWatchTurn(ctx, intent, userID, conversationID, content)
 		}
 	}
-	if err := h.ai.Consent.Require(c, userID); err != nil {
+	if err := requireConsent(); err != nil {
 		return turnOutcome{}, err
 	}
 	if ask != nil {

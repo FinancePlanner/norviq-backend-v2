@@ -14,6 +14,7 @@ import (
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/platform/telegram"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/assistantdb"
 
@@ -30,6 +31,11 @@ type Feature struct {
 	// Sources wires the other domains' services the AI surfaces read; see
 	// Sources. Nil leaves every source-dependent route on Vapor.
 	Sources SourcesFunc
+
+	// Telegram overrides the environment's bot configuration (tests);
+	// TelegramBaseURL points the bot client at a stand-in API.
+	Telegram        *telegram.Config
+	TelegramBaseURL string
 
 	// memo is PositionMemoService; tests inject one.
 	memo memoGenerator
@@ -50,6 +56,7 @@ type handlers struct {
 	actions *actionServices
 	reads   *readTools
 	memo    memoGenerator
+	bot     *telegramBot // nil without a configured Telegram bot
 }
 
 func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*handlers, error) {
@@ -105,6 +112,16 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.memo != nil {
 		h.memo = f.memo
 	}
+	tg := f.Telegram
+	if tg == nil {
+		tg = telegram.Load(nil, d.Config.IsProduction(), d.Logger)
+	}
+	if h.bot = newTelegramBot(h, tg); h.bot != nil && f.TelegramBaseURL != "" {
+		h.bot.client.BaseURL = f.TelegramBaseURL
+	}
+	// TelegramWebhookController: at the root, outside every authenticator;
+	// the secret header is the whole door.
+	r.Root.POST("/webhooks/telegram", h.telegramWebhook)
 
 	// ActionCatalogController: any authenticated credential, no limiter.
 	r.V1.GET("/actions/catalog", h.actionCatalog, d.Auth.Scoped(), auth.Guard())

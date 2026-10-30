@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/push"
+	"norviq-api/internal/platform/telegram"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/notificationsdb"
 
@@ -72,7 +73,7 @@ func (f Feature) engine(d *server.Deps) (*Engine, error) {
 		}
 		// Vapor offered the event to APNS then Telegram; the Telegram
 		// channel arrives with the messaging port.
-		ip := inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger)
+		ip := inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger, telegram.Channels(d)...)
 		if f.Now != nil {
 			ip.Now = f.Now
 		}

@@ -286,6 +286,10 @@ func AllJobs() []Job {
 		assistant.RetentionJob{},
 		assistant.DailyTipJob{},
 		assistant.WatchJob{Sources: assistantSources},
+		// TelegramPoller (development only: never with a webhook secret, never
+		// in production) and TelegramCommandMenu (setMyCommands once at boot).
+		assistant.TelegramPollerJob{Sources: assistantSources},
+		assistant.TelegramCommandMenuJob{},
 		// DataExportCleanupJob.
 		dataexport.CleanupJob{},
 		// Insights: Hermes pull, daily sentiment roll-up, retention.
@@ -374,6 +378,15 @@ func assistantSources(d *server.Deps) (assistant.Sources, error) {
 	}
 	src.CryptoQuotesShort = func(ctx context.Context) (any, error) {
 		return cp.BatchQuotes(ctx, true)
+	}
+
+	// thesisWatchService.feed(scope: .forYou), for the Telegram /news command.
+	thesis, err := news.SharedService(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	src.ThesisFeed = func(ctx context.Context, userID uuid.UUID, limit int) (any, error) {
+		return thesis.ThesisFeed(ctx, userID, news.ScopeForYou, nil, limit, nil)
 	}
 
 	// marketNewsArchiveService.news(symbol:limit:).

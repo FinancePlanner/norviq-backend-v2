@@ -94,6 +94,17 @@ type Goal struct {
 	CompletedAt     *time.Time
 }
 
+type MessagingLink struct {
+	ID             uuid.UUID
+	UserID         uuid.UUID
+	Platform       string
+	ExternalID     string
+	LastUpdateID   int64
+	CreatedAt      *time.Time
+	LastSeenAt     *time.Time
+	ConversationID *uuid.UUID
+}
+
 type PositionMemo struct {
 	ID                uuid.UUID
 	UserID            uuid.UUID

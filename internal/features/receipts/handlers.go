@@ -170,9 +170,9 @@ func readImageUploads(c *echo.Context, body []byte) ([]multipartform.Part, error
 }
 
 // readImageUpload accepts multipart (a `file` or `image` part) or a raw
-// body. The raw body is not re-capped at 8 MB: Vapor had already collected
-// it under the 10 MB default, and collect(max:) on a collected body is a
-// no-op.
+// body, each capped at 8 MB. (Vapor's collect(max: 8MB) was a no-op on an
+// already collected body, so a raw body up to the 10 MB app cap got
+// through.)
 func readImageUpload(c *echo.Context, body []byte) ([]byte, string, error) {
 	contentType := c.Request().Header.Get(echo.HeaderContentType)
 	if _, isMultipart, _ := multipartform.Boundary(contentType); isMultipart {
@@ -205,6 +205,9 @@ func readImageUpload(c *echo.Context, body []byte) ([]byte, string, error) {
 	}
 	if len(body) == 0 {
 		return nil, "", httpx.BadRequest("Missing image body.")
+	}
+	if len(body) > maxImageBytes {
+		return nil, "", httpx.Abort(http.StatusRequestEntityTooLarge, "Receipt image must be 8 MB or smaller.")
 	}
 	if contentType == "" {
 		contentType = "application/octet-stream"

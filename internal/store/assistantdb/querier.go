@@ -58,6 +58,13 @@ type Querier interface {
 	ListPendingActions(ctx context.Context, arg ListPendingActionsParams) ([]AiPendingAction, error)
 	ListTips(ctx context.Context, arg ListTipsParams) ([]AiTip, error)
 	MarkTipSeen(ctx context.Context, id uuid.UUID) error
+	// MarketNewsArchiveService.archivedRows: newest first.
+	MemoArchivedNews(ctx context.Context, arg MemoArchivedNewsParams) ([]MemoArchivedNewsRow, error)
+	MemoUserNotes(ctx context.Context, userID uuid.UUID) ([]MemoUserNotesRow, error)
+	// PositionMemoEvidence reads (Fluent `.filter(\.$userId == userId).all()`
+	// with no sort, so no ORDER BY here either).
+	MemoUserStocks(ctx context.Context, userID uuid.UUID) ([]MemoUserStocksRow, error)
+	MemoUserTargets(ctx context.Context, userID uuid.UUID) ([]MemoUserTargetsRow, error)
 	MonthExpensesForTip(ctx context.Context, arg MonthExpensesForTipParams) ([]MonthExpensesForTipRow, error)
 	NewestConversation(ctx context.Context, arg NewestConversationParams) (AiConversation, error)
 	RecentConversationMessages(ctx context.Context, arg RecentConversationMessagesParams) ([]AiMessage, error)

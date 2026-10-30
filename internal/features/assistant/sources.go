@@ -34,6 +34,11 @@ type Sources struct {
 	// InsightsSummary is insightsService.summary(days:on:).
 	InsightsSummary func(ctx context.Context, days int) (any, error)
 
+	// StockNews is marketNewsArchiveService.news(symbol:limit:), returning a
+	// StockNews array. Nil reads the archived rows only (Vapor's behavior
+	// with no news provider configured); the memo writer still runs.
+	StockNews func(ctx context.Context, symbol string, limit int) (any, error)
+
 	// Tax is taxService.dashboard; Register fills it from the tax package.
 	Tax tax.DashboardFunc
 }

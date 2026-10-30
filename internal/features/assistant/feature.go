@@ -88,6 +88,11 @@ func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*ha
 		d: d, q: q, pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now, src: src, actions: acts,
 	}
 	h.reads = &readTools{src: &h.src, expenses: acts.expenses, market: mkt, db: d.DB, now: now}
+	var news memoNewsFunc
+	if src.StockNews != nil {
+		news = sourceMemoNews(src.StockNews)
+	}
+	h.memo = newPositionMemos(h, mkt, news)
 	return h, nil
 }
 

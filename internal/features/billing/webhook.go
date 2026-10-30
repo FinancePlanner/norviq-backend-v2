@@ -47,8 +47,9 @@ type webhookEvent struct {
 // decodeWebhookEvent is RevenueCatWebhookPayload's decode. Vapor used
 // JSONDecoder.backendAPI, which rewrites snake_case keys to camelCase before
 // lookup, so of each "app_user_id"/"appUserId" pair only the camelCase key
-// ever matched (and grace_period_expiration_at_ms, which becomes
-// gracePeriodExpirationAtMs, never decoded at all).
+// ever matched. RevenueCat's real grace field, grace_period_expiration_at_ms,
+// becomes gracePeriodExpirationAtMs and never decoded in Vapor (a bug); v2
+// reads it when gracePeriodExpiresDateMs is absent.
 func decodeWebhookEvent(c *echo.Context, raw []byte) (*webhookEvent, error) {
 	kind, err := contentKind(c)
 	if err != nil {
@@ -98,6 +99,9 @@ func decodeWebhookEvent(c *echo.Context, raw []byte) (*webhookEvent, error) {
 	num(&e.PurchasedAtMs, "purchasedAtMs")
 	num(&e.ExpirationAtMs, "expirationAtMs")
 	num(&e.GracePeriodExpiresDateMs, "gracePeriodExpiresDateMs")
+	if e.GracePeriodExpiresDateMs == nil {
+		num(&e.GracePeriodExpiresDateMs, "gracePeriodExpirationAtMs")
+	}
 	str(&e.CancelReason, "cancelReason", false)
 	str(&e.ExpirationReason, "expirationReason", false)
 	str(&e.NewProductID, "newProductId", false)
@@ -238,6 +242,16 @@ func processEvent(ctx context.Context, svc *entitlements.Service, logger *slog.L
 
 	now := svc.Now()
 	userID, isUser := parseSwiftUUID(*e.AppUserID)
+	if isUser {
+		// Vapor inserted the event with a user_id that has no users row,
+		// hit the foreign key and answered 500, so RevenueCat retried the
+		// event forever. v2 treats it like a non-UUID app_user_id.
+		exists, err := q.UserExistsForBilling(ctx, userID)
+		if err != nil {
+			return err
+		}
+		isUser = exists
+	}
 	var userIDPtr *uuid.UUID
 	if isUser {
 		userIDPtr = &userID
@@ -258,7 +272,7 @@ func processEvent(ctx context.Context, svc *entitlements.Service, logger *slog.L
 		if e.ProductID != nil {
 			product = *e.ProductID
 		}
-		logger.Error("Billing webhook dropped: app_user_id is not a Norviq user UUID. event=" + *e.ID +
+		logger.Error("Billing webhook dropped: app_user_id is not a Norviq user. event=" + *e.ID +
 			" type=" + *e.Type + " product=" + product + " store=" + store)
 		return nil
 	}
@@ -291,9 +305,13 @@ func processEvent(ctx context.Context, svc *entitlements.Service, logger *slog.L
 		return nil
 	}
 
-	row, previousUserID, err := upsertSubscription(ctx, q, now, userID, e, status, cancelledAt)
+	isNewTransaction := false
+	row, previousUserID, err := upsertSubscription(ctx, q, now, userID, e, status, cancelledAt, &isNewTransaction)
 	if err != nil {
 		return err
+	}
+	if *e.Type == "CANCELLATION" && !cancellationKeepsAccess(row, isNewTransaction, now) {
+		level = "free"
 	}
 	if err := revokeTransferredEntitlement(ctx, q, now, previousUserID, userID, row.ID); err != nil {
 		return err
@@ -326,7 +344,7 @@ func processTaxPackEvent(ctx context.Context, svc *entitlements.Service, e *webh
 
 // upsertSubscription is DefaultBillingService.upsertSubscription. It also
 // returns the previous owner when the row already existed.
-func upsertSubscription(ctx context.Context, q *billingdb.Queries, now time.Time, userID uuid.UUID, e *webhookEvent, status string, cancelledAt *time.Time) (*subscriptionRow, *uuid.UUID, error) {
+func upsertSubscription(ctx context.Context, q *billingdb.Queries, now time.Time, userID uuid.UUID, e *webhookEvent, status string, cancelledAt *time.Time, created *bool) (*subscriptionRow, *uuid.UUID, error) {
 	productID := eventProductID(e)
 	txn := *e.AppUserID + ":" + productID
 	if e.OriginalTransactionID != nil && *e.OriginalTransactionID != "" {
@@ -339,6 +357,7 @@ func upsertSubscription(ctx context.Context, q *billingdb.Queries, now time.Time
 	if err != nil {
 		return nil, nil, err
 	}
+	*created = row.isNew
 	var previous *uuid.UUID
 	if !row.isNew {
 		p := row.UserID
@@ -372,6 +391,19 @@ func upsertSubscription(ctx context.Context, q *billingdb.Queries, now time.Time
 		return nil, nil, err
 	}
 	return row, previous, nil
+}
+
+// cancellationKeepsAccess is whether a CANCELLATION leaves the user on Pro.
+// A canceled subscription keeps access until its period ends. Vapor always
+// answered Pro, so a cancellation for a transaction it had never seen (or a
+// store refund arriving as CANCELLATION with an expiration in the past)
+// granted Pro with nothing paid for. v2 grants it only while a known period
+// end lies ahead, or for an existing subscription whose end is unknown.
+func cancellationKeepsAccess(row *subscriptionRow, isNewTransaction bool, now time.Time) bool {
+	if row.PeriodEndsAt != nil {
+		return row.PeriodEndsAt.After(now)
+	}
+	return !isNewTransaction
 }
 
 // applyPendingPlanChange records a PRODUCT_CHANGE's new product as pending

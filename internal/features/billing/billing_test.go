@@ -663,6 +663,21 @@ func TestTrialExpirationJobSweeps(t *testing.T) {
 	}
 }
 
+// Vapor's sweep took any 500 trial users in no order, so with more than 500
+// running trials an expired one could be starved. The earliest end is first.
+func TestTrialExpirationSweepReachesExpiredBehind500Running(t *testing.T) {
+	app := newApp(t)
+	app.exec(`INSERT INTO users (id, email, password_hash, trial_started_at, trial_days, trial_tier, created_at, updated_at)
+		SELECT gen_random_uuid(), 'bulk-trial-' || g || '@example.com', 'x', now(), 7, 'temporary', now(), now()
+		FROM generate_series(1, 510) g`)
+	expired := app.user("starved")
+	app.exec(`UPDATE users SET trial_started_at = now() - interval '30 days', trial_days = 7, trial_tier = 'temporary' WHERE id = $1`, expired)
+	RunTrialExpirationOnce(app.ctx(), app.Deps, app.svc())
+	if app.count(`SELECT count(*) FROM users WHERE id = $1 AND trial_tier IS NULL AND had_trial`, expired) != 1 {
+		t.Fatal("expired trial starved")
+	}
+}
+
 func TestTrialIntervalFromEnv(t *testing.T) {
 	for raw, want := range map[string]time.Duration{"": time.Hour, "abc": time.Hour, "0": time.Minute, "-3": time.Minute, "15": 15 * time.Minute} {
 		t.Setenv("TRIAL_EXPIRATION_CHECK_INTERVAL_MINUTES", raw)

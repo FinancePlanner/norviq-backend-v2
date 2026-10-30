@@ -212,8 +212,10 @@ func TestWebhookUnknownAndNonRenewingTypesTouchNothing(t *testing.T) {
 }
 
 // Vapor's decoder rewrote snake_case keys before lookup, so camelCase
-// payloads decode too, and grace_period_expiration_at_ms never does.
-func TestWebhookDecodesCamelCaseAndIgnoresGraceExpirationAlias(t *testing.T) {
+// payloads decode too. RevenueCat's grace_period_expiration_at_ms never
+// decoded in Vapor (a bug); v2 reads it, so a billing issue inside the grace
+// period keeps Pro.
+func TestWebhookDecodesCamelCaseAndGraceExpirationAlias(t *testing.T) {
 	app := newApp(t)
 	user := app.user("camel")
 	grace := time.Now().Add(24 * time.Hour).UnixMilli()
@@ -223,9 +225,61 @@ func TestWebhookDecodesCamelCaseAndIgnoresGraceExpirationAlias(t *testing.T) {
 		t.Fatal(s)
 	}
 	sub, ent := app.subscriptionOf(user), app.entitlementOf(user)
-	if sub.Plan != "pro_monthly" || sub.GracePeriodEndsAt != nil || ent.Level != "free" {
+	if sub.Plan != "pro_monthly" || sub.GracePeriodEndsAt == nil || sub.GracePeriodEndsAt.UnixMilli() != grace || ent.Level != "pro" {
 		t.Fatalf("sub=%+v ent=%+v", sub, ent)
 	}
+}
+
+// Vapor answered 500 (billing_events foreign key) for a UUID with no user
+// row, so RevenueCat retried forever. v2 stores the event without a user.
+func TestWebhookUnknownUserUUIDPersistsEventOnly(t *testing.T) {
+	app := newApp(t)
+	id := uuid.NewString()
+	if s := app.post(makePayload("INITIAL_PURCHASE", id, upperID(uuid.New()), payloadOpts{}), testSecret); s != 200 {
+		t.Fatal(s)
+	}
+	if app.count(`SELECT count(*) FROM billing_events WHERE provider_event_id = $1 AND user_id IS NULL`, id) != 1 {
+		t.Fatal("event not stored without a user")
+	}
+	if app.count(`SELECT count(*) FROM subscriptions`) != 0 || app.count(`SELECT count(*) FROM entitlements`) != 0 {
+		t.Fatal("state mutated")
+	}
+}
+
+// Vapor granted Pro on every CANCELLATION, even for a transaction it had
+// never seen or one whose period had already ended.
+func TestWebhookCancellationGrantsProOnlyWhilePeriodRuns(t *testing.T) {
+	cases := []struct {
+		name  string
+		opts  payloadOpts
+		level string
+	}{
+		{"unknown-no-expiry", payloadOpts{}, "free"},
+		{"unknown-past-expiry", payloadOpts{expirationAtMs: msFromNow(-time.Hour)}, "free"},
+		{"unknown-future-expiry", payloadOpts{expirationAtMs: msFromNow(24 * time.Hour)}, "pro"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newApp(t)
+			user := app.user("cancel")
+			if s := app.post(makePayload("CANCELLATION", uuid.NewString(), upperID(user), tc.opts), testSecret); s != 200 {
+				t.Fatal(s)
+			}
+			sub, ent := app.subscriptionOf(user), app.entitlementOf(user)
+			if sub.Status != entitlements.StatusCancelled || sub.CancelledAt == nil || ent.Level != tc.level {
+				t.Fatalf("sub=%+v ent=%+v", sub, ent)
+			}
+		})
+	}
+	t.Run("known-past-expiry", func(t *testing.T) {
+		app := newApp(t)
+		user := app.user("cancel-known")
+		app.post(makePayload("INITIAL_PURCHASE", uuid.NewString(), upperID(user), payloadOpts{expirationAtMs: msFromNow(24 * time.Hour)}), testSecret)
+		app.post(makePayload("CANCELLATION", uuid.NewString(), upperID(user), payloadOpts{expirationAtMs: msFromNow(-time.Minute)}), testSecret)
+		if ent := app.entitlementOf(user); ent.Level != "free" {
+			t.Fatalf("ent=%+v", ent)
+		}
+	})
 }
 
 func TestWebhookDecodeErrors(t *testing.T) {

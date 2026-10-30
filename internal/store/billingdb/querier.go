@@ -22,8 +22,10 @@ type Querier interface {
 	CurrentSubscription(ctx context.Context, userID uuid.UUID) (Subscription, error)
 	DeleteTaxPack(ctx context.Context, arg DeleteTaxPackParams) error
 	EntitlementByUser(ctx context.Context, userID uuid.UUID) (Entitlement, error)
-	// Vapor's query: any 500 users with trial fields set, in no particular order,
-	// expired or not. Expiry is decided in Go.
+	// Up to 500 users with trial fields set, earliest trial end first, expired
+	// or not; expiry is decided in Go. Vapor had no ORDER BY, so with more than
+	// 500 running trials an expired one could be skipped tick after tick. Swept
+	// users lose their trial fields, so the ordering always reaches the rest.
 	ExpiredTrialCandidates(ctx context.Context) ([]ExpiredTrialCandidatesRow, error)
 	InsertBillingEvent(ctx context.Context, arg InsertBillingEventParams) error
 	InsertCouponRedemption(ctx context.Context, arg InsertCouponRedemptionParams) error

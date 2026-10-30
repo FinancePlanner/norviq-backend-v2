@@ -7,13 +7,16 @@ SET trial_started_at = $2, trial_days = $3, trial_tier = $4, updated_at = $5
 WHERE id = $1;
 
 -- name: ExpiredTrialCandidates :many
--- Vapor's query: any 500 users with trial fields set, in no particular order,
--- expired or not. Expiry is decided in Go.
+-- Up to 500 users with trial fields set, earliest trial end first, expired
+-- or not; expiry is decided in Go. Vapor had no ORDER BY, so with more than
+-- 500 running trials an expired one could be skipped tick after tick. Swept
+-- users lose their trial fields, so the ordering always reaches the rest.
 SELECT id, trial_started_at, trial_days
 FROM users
 WHERE trial_tier IS NOT NULL
   AND trial_started_at IS NOT NULL
   AND trial_days IS NOT NULL
+ORDER BY trial_started_at + trial_days * interval '1 day', id
 LIMIT 500;
 
 -- name: ClearUserTrial :exec

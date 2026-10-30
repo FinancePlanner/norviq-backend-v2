@@ -204,13 +204,21 @@ func (p Processor) adjustedCloses(ctx context.Context, instrumentKey string, fro
 	return out, nil
 }
 
-func (p Processor) historical(ctx context.Context, snapshot, configuration map[string]any) (map[string]any, error) {
-	preset := "covid_crash"
-	if s, ok := jsonString(configuration["catalog_id"]); ok {
-		preset = s
-	} else if s, ok := jsonString(configuration["catalogId"]); ok {
-		preset = s
+// historicalPreset reads the catalog id in the validator's order (catalogId,
+// then catalog_id). Vapor's processor read them the other way round, so a
+// configuration carrying both ran a preset the validator never checked.
+func historicalPreset(configuration map[string]any) string {
+	if s, ok := jsonString(configuration["catalogId"]); ok {
+		return s
 	}
+	if s, ok := jsonString(configuration["catalog_id"]); ok {
+		return s
+	}
+	return "covid_crash"
+}
+
+func (p Processor) historical(ctx context.Context, snapshot, configuration map[string]any) (map[string]any, error) {
+	preset := historicalPreset(configuration)
 	dates, ok := historicalWindows[preset]
 	if !ok {
 		dates = [2]string{"2020-02-19", "2020-03-23"}

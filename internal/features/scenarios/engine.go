@@ -656,8 +656,9 @@ func (e Engine) Simulate(spec SimulationSpec) SimulationOutput {
 	}
 	out := SimulationOutput{Bands: bandsFrom(columns), MedianMaximumDrawdown: percentile(sortedCopy(drawdowns), 0.5)}
 	if spec.TargetAmount != nil {
-		// Swift divides by the requested pathCount even when canceled.
-		out.GoalProbability = ptr(float64(successes) / float64(pathCount))
+		// Divided by the paths actually simulated: Swift divided by the
+		// requested pathCount, which understated it after a cancel.
+		out.GoalProbability = ptr(float64(successes) / float64(max(1, len(drawdowns))))
 	}
 	// `positiveShortfalls.isEmpty ? (target == nil ? nil : 0) : mean`.
 	if hasPositive(shortfalls) {

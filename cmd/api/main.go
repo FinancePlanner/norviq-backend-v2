@@ -27,6 +27,7 @@ import (
 	"norviq-api/internal/features"
 	"norviq-api/internal/middleware"
 	"norviq-api/internal/migrate"
+	"norviq-api/internal/platform/realtime"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store"
 
@@ -177,6 +178,9 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 		Handler:           srv.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Open realtime streams end with the process (RealtimeBus shutdown):
+	// Shutdown does not wait for hijacked or long-lived SSE responses.
+	httpServer.RegisterOnShutdown(realtime.FinishAll)
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("listening", "port", cfg.Port, "env", cfg.Environment, "legacy_upstream", cfg.LegacyUpstreamURL)

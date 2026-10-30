@@ -23,7 +23,12 @@ client release. Then archive the Vapor repo.
   `V2_DISABLED_ROUTES` sends any route back to Vapor without a deploy.
   `V2_NATIVE_PREFIXES` (e.g. `/v1/auth,/health,/.well-known`) narrows v2 to
   the ported routes under those prefixes, so production can widen domain by
-  domain with a values change. The
+  domain with a values change.
+- **Realtime is in-process** (as in Vapor; no Redis pub/sub). An SSE client on
+  `/v1/realtime/stream` only sees events published by the same process, so
+  `/v1/realtime` must flip together with every route that publishes to it:
+  `/v1/groups`, `/v1/group-channels`, `/v1/group-invites`,
+  `/v1/group-messages`. Keep api-v2 at one replica. The
   ingress pointing back at the Vapor service is the full rollback.
 - Shared Redis keeps rate-limit buckets and idempotency keys consistent across
   both processes. The Vapor-compatible cache format is in

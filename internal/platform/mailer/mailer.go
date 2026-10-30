@@ -27,6 +27,10 @@ type Message struct {
 	Body        string
 	Purpose     string     // "" logs as "general"
 	ChallengeID *uuid.UUID // MFA challenge, for log correlation
+	// HTMLBody, when set, is sent as the HTML part next to Body.
+	HTMLBody *string
+	// Headers are extra message headers, e.g. List-Unsubscribe.
+	Headers map[string]string
 }
 
 // Mailer delivers a message or returns an error the caller may surface.
@@ -57,12 +61,17 @@ type resendPayload struct {
 	To      []string `json:"to"`
 	Subject string   `json:"subject"`
 	Text    string   `json:"text"`
+	// MailMessage.htmlBody and headers (nil when empty), omitted when absent.
+	HTML    *string           `json:"html,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // Send delivers the message; any non-2xx answer is a 503 "Unable to send
 // email right now.", as in Vapor.
 func (r Resend) Send(ctx context.Context, m Message) error {
-	body, err := apijson.Marshal(resendPayload{From: r.FromEmail, To: []string{m.To}, Subject: m.Subject, Text: m.Body})
+	body, err := apijson.Marshal(resendPayload{
+		From: r.FromEmail, To: []string{m.To}, Subject: m.Subject, Text: m.Body, HTML: m.HTMLBody, Headers: m.Headers,
+	})
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,52 @@
+# Order-dependent groups and digest cases: the first backend to run
+# creates, joins or deletes, so the second sees the next state. Run once per
+# order, resetting the fixtures before each run (flagged Vapor on :18127, v2
+# on :18117, as in groups.jsonl):
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/groups-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:18127 -b http://127.0.0.1:18117 -jwt-secret parity-secret -cases parity/groups-ordered.jsonl \
+#     -ignore requestId,serverTime,id,defaultChannelId,groupId,createdAt,joinedAt,code,url,expiresAt,lastMessageAt,messageId
+#   (reset again, then the same with -a and -b swapped)
+# Result 2026-10-29, both orders: 39 cases, the same 5 first-mover diffs
+# (send-message 201/200, the retry returning the original; accept-invitation
+# 200/404; create-channel 200/409 channel_name_taken; delete-channel 204/404;
+# delete-group 204/404). redeem-link, ban-gus, unban-cy and eve-leaves are
+# idempotent (204/200 both times), and every follow-up read matches.
+{"name": "create-group", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000006", "body": {"name": "Parity new", "description": "Fresh", "iconEmoji": "🌱", "topic": "custom", "visibility": "private"}}
+{"name": "send-message", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "o-1", "body": "ordered hello"}}
+{"name": "mark-read", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/read", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"seq": 5}}
+{"name": "mark-read-beyond", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/read", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000008", "body": {"seq": 99}}
+{"name": "delete-own-message", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "admin-deletes-message", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000304", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "report-message", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302/report", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"reason": "spam", "note": "  buy my course  "}}
+{"name": "accept-invitation", "path": "/v1/groups/invitations/9a0e0000-0000-4000-8000-000000000403/accept", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "redeem-link", "path": "/v1/group-invites/PARITYCODE1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "create-channel", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/channels", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Ordered Talk", "topic": "T"}}
+{"name": "update-group", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"description": "Updated", "iconEmoji": "📈", "ticker": "$msft"}}
+{"name": "notifications-off", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/notifications", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"pushEnabled": false}}
+{"name": "promote-gus", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000008", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"role": "admin"}}
+{"name": "ban-gus", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userId": "9a0e0000-0000-4000-8000-000000000008", "reason": "spam"}}
+{"name": "unban-cy", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans/9a0e0000-0000-4000-8000-000000000003", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "create-invite", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"expiresInHours": 48, "maxUses": 3}}
+{"name": "revoke-invite", "path": "/v1/group-invites/9a0e0000-0000-4000-8000-000000000401", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "eve-leaves", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/leave", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "delete-channel", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000202", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "join-public", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000103/join", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "delete-group", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000102", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-prefs-create", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"emailEnabled": true, "country": "ea", "weekday": 1, "localHour": 7, "timezone": "America/Sao_Paulo"}}
+{"name": "digest-unsubscribe", "path": "/v1/digest/unsubscribe?token=parity-groups-unsub-ana", "method": "POST"}
+{"name": "after-my-groups-ana", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-my-groups-bo", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "after-my-groups-fay", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "after-my-groups-dee", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "after-my-groups-eve", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "after-my-groups-gus", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000008"}
+{"name": "after-detail-g1", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-members-g1", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-bans-g1", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-invites-g1", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-messages-c1", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-unread-ana", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-unread-bo", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "after-invitations-fay", "path": "/v1/groups/invitations", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "after-digest-prefs-ana", "path": "/v1/digest-preferences", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "after-digest-prefs-bo", "path": "/v1/digest-preferences", "as": "9a0e0000-0000-4000-8000-000000000002"}

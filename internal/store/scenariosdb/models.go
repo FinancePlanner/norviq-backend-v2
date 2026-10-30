@@ -21,3 +21,37 @@ type PortfolioScenarioSnapshot struct {
 	Warnings           json.RawMessage
 	CreatedAt          *time.Time
 }
+
+type ScenarioDefinition struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	PortfolioListID uuid.UUID
+	FinancialGoalID *uuid.UUID
+	Name            string
+	Kind            string
+	Configuration   json.RawMessage
+	IsSaved         bool
+	CreatedAt       *time.Time
+	UpdatedAt       *time.Time
+}
+
+type ScenarioRun struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	ScenarioID        uuid.UUID
+	SnapshotID        uuid.UUID
+	State             string
+	Progress          float64
+	Seed              string
+	DeduplicationHash string
+	EngineVersion     string
+	CatalogVersion    string
+	Result            json.RawMessage
+	ErrorMessage      *string
+	LeaseOwner        *string
+	LeaseExpiresAt    *time.Time
+	CreatedAt         *time.Time
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	ExpiresAt         *time.Time
+}

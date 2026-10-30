@@ -1,0 +1,24 @@
+# AI insights, view summary, chat/stream and /v1/ai/chat: gate and 4xx paths
+# only (no case reaches a model). Run parity/ai-assistant-setup.sql first.
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:<v2> -jwt-secret parity-secret -cases parity/ai-gated.jsonl
+{"name": "insights-expenses-unauth", "method": "GET", "path": "/v1/ai/insights/expenses"}
+{"name": "insights-expenses-free", "method": "GET", "path": "/v1/ai/insights/expenses", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "insights-portfolio-free", "method": "GET", "path": "/v1/ai/insights/portfolio", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "insights-summary-free", "method": "GET", "path": "/v1/ai/insights/summary", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "view-summary-unauth", "method": "GET", "path": "/v1/ai/view-summary/home"}
+{"name": "view-summary-unknown-scope", "method": "GET", "path": "/v1/ai/view-summary/bogus", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "view-summary-free", "method": "GET", "path": "/v1/ai/view-summary/home", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "view-summary-free-bad-query", "method": "GET", "path": "/v1/ai/view-summary/tax?taxYear=abc", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "view-summary-pro-bad-taxyear", "method": "GET", "path": "/v1/ai/view-summary/tax?taxYear=abc", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "view-summary-pro-bare-country", "method": "GET", "path": "/v1/ai/view-summary/economy?country", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "view-summary-pro-bad-refresh", "method": "GET", "path": "/v1/ai/view-summary/home?refresh=off", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "chat-unauth", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/chat", "body": {"content": "hi"}}
+{"name": "chat-bad-id", "method": "POST", "path": "/v1/ai/assistant/conversations/nope/chat", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"content": "hi"}}
+{"name": "chat-foreign", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/chat", "as": "a2a2a2a2-0000-4000-8000-000000000002", "body": {"content": "hi"}}
+{"name": "chat-empty", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/chat", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"content": "   "}}
+{"name": "chat-no-body", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/chat", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {}}
+{"name": "stream-unauth", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/stream", "body": {"content": "hi"}}
+{"name": "stream-foreign", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c1/stream", "as": "a2a2a2a2-0000-4000-8000-000000000002", "body": {"content": "hi"}}
+{"name": "stream-bad-id", "method": "POST", "path": "/v1/ai/assistant/conversations/nope/stream", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"content": "hi"}}
+{"name": "ai-chat-unauth", "method": "POST", "path": "/v1/ai/chat", "body": {"messages": [{"role": "user", "content": "hi"}]}}
+{"name": "ai-chat-free", "method": "POST", "path": "/v1/ai/chat", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"messages": [{"role": "user", "content": "hi"}]}}

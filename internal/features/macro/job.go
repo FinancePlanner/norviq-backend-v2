@@ -32,6 +32,15 @@ func (s *SyncStatus) RecordSuccess(c Country, t time.Time) {
 	s.last[c] = t
 }
 
+var sharedStatus sync.Map // *server.Deps -> *SyncStatus
+
+// SharedSyncStatus is app.macroSyncStatus: one per Deps, written by
+// RefreshJob and read by the readiness check.
+func SharedSyncStatus(d *server.Deps) *SyncStatus {
+	v, _ := sharedStatus.LoadOrStore(d, &SyncStatus{})
+	return v.(*SyncStatus)
+}
+
 // LastSuccess is lastSuccessAt(_:).
 func (s *SyncStatus) LastSuccess(c Country) (time.Time, bool) {
 	s.mu.Lock()
@@ -114,7 +123,7 @@ func (j RefreshJob) Run(ctx context.Context, d *server.Deps) {
 	d.Logger.Info("macro_refresh scheduled", "countries", strings.Join(names, ","), "tick", cadence.Tick.String())
 	status := j.Status
 	if status == nil {
-		status = &SyncStatus{}
+		status = SharedSyncStatus(d)
 	}
 	delay := j.InitialDelay
 	if delay == 0 {

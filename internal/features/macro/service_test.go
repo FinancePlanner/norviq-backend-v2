@@ -711,3 +711,32 @@ func TestNewServiceFromSettings(t *testing.T) {
 		t.Fatalf("%s %s", svc.sourceName(US), svc.sourceName(EA))
 	}
 }
+
+func TestHealthCheck(t *testing.T) {
+	ctx := context.Background()
+	if c := (&Service{Registry: NewRegistry(nil, discard)}).HealthCheck(ctx, &SyncStatus{}, time.Now()); c.Status != "skipped" ||
+		*c.Message != "No macro providers configured; macro refresh is disabled." {
+		t.Fatalf("%+v", c)
+	}
+	svc := &Service{Registry: NewRegistry(map[Country]CountryProviders{
+		US: {Primary: stubProvider{name: "us-ok"}},
+		BR: {Primary: stubProvider{name: "br-down", failing: true}},
+	}, discard)}
+	app := newApp(t, svc)
+	status := &SyncStatus{}
+	RefreshJob{}.RunOnce(ctx, app.Deps, svc, status, LoadCadence(Settings{}), true)
+	c := svc.HealthCheck(ctx, status, time.Now())
+	if c.Status != "degraded" || *c.Message != "Macro data stale: BR (never)." {
+		t.Fatalf("%+v %s", c, *c.Message)
+	}
+	// The snapshot table counts too: a fresh process (empty status) reads
+	// US's fetch time from the DB. 3 x 6h + 1h later, US is stale.
+	c = svc.HealthCheck(ctx, &SyncStatus{}, time.Now().Add(19*time.Hour))
+	if c.Status != "degraded" || *c.Message != "Macro data stale: US (19h), BR (never)." && *c.Message != "Macro data stale: BR (never), US (19h)." {
+		t.Fatalf("%+v %s", c, *c.Message)
+	}
+	status.RecordSuccess(BR, time.Now())
+	if c := svc.HealthCheck(ctx, status, time.Now()); c.Status != "healthy" || c.Message != nil {
+		t.Fatalf("%+v", c)
+	}
+}

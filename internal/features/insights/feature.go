@@ -12,6 +12,7 @@
 package insights
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -352,6 +353,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		return err
 	}
 	h := &handlers{d: d, b: b, ent: entitlements.NewFromEnv(d.DB)}
+	d.Health.Add("hermes", func(context.Context) server.HealthCheck {
+		return b.insights.HermesHealthCheck(os.Getenv("HERMES_SYNC_INTERVAL_SECONDS"))
+	})
 
 	// routes.swift: RateLimitMiddleware(60/60s, "ratelimit:insights")
 	// outside the controller, so it is per client IP and also covers the

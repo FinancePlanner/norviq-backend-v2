@@ -4,6 +4,7 @@
 package macro
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -127,6 +128,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		}
 	}
 	h := handlers{svc: svc}
+	status := SharedSyncStatus(d)
+	d.Health.Add("macro", func(ctx context.Context) server.HealthCheck {
+		return svc.HealthCheck(ctx, status, time.Now())
+	})
 	// routes.swift: api.grouped(RateLimitMiddleware(80/60s, "ratelimit:macro"))
 	// wraps the controller outside its authenticator, so the bucket is per
 	// client IP.

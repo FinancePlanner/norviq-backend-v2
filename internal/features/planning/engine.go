@@ -198,7 +198,7 @@ func InflatedTarget(target, annualInflationRate float64, months int) float64 {
 	if months <= 0 || !(math.Abs(annualInflationRate) > 0.000_000_001) {
 		return target
 	}
-	return target * Pow(1+annualInflationRate, float64(months)/12)
+	return float64(target * Pow(1+annualInflationRate, float64(months)/12))
 }
 
 // RequiredMonthlyContribution is PlanningEngine.requiredMonthlyContribution.
@@ -208,7 +208,7 @@ func RequiredMonthlyContribution(principal, target, annualRate float64, months i
 	}
 	goal := InflatedTarget(target, inflationRate, months)
 	rate := MonthlyRate(annualRate)
-	grown := principal * Pow(1+rate, float64(months))
+	grown := float64(principal * Pow(1+rate, float64(months)))
 	factor := FutureValue(0, 1, annualRate, months, growthRate)
 	if !(factor > 0.000_000_001) {
 		return 0, nil
@@ -271,11 +271,11 @@ func RetirementNeed(in NeedInput, projected float64) (Need, error) {
 		return Need{}, err
 	}
 	years := float64(in.YearsToRetirement())
-	annualCostToday := in.MonthlyCostOfLifeToday * 12
-	annualHousingToday := in.MonthlyHousingToday * 12
-	annualOtherIncomeToday := in.MonthlyOtherIncomeAtRetirement * 12
+	annualCostToday := float64(in.MonthlyCostOfLifeToday * 12)
+	annualHousingToday := float64(in.MonthlyHousingToday * 12)
+	annualOtherIncomeToday := float64(in.MonthlyOtherIncomeAtRetirement * 12)
 	inflationAtRetirement := Pow(1+in.AnnualInflationRate, years)
-	spending := math.Max(0, annualCostToday-annualOtherIncomeToday) * inflationAtRetirement
+	spending := float64(math.Max(0, annualCostToday-annualOtherIncomeToday) * inflationAtRetirement)
 	nestEgg := spending / in.WithdrawalRate
 
 	balance := projected
@@ -289,7 +289,7 @@ func RetirementNeed(in NeedInput, projected float64) (Need, error) {
 		if in.HousingEndsAtAge != nil && age >= *in.HousingEndsAtAge {
 			annualToday -= annualHousingToday
 		}
-		annualSpending := math.Max(0, annualToday) * factor
+		annualSpending := float64(math.Max(0, annualToday) * factor)
 		balance = float64(balance*(1+in.ExpectedAnnualReturn)) - annualSpending
 		depletion = append(depletion, DepletionYear{Age: age, AnnualSpending: annualSpending, EndingBalance: math.Max(0, balance)})
 		if balance <= 0 {
@@ -359,7 +359,7 @@ func PlanLever(in NeedInput, plan Assumptions) (Lever, error) {
 			break
 		}
 	}
-	sustainable := projected * in.WithdrawalRate
+	sustainable := float64(projected * in.WithdrawalRate)
 	shortfallAnnual := math.Max(0, float64(target*in.WithdrawalRate)-sustainable)
 	deflator := Pow(1+in.AnnualInflationRate, float64(in.YearsToRetirement()))
 	reduction := shortfallAnnual / deflator / 12

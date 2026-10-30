@@ -377,7 +377,7 @@ func (h *handler) budgetPrefill(ctx context.Context, userID uuid.UUID, out *Pref
 			continue
 		}
 		share := math.Max(0, math.Min(it.UserSharePercent, 100)) / 100
-		amount := math.Max(0, it.PlannedAmount) * share
+		amount := float64(math.Max(0, it.PlannedAmount) * share)
 		// ScenarioBudgetSpending.expenseTotal, then the per-pillar loop:
 		// the same terms summed in the same order.
 		total += amount

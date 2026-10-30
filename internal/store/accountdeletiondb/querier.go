@@ -12,7 +12,16 @@ import (
 
 type Querier interface {
 	BankConnectionsForUser(ctx context.Context, userID uuid.UUID) ([]BankConnectionsForUserRow, error)
+	DeleteOwnAllocationModels(ctx context.Context, userID uuid.UUID) error
+	// allocation_models.created_by_user_id and rebalance_plans.created_by_user_id
+	// are ON DELETE RESTRICT and NOT NULL, so a user who ever created a model or
+	// plan could not be deleted (Vapor answered 500). The user's own portfolios'
+	// plans and models go first (plans before models: model_id is RESTRICT too);
+	// ones on someone else's portfolio pass to that portfolio's owner.
+	DeleteOwnRebalancePlans(ctx context.Context, userID uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ReassignAllocationModels(ctx context.Context, userID uuid.UUID) error
+	ReassignRebalancePlans(ctx context.Context, userID uuid.UUID) error
 	// UserProfileService.delete (DELETE /v1/users, DELETE /v1/users/:id).
 	UserExistsForDeletion(ctx context.Context, id uuid.UUID) (bool, error)
 }

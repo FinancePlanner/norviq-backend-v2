@@ -175,26 +175,40 @@ func TestDeleteByID(t *testing.T) {
 	}
 }
 
-// TestRestrictForeignKeyFailsDeletion ports a Vapor bug: a user who created
-// an allocation model cannot be deleted (ON DELETE RESTRICT), and the
-// request fails with a 500 after the bank links were already revoked.
-func TestRestrictForeignKeyFailsDeletion(t *testing.T) {
+// TestDeletionClearsRestrictForeignKeys: allocation_models and rebalance_plans
+// reference their creator ON DELETE RESTRICT. Vapor answered 500 for any
+// user who had created one (after revoking the bank links). v2 deletes the
+// user's own portfolios' models and plans, hands ones on someone else's
+// portfolio to that portfolio's owner, and revokes only after the commit.
+func TestDeletionClearsRestrictForeignKeys(t *testing.T) {
 	app, rev := newApp(t)
 	user := app.CreateUser("modeler@example.com")
-	listID := uuid.New()
-	exec(t, app, `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Main', now())`, listID, user)
-	exec(t, app, `INSERT INTO allocation_models (id, portfolio_id, created_by_user_id, name, grouping_mode, is_active, revision, base_currency,
-		default_target_threshold_bps, total_threshold_bps, fractional_shares_enabled, quantity_increment, minimum_trade_amount, flat_fee, variable_fee_bps)
-		VALUES ($1, $2, $3, 'm', 'asset', true, 1, 'EUR', 100, 100, false, 1, 0, 0, 0)`, uuid.New(), listID, user)
+	owner := app.CreateUser("owner@example.com")
+	ownList, sharedList := uuid.New(), uuid.New()
+	exec(t, app, `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Main', now())`, ownList, user)
+	exec(t, app, `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Family', now())`, sharedList, owner)
+	model := func(list uuid.UUID) uuid.UUID {
+		id := uuid.New()
+		exec(t, app, `INSERT INTO allocation_models (id, portfolio_id, created_by_user_id, name, grouping_mode, is_active, revision, base_currency,
+			default_target_threshold_bps, total_threshold_bps, fractional_shares_enabled, quantity_increment, minimum_trade_amount, flat_fee, variable_fee_bps)
+			VALUES ($1, $2, $3, 'm', 'asset', true, 1, 'EUR', 100, 100, false, 1, 0, 0, 0)`, id, list, user)
+		return id
+	}
+	model(ownList)
+	shared := model(sharedList)
 	exec(t, app, `INSERT INTO bank_connections (id, user_id, provider, provider_item_id, status, created_at) VALUES ($1, $2, 'plaid', 'item-r', 'active', now())`, uuid.New(), user)
+
 	r := app.Do(http.MethodDelete, "/v1/users", app.Token(user), nil)
-	if r.Status != http.StatusInternalServerError {
+	if r.Status != http.StatusOK {
 		t.Fatalf("got %d %s", r.Status, r.Body)
 	}
 	if len(rev.got) != 1 {
 		t.Fatalf("revocations %d", len(rev.got))
 	}
-	if n := count(t, app, `SELECT count(*) FROM users WHERE id = $1`, user); n != 1 {
-		t.Fatal("user deleted despite RESTRICT")
+	if n := count(t, app, `SELECT count(*) FROM users WHERE id = $1`, user); n != 0 {
+		t.Fatal("user not deleted")
+	}
+	if n := count(t, app, `SELECT count(*) FROM allocation_models WHERE id = $1 AND created_by_user_id = $2`, shared, owner); n != 1 {
+		t.Fatal("model on the other user's portfolio was not handed to its owner")
 	}
 }

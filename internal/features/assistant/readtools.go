@@ -284,9 +284,11 @@ func (h *handlers) executeChatTool(ctx context.Context, name, arguments string, 
 	return h.actions.execute(ctx, name, parseArgs(arguments), userID, mode), nil
 }
 
-// activityLabel is AIChatEvent.activityLabel(for:).
+// activityLabel is AIChatEvent.activityLabel(for:). Legacy names map to
+// their catalog name first (deliberate fix: Swift labeled the raw name, so
+// create_goal and create_expense showed "Working…").
 func activityLabel(tool string) string {
-	switch tool {
+	switch canonicalName(tool) {
 	case "add_expense":
 		return "Adding expense…"
 	case "update_expense":

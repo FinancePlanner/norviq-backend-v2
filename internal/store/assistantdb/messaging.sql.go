@@ -93,23 +93,27 @@ func (q *Queries) DeleteUserMessagingLinks(ctx context.Context, arg DeleteUserMe
 
 const insertMessagingLink = `-- name: InsertMessagingLink :exec
 INSERT INTO messaging_links (id, user_id, platform, external_id, last_update_id, created_at, last_seen_at, conversation_id)
-VALUES ($1, $2, $3, $4, 0, $5::timestamptz, NULL, NULL)
+VALUES ($1, $2, $3, $4, $5, $6::timestamptz, NULL, NULL)
 `
 
 type InsertMessagingLinkParams struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	Platform   string
-	ExternalID string
-	Now        time.Time
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	Platform     string
+	ExternalID   string
+	LastUpdateID int64
+	Now          time.Time
 }
 
+// last_update_id starts at the pairing update, so a redelivery of it is
+// deduped instead of running as the first message (Vapor stored 0).
 func (q *Queries) InsertMessagingLink(ctx context.Context, arg InsertMessagingLinkParams) error {
 	_, err := q.db.Exec(ctx, insertMessagingLink,
 		arg.ID,
 		arg.UserID,
 		arg.Platform,
 		arg.ExternalID,
+		arg.LastUpdateID,
 		arg.Now,
 	)
 	return err

@@ -18,8 +18,10 @@ UPDATE messaging_links SET conversation_id = @conversation_id WHERE id = @id;
 DELETE FROM messaging_links WHERE user_id = @user_id AND platform = @platform;
 
 -- name: InsertMessagingLink :exec
+-- last_update_id starts at the pairing update, so a redelivery of it is
+-- deduped instead of running as the first message (Vapor stored 0).
 INSERT INTO messaging_links (id, user_id, platform, external_id, last_update_id, created_at, last_seen_at, conversation_id)
-VALUES (@id, @user_id, @platform, @external_id, 0, @now::timestamptz, NULL, NULL);
+VALUES (@id, @user_id, @platform, @external_id, @last_update_id, @now::timestamptz, NULL, NULL);
 
 -- name: ClaimLinkCode :one
 -- MessagingLinkService.claimCode: the first unspent, unexpired code with

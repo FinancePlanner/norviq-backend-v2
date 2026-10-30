@@ -178,9 +178,8 @@ func TestStreamAppliesHarmlessWriteAndProposesDestructive(t *testing.T) {
 	if events(frames) != "started,tool,turn,done" || frames[0].data != "{}" || frames[3].data != "{}" {
 		t.Fatalf("frames = %+v", frames)
 	}
-	// activityLabel sees the raw (legacy) name, so create_goal is "Working…"
-	// (Vapor quirk, ported).
-	if frames[1].data != `{"label":"Working…"}` {
+	// The legacy create_goal maps to add_goal's label (Vapor sent "Working…").
+	if frames[1].data != `{"label":"Adding the goal…"}` {
 		t.Fatalf("tool frame = %s", frames[1].data)
 	}
 	var turn turnResponse
@@ -468,6 +467,17 @@ func TestInlineDestructiveNeedsConfirmAndExecutorMapsErrors(t *testing.T) {
 	}
 	if _, err := th.h.executeConfirmed(ctx, "drop_table", `{}`, user); err == nil || !strings.Contains(err.Error(), "Unsupported assistant action.") {
 		t.Fatalf("unsupported = %v", err)
+	}
+	// update_expense finds the expense by a lowercase id (Vapor compared
+	// strings with the uppercase uuidString: "expense not found").
+	expense := a.execute(ctx, "add_expense", parseArgs(`{"title":"Lunch","amount":12,"pillar":"fun","occurred_on":"2026-10-01"}`), user, modeConfirmed)
+	var e struct{ ID string }
+	if err := json.Unmarshal([]byte(expense), &e); err != nil || e.ID == "" {
+		t.Fatalf("expense = %s", expense)
+	}
+	if got := a.execute(ctx, "update_expense", parseArgs(`{"id":"`+strings.ToLower(e.ID)+`","title":"Dinner"}`), user, modeConfirmed); strings.Contains(got, "error") ||
+		th.count(`SELECT count(*) FROM expenses WHERE user_id = $1 AND title = 'Dinner'`, user) != 1 {
+		t.Fatalf("update = %s", got)
 	}
 }
 

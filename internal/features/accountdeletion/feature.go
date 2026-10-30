@@ -7,7 +7,13 @@
 // (see deletion_test.go for the full list, asserted against the schema).
 // Before that it revokes each bank connection at its aggregator (best
 // effort) and removes the user's export files from disk, which no cascade
-// reaches. v2 does exactly the same, in the same order.
+// reaches.
+//
+// Deliberate fix: two RESTRICT foreign keys (allocation_models and
+// rebalance_plans created_by_user_id) made the delete fail with a 500 for any
+// user who had created a model or plan, after the bank links were already
+// revoked. v2 clears those rows first, deletes in one transaction, and
+// revokes the bank links only once the delete has committed.
 package accountdeletion
 
 import (
@@ -27,6 +33,8 @@ import (
 	"norviq-api/internal/store/dataexportdb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 )
 
@@ -57,7 +65,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		}
 		revoker = bankrevoke.FromEnv(vault, nil, d.Logger)
 	}
-	h := &handler{q: accountdeletiondb.New(d.DB), exports: dataexportdb.New(d.DB), revoker: revoker, logger: d.Logger}
+	h := &handler{db: d.DB, q: accountdeletiondb.New(d.DB), exports: dataexportdb.New(d.DB), revoker: revoker, logger: d.Logger}
 
 	// UserProfileController.boot: the first-party session authenticator,
 	// guard, FirstPartyOnlyMiddleware. No rate limit.
@@ -68,6 +76,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 }
 
 type handler struct {
+	db      *pgxpool.Pool
 	q       *accountdeletiondb.Queries
 	exports *dataexportdb.Queries
 	revoker BankRevoker
@@ -115,30 +124,45 @@ func (h *handler) delete(c *echo.Context, userID uuid.UUID) error {
 	if !exists {
 		return httpx.Abort(http.StatusUnauthorized, "User not found")
 	}
-	if err := Delete(ctx, h.q, h.exports, h.revoker, h.logger, userID); err != nil {
+	if err := Delete(ctx, h.db, h.exports, h.revoker, h.logger, userID); err != nil {
 		return err
 	}
 	msg := "User account deleted"
 	return httpx.OK(c, deleteResponse{Success: true, Message: &msg})
 }
 
-// Delete revokes the user's bank links, removes their export files, then
-// deletes the users row; the schema cascades the rest.
-func Delete(ctx context.Context, q *accountdeletiondb.Queries, exports *dataexportdb.Queries, revoker BankRevoker, logger *slog.Logger, userID uuid.UUID) error {
-	// Revoke the aggregators' access before the rows that hold their tokens
-	// cascade away.
+// Delete removes the user: the users row and everything the schema cascades
+// from it, in one transaction, then the export files and the bank links at
+// their aggregators. Revocation comes after the commit so a failed delete
+// never leaves a live account with its banks disconnected; the connection
+// rows (and their tokens) are read before they cascade away.
+func Delete(ctx context.Context, db *pgxpool.Pool, exports *dataexportdb.Queries, revoker BankRevoker, logger *slog.Logger, userID uuid.UUID) error {
+	q := accountdeletiondb.New(db)
 	conns, err := q.BankConnectionsForUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	for _, conn := range conns {
-		revoker.Revoke(ctx, bankrevoke.Connection{
-			ID: conn.ID, Provider: conn.Provider, ProviderItemID: conn.ProviderItemID, AccessTokenEnc: conn.AccessTokenEnc,
-		})
-	}
 	// Export files sit on disk outside the database; the rows cascade, the
 	// files would not.
 	files, err := exports.ExportFilesForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		q := q.WithTx(tx)
+		for _, step := range []func(context.Context, uuid.UUID) error{
+			q.DeleteOwnRebalancePlans,
+			q.DeleteOwnAllocationModels,
+			q.ReassignRebalancePlans,
+			q.ReassignAllocationModels,
+			q.DeleteUser,
+		} {
+			if err := step(ctx, userID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -149,5 +173,10 @@ func Delete(ctx context.Context, q *accountdeletiondb.Queries, exports *dataexpo
 	}
 	// Sign in with Apple stores no Apple refresh token, so there is nothing
 	// to revoke at Apple.
-	return q.DeleteUser(ctx, userID)
+	for _, conn := range conns {
+		revoker.Revoke(ctx, bankrevoke.Connection{
+			ID: conn.ID, Provider: conn.Provider, ProviderItemID: conn.ProviderItemID, AccessTokenEnc: conn.AccessTokenEnc,
+		})
+	}
+	return nil
 }

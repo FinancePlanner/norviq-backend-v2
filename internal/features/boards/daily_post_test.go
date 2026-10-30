@@ -31,8 +31,9 @@ var lisbonTZ = func() *time.Location {
 	return l
 }()
 
-func lisbonAt(y int, m time.Month, d, hh, mm int) time.Time {
-	return time.Date(y, m, d, hh, mm, 0, 0, lisbonTZ)
+// lisbonAt is a Lisbon wall-clock time in October 2026.
+func lisbonAt(d, hh, mm int) time.Time {
+	return time.Date(2026, time.October, d, hh, mm, 0, 0, lisbonTZ)
 }
 
 func ptrF(v float64) *float64 { return &v }
@@ -62,15 +63,15 @@ func TestDailySchedule(t *testing.T) {
 		want string
 	}{
 		// Wednesday 14 Oct 2026.
-		{lisbonAt(2026, 10, 14, 22, 30), "2026-10-14"},
-		{lisbonAt(2026, 10, 14, 10, 0), "2026-10-13"},
+		{lisbonAt(14, 22, 30), "2026-10-14"},
+		{lisbonAt(14, 10, 0), "2026-10-13"},
 		// Saturday 17 Oct: before 10:00 it is still Friday.
-		{lisbonAt(2026, 10, 17, 9, 59), "2026-10-16"},
-		{lisbonAt(2026, 10, 17, 10, 0), "2026-10-17"},
+		{lisbonAt(17, 9, 59), "2026-10-16"},
+		{lisbonAt(17, 10, 0), "2026-10-17"},
 		// Sunday 10:00 is Sunday; a Saturday missed until then is not written late.
-		{lisbonAt(2026, 10, 18, 10, 0), "2026-10-18"},
+		{lisbonAt(18, 10, 0), "2026-10-18"},
 		// Monday morning is Sunday.
-		{lisbonAt(2026, 10, 19, 9, 0), "2026-10-18"},
+		{lisbonAt(19, 9, 0), "2026-10-18"},
 	}
 	for _, c := range cases {
 		if got, _ := boards.DailyLatestDueDate(c.now); got != c.want {
@@ -452,7 +453,7 @@ const goodBody = "Nvidia closed at 131.24 USD on Monday, down 4.3% on the sessio
 	"The drop takes it 14.2% below its 52-week high of 152.89 USD, though the stock is still up 61.4% this year.\n" +
 	"\n" +
 	"Even after the slide the market values the company at $3.21 trillion, and the stock trades at 51.3x " +
-	"trailing earnings. That multiple prices in years of fast growth in data-centre sales, so a weak week " +
+	"trailing earnings. That multiple prices in years of fast growth in data-center sales, so a weak week " +
 	"moves the valuation more than it would for a slower business with steadier margins.\n" +
 	"\n" +
 	"A five-day fall of this size has come before every recent earnings report, and it often reversed once " +
@@ -808,7 +809,7 @@ func TestDailyRunnerSkipsAfterThreeFailures(t *testing.T) {
 	ctx := context.Background()
 	// Thursday 2026-10-22 at 01:00: the window for Wednesday has opened and
 	// the brief is no longer required.
-	now := lisbonAt(2026, 10, 22, 1, 0)
+	now := lisbonAt(22, 1, 0)
 	for i := range 3 {
 		r.Tick(ctx, now)
 		if status, _ := runRow(t, e, "2026-10-21"); status != "" {
@@ -835,7 +836,7 @@ func TestDailyRunnerWaitsForTheEveningBrief(t *testing.T) {
 		DB: e.app.Deps.DB, Logger: e.app.Deps.Logger,
 	}
 	ctx := context.Background()
-	now := lisbonAt(2026, 10, 22, 22, 45) // Thursday, ETF day
+	now := lisbonAt(22, 22, 45) // Thursday, ETF day
 	r.Tick(ctx, now)
 	if w.calls() != 0 {
 		t.Fatal("wrote before the evening brief")
@@ -853,7 +854,7 @@ func TestDailyPostJobRunsOnlyWhenEnabled(t *testing.T) {
 	w := &scriptedWriter{drafts: [][2]string{{"SPY is up 9.1% this year", etfBody}}}
 	job := boards.DailyPostJob{
 		Sources: fixedSources{}, Writer: w,
-		Now:          func() time.Time { return lisbonAt(2026, 10, 23, 1, 0) }, // Thursday's post, after midnight
+		Now:          func() time.Time { return lisbonAt(23, 1, 0) }, // Thursday's post, after midnight
 		InitialDelay: time.Millisecond, Interval: 5 * time.Millisecond,
 	}
 	if job.Name() != "daily_board_post" {

@@ -1,6 +1,7 @@
 package automation_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -360,7 +361,7 @@ func TestRebalancingUpsertValidationAndPersist(t *testing.T) {
 		t.Fatalf("stored targets: %s", stored)
 	}
 	g := e.Do("GET", base, tok, nil)
-	if g.Status != 200 || string(g.Body) != string(r.Body) {
+	if g.Status != 200 || !bytes.Equal(g.Body, r.Body) {
 		t.Fatalf("get after put:\n%s\nwant\n%s", g.Body, r.Body)
 	}
 	// A second PUT updates the same row.

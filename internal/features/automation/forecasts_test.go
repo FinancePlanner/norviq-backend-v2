@@ -1,6 +1,7 @@
 package automation_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -119,7 +120,7 @@ func TestForecastCRUD(t *testing.T) {
 		t.Fatalf("stored assumptions: %s", stored)
 	}
 	latest := e.Do("GET", one+"/runs/latest", tok, nil)
-	if latest.Status != 200 || string(trim(latest.Body)) != string(trim(r.Body)) {
+	if latest.Status != 200 || !bytes.Equal(trim(latest.Body), trim(r.Body)) {
 		t.Fatalf("latest:\n%s\nwant\n%s", latest.Body, r.Body)
 	}
 	// The same seed reproduces the same bands.

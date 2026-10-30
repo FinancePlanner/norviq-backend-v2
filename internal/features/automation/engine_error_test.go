@@ -17,7 +17,7 @@ func TestEngineErrorIs422(t *testing.T) {
 		}
 	}
 	other := errors.New("boom")
-	if engineError(other) != other {
+	if !errors.Is(engineError(other), other) {
 		t.Fatal("non-validation errors pass through")
 	}
 }

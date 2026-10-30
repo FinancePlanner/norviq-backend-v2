@@ -1,6 +1,7 @@
 package watchlist_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -162,7 +163,7 @@ func TestScreensPersistAndEvaluate(t *testing.T) {
 	}
 	one := "/v1/watchlist/screens/" + created.ID
 	g := e.Do("GET", one, token, nil)
-	if g.Status != 200 || string(g.Body) != string(r.Body) {
+	if g.Status != 200 || !bytes.Equal(g.Body, r.Body) {
 		t.Fatalf("get:\n%s\nwant\n%s", g.Body, r.Body)
 	}
 	if l := e.Do("GET", "/v1/watchlist/screens", token, nil); l.Status != 200 || string(l.Body) != "["+strings.TrimSpace(string(r.Body))+"]" {

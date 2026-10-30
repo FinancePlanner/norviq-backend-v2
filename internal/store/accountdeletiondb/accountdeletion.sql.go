@@ -47,12 +47,60 @@ func (q *Queries) BankConnectionsForUser(ctx context.Context, userID uuid.UUID) 
 	return items, nil
 }
 
+const deleteOwnAllocationModels = `-- name: DeleteOwnAllocationModels :exec
+DELETE FROM allocation_models
+WHERE portfolio_id IN (SELECT id FROM portfolio_lists WHERE user_id = $1)
+`
+
+func (q *Queries) DeleteOwnAllocationModels(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteOwnAllocationModels, userID)
+	return err
+}
+
+const deleteOwnRebalancePlans = `-- name: DeleteOwnRebalancePlans :exec
+
+DELETE FROM rebalance_plans
+WHERE portfolio_id IN (SELECT id FROM portfolio_lists WHERE user_id = $1)
+`
+
+// allocation_models.created_by_user_id and rebalance_plans.created_by_user_id
+// are ON DELETE RESTRICT and NOT NULL, so a user who ever created a model or
+// plan could not be deleted (Vapor answered 500). The user's own portfolios'
+// plans and models go first (plans before models: model_id is RESTRICT too);
+// ones on someone else's portfolio pass to that portfolio's owner.
+func (q *Queries) DeleteOwnRebalancePlans(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteOwnRebalancePlans, userID)
+	return err
+}
+
 const deleteUser = `-- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1
 `
 
 func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
+const reassignAllocationModels = `-- name: ReassignAllocationModels :exec
+UPDATE allocation_models am SET created_by_user_id = pl.user_id
+FROM portfolio_lists pl
+WHERE am.portfolio_id = pl.id AND am.created_by_user_id = $1
+`
+
+func (q *Queries) ReassignAllocationModels(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, reassignAllocationModels, userID)
+	return err
+}
+
+const reassignRebalancePlans = `-- name: ReassignRebalancePlans :exec
+UPDATE rebalance_plans rp SET created_by_user_id = pl.user_id
+FROM portfolio_lists pl
+WHERE rp.portfolio_id = pl.id AND rp.created_by_user_id = $1
+`
+
+func (q *Queries) ReassignRebalancePlans(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, reassignRebalancePlans, userID)
 	return err
 }
 

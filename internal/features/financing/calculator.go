@@ -3,6 +3,7 @@ package financing
 import (
 	"fmt"
 	"math"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,11 +13,16 @@ import (
 )
 
 // calcError is FinancingCalculationError. Vapor let it escape the handlers
-// as a non-Abort error, so it surfaces as a 500 whose reason (outside
-// production) is the case name.
+// as a non-Abort error, so bad offer input (a bad firstPaymentDate, a down
+// payment above the price, a negative balloon, no rate and no payment, a
+// currency mismatch, more than 3 offers) was a 500. v2 answers 400 with the
+// case name as the reason.
 type calcError string
 
 func (e calcError) Error() string { return string(e) }
+
+// StatusCode makes the error handler answer 400 (echo.HTTPStatusCoder).
+func (calcError) StatusCode() int { return http.StatusBadRequest }
 
 const (
 	errInvalidOffer calcError = "invalidOffer"

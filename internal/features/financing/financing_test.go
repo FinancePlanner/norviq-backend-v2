@@ -100,7 +100,8 @@ func TestPlanLifecycle(t *testing.T) {
 		t.Fatalf("match %v", m)
 	}
 	// Same expense again: unique constraint, Vapor's 500.
-	f.do(t, "POST", "/v1/financing/plans/"+id+"/installments/2/match", map[string]any{"expenseId": expense.String()}, 500)
+	// Vapor let the unique-constraint error through as a 500.
+	f.do(t, "POST", "/v1/financing/plans/"+id+"/installments/2/match", map[string]any{"expenseId": expense.String()}, 409)
 
 	var sched []map[string]any
 	f.do(t, "GET", "/v1/financing/plans/"+id+"/schedule", nil, 200).JSON(t, &sched)
@@ -239,10 +240,11 @@ func TestSimulationUsesBudget(t *testing.T) {
 	if r.Status != 403 || !bytes.Contains(r.Body, []byte(`"upgrade_required"`)) {
 		t.Fatalf("free: %d %s", r.Status, r.Body)
 	}
-	// One offer is free; a currency mismatch is the calculator's 500.
+	// One offer is free; a currency mismatch is the calculator's
+	// invalidOffer, a 400 (Vapor answered 500).
 	body["offers"] = []any{offer("a")}
 	body["currency"] = "USD"
-	r = f.do(t, "POST", "/v1/financing/simulations", body, 500)
+	r = f.do(t, "POST", "/v1/financing/simulations", body, 400)
 	if !bytes.Contains(r.Body, []byte("invalidOffer")) {
 		t.Fatalf("%s", r.Body)
 	}
@@ -271,7 +273,7 @@ func TestValidationAndGates(t *testing.T) {
 	}
 	bad = planBody("x")
 	bad["terms"].(map[string]any)["firstPaymentDate"] = "soon"
-	f.do(t, "POST", "/v1/financing/plans", bad, 500)
+	f.do(t, "POST", "/v1/financing/plans", bad, 400) // a 500 in Vapor
 	bad = planBody("x")
 	delete(bad["terms"].(map[string]any), "upfrontFees")
 	f.do(t, "POST", "/v1/financing/plans", bad, 400)
@@ -399,7 +401,7 @@ func TestImportURL(t *testing.T) {
 	var res map[string]any
 	f.do(t, "POST", "/v1/financing/imports/url", map[string]any{"url": "https://Offers.Example.com/offer"}, 200).JSON(t, &res)
 	draft := res["draft"].(map[string]any)
-	if res["sourceDomain"] != "offers.example.com" || draft["termMonths"] != float64(48) || draft["purchaseAmount"] != float64(30) || draft["confidence"] != float64(1) {
+	if res["sourceDomain"] != "offers.example.com" || draft["termMonths"] != float64(48) || draft["purchaseAmount"] != float64(30000) || draft["confidence"] != float64(1) {
 		t.Fatalf("%v", res)
 	}
 	if gotUA != "Norviq Financing Import/1.0" {
@@ -411,13 +413,17 @@ func TestImportURL(t *testing.T) {
 			t.Fatalf("%s", r.Body)
 		}
 	}
-	for _, u := range []string{"http://example.com", "https://localhost/x", "https://10.1.2.3/", "https:example.com", " https://example.com", "https://%6Cocalhost/"} {
+	// Vapor let "[::1]" through (brackets kept) and the other IPv6/CGNAT
+	// literals were never checked; "https:///x" was a 500.
+	for _, u := range []string{
+		"http://example.com", "https://localhost/x", "https://10.1.2.3/", "https:example.com", " https://example.com", "https://%6Cocalhost/",
+		"https://[::1]/", "https://[fd00::1]/", "https://[fe80::1]/", "https://100.64.0.1/", "https://[::ffff:127.0.0.1]/", "https:///x",
+	} {
 		r := f.do(t, "POST", "/v1/financing/imports/url", map[string]any{"url": u}, 400)
 		if !bytes.Contains(r.Body, []byte("Only public HTTPS offer pages can be imported.")) {
 			t.Fatalf("%s: %s", u, r.Body)
 		}
 	}
-	f.do(t, "POST", "/v1/financing/imports/url", map[string]any{"url": "https:///x"}, 500)
 	if r := f.app.Do("POST", "/v1/financing/imports/url", f.app.Token(f.free), map[string]any{"url": "https://example.com"}); r.Status != 403 {
 		t.Fatalf("free %d", r.Status)
 	}

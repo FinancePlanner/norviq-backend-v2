@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"norviq-api/internal/httpx"
@@ -25,34 +26,66 @@ import (
 // 10s connect timeout, no read timeout, AsyncHTTPClient's default redirect
 // policy (follow up to 5, no cycles) and no response decompression.
 //
-// Vapor bug ported faithfully: the blocked-host check runs on the URL the
-// user sent only. Redirect targets and DNS answers are not re-checked, so a
-// public page that redirects to (or a name that resolves to) a private
-// address is still fetched.
+// Vapor checked only the host of the URL the user sent, so a public page
+// that redirected to (or a name that resolved to) a private address was
+// still fetched (SSRF). v2 also re-checks every redirect target and refuses
+// to dial a non-public IP, whatever name led to it. No proxy is used, so the
+// dialed address is the real target.
 func importClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
+	transport.Proxy = nil
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: refusePrivateDial}).DialContext
 	transport.DisableCompression = true
-	return &http.Client{
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > 5 {
-				return errors.New("redirectLimitReached")
-			}
-			for _, prev := range via {
-				if prev.URL.String() == req.URL.String() {
-					return errors.New("redirectCycleDetected")
-				}
-			}
-			return nil
-		},
+	return &http.Client{Transport: transport, CheckRedirect: checkImportRedirect}
+}
+
+// errBlockedTarget is a redirect or dial to a host an import may not reach.
+var errBlockedTarget = errors.New("blocked import target")
+
+func checkImportRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > 5 {
+		return errors.New("redirectLimitReached")
 	}
+	for _, prev := range via {
+		if prev.URL.String() == req.URL.String() {
+			return errors.New("redirectCycleDetected")
+		}
+	}
+	if host, ok := importHost(req.URL.String()); !ok || host == "" {
+		return errBlockedTarget
+	}
+	return nil
+}
+
+// refusePrivateDial is the dialer's Control hook: it sees the resolved
+// address, so DNS answers pointing inside the network are refused too.
+func refusePrivateDial(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !publicIP(ip) {
+		return errBlockedTarget
+	}
+	return nil
+}
+
+// cgnat is 100.64.0.0/10 (carrier-grade NAT, also used inside clusters).
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// publicIP is false for loopback, private (RFC 1918 and fc00::/7),
+// link-local, multicast, unspecified and CGNAT addresses.
+func publicIP(ip net.IP) bool {
+	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() &&
+		!ip.IsInterfaceLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified() && !cgnat.Contains(ip)
 }
 
 // importHost is the URLComponents(string:) part of importURL: the
-// lowercased host, or ok=false when Vapor answered 400. An IPv6 literal
-// keeps its brackets (URLComponents.host did), so "[::1]" is not a blocked
-// host: also ported as is.
+// lowercased host, or ok=false when the URL is not an https URL to a public
+// host. Vapor kept an IPv6 literal's brackets, so "[::1]" slipped past the
+// blocked-host check; v2 strips them, and also refuses non-public IP
+// literals the name list misses (IPv6 private ranges, CGNAT).
 func importHost(raw string) (host string, ok bool) {
 	u, err := url.Parse(raw)
 	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Opaque != "" {
@@ -61,16 +94,11 @@ func importHost(raw string) (host string, ok bool) {
 	if !strings.HasPrefix(raw[len(u.Scheme)+1:], "//") {
 		return "", false // no authority: host is nil
 	}
-	host = u.Host
-	if strings.HasPrefix(host, "[") {
-		if i := strings.Index(host, "]"); i >= 0 {
-			host = host[:i+1]
-		}
-	} else {
-		host = u.Hostname()
-	}
-	host = strings.ToLower(host)
+	host = strings.ToLower(u.Hostname())
 	if netguard.IsBlockedHost(host) {
+		return "", false
+	}
+	if ip := net.ParseIP(host); ip != nil && !publicIP(ip) {
 		return "", false
 	}
 	return host, true
@@ -89,12 +117,10 @@ func (h *handlers) importURL(c *echo.Context) error {
 		return err
 	}
 	host, ok := importHost(req.URL)
-	if !ok {
-		return httpx.BadRequest("Only public HTTPS offer pages can be imported.")
-	}
-	if host == "" {
-		// AsyncHTTPClient refused the request; Vapor answered 500.
-		return errors.New("HTTPClientError.emptyHost")
+	if !ok || host == "" {
+		// An empty host ("https:///x") was a 500 HTTPClientError.emptyHost
+		// in Vapor; it is the same bad input as any other non-public URL.
+		return errNotPublic
 	}
 	out, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, req.URL, nil)
 	if err != nil {
@@ -102,6 +128,9 @@ func (h *handlers) importURL(c *echo.Context) error {
 	}
 	out.Header.Set("User-Agent", "Norviq Financing Import/1.0")
 	resp, err := h.client.Do(out)
+	if errors.Is(err, errBlockedTarget) {
+		return errNotPublic
+	}
 	if err != nil {
 		return err
 	}
@@ -115,6 +144,8 @@ func (h *handlers) importURL(c *echo.Context) error {
 	}
 	return httpx.OK(c, extractOffer(string(body), &host))
 }
+
+var errNotPublic = httpx.BadRequest("Only public HTTPS offer pages can be imported.")
 
 var errMissingFile = httpx.BadRequest("Missing or oversized file.")
 

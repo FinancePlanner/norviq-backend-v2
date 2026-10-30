@@ -116,8 +116,6 @@ func TestWebAuthnRegisterAndSignIn(t *testing.T) {
 		reg.PublicKey.Timeout != 300000 || reg.PublicKey.Attestation != "none" || len(reg.PublicKey.PubKeyCredParams) != 10 {
 		t.Fatalf("%s", r.Body)
 	}
-	// 18 zero bytes spell the same in base64 and base64url, so Vapor's
-	// mismatched lookup (see webAuthnLoginVerify) still finds it.
 	key := newSoftKey(t, make([]byte, 18))
 	expect(t, h.req("POST", "/v1/auth/webauthn/register/verify", a.Token, key.attestation(t, b64.EncodeToString([]byte("not-issued"))), nil), 401, "Passkey challenge expired or invalid.")
 	r = h.req("POST", "/v1/auth/webauthn/register/verify", a.Token, key.attestation(t, reg.PublicKey.Challenge), map[string]string{"Origin": origin})
@@ -161,11 +159,18 @@ func TestWebAuthnStoresStandardBase64CredentialID(t *testing.T) {
 	if stored != "+//+AQ==" {
 		t.Fatalf("stored %q", stored)
 	}
-	// Faithful to Vapor: sign-in looks the credential up by its base64url id.
+	// Sign-in finds it although the client's base64url id spells it
+	// differently (Vapor answered 401 "Unknown passkey." here).
 	r = h.Do("POST", "/v1/auth/webauthn/login/options", "", nil)
 	var login struct{ PublicKey loginOptions }
 	r.JSON(t, &login)
-	expect(t, h.Do("POST", "/v1/auth/webauthn/login/verify", "", key.assertion(t, login.PublicKey.Challenge)), 401, "Unknown passkey.")
+	r = h.Do("POST", "/v1/auth/webauthn/login/verify", "", key.assertion(t, login.PublicKey.Challenge))
+	expect(t, r, 200, "")
+	var out AuthResponse
+	r.JSON(t, &out)
+	if out.UserID != a.UserID {
+		t.Fatalf("%s", r.Body)
+	}
 }
 
 func TestWebAuthnOrigin(t *testing.T) {

@@ -166,10 +166,15 @@ func (s *service) webAuthnLoginVerify(c *echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	q := identitydb.New(s.d.DB)
-	// Vapor looks the credential up by the id exactly as the client sent it
-	// (base64url), while registration stored the standard-base64 spelling.
-	// Ported as is: see the deviations note in the port report.
-	stored, err := q.WebAuthnCredentialByCredentialID(ctx, parsed.ID)
+	// Registration stores the standard-base64 spelling of the raw id, so look
+	// it up that way. Deliberate fix: Vapor looked it up by the id as the
+	// client sent it (base64url), so a passkey whose id contains '-' or '_',
+	// or whose length is not a multiple of 3, could never sign in. The
+	// client's spelling stays as a fallback.
+	stored, err := q.WebAuthnCredentialByCredentialID(ctx, base64.StdEncoding.EncodeToString(parsed.RawID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		stored, err = q.WebAuthnCredentialByCredentialID(ctx, parsed.ID)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return unauthorized("Unknown passkey.")
 	}

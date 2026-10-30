@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -424,7 +425,26 @@ func TestWorkerGeneratesDeliversAndDownloads(t *testing.T) {
 	if !strings.Contains(string(r.Body), "No value found (expected type 'Int64') at path 'expires'.") {
 		t.Fatalf("body = %s", r.Body)
 	}
-	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/artifacts/"+art.ID+"/link", a.Token(a.user("x", true)), nil), http.StatusNotFound)
+	stranger := a.user("x", true)
+	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/artifacts/"+art.ID+"/link", a.Token(stranger), nil), http.StatusNotFound)
+
+	// A recipient stored in lowercase can still download (Vapor compared
+	// strings against the uppercase UUID and answered 403).
+	a.exec(`UPDATE advanced_report_runs SET requested_by_user_id = $1, recipient_user_ids_json = $2 WHERE id = $3`,
+		stranger, `["`+owner.String()+`"]`, uuid.MustParse(runID))
+	expectStatus(t, a.Do(http.MethodGet, u.Path+"?"+u.RawQuery, "", nil), http.StatusOK)
+	// A validly signed link for someone not on the run gets the same reason
+	// as a bad signature (Vapor: a bare "Forbidden").
+	artID := uuid.MustParse(art.ID)
+	other := uuid.New()
+	expiresAt := time.Now().Add(time.Hour)
+	sig := Signer{Secret: a.settings.SigningSecret}.Signature(artID, time.Unix(expiresAt.Unix(), 0), &other)
+	r = a.Do(http.MethodGet, fmt.Sprintf("%s?expires=%d&recipient=%s&signature=%s", u.Path, expiresAt.Unix(), strings.ToUpper(other.String()), url.QueryEscape(sig)), "", nil)
+	expectStatus(t, r, http.StatusForbidden)
+	if !strings.Contains(string(r.Body), "This report link is invalid or expired.") {
+		t.Fatalf("not-a-recipient body = %s", r.Body)
+	}
+	a.exec(`UPDATE advanced_report_runs SET requested_by_user_id = $1 WHERE id = $2`, owner, uuid.MustParse(runID))
 
 	// Retention: expire the artifacts and their files go.
 	a.exec(`UPDATE advanced_report_artifacts SET expires_at = now() - interval '1 day'`)

@@ -165,10 +165,33 @@ func Decode(body []byte, v any) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if err := validate(root, t, nil, true); err != nil {
+	if err := validate(root, t, nil, false); err != nil {
 		return err
 	}
 	if err := apijson.Unmarshal(body, v); err != nil {
+		return httpx.BadRequest(err.Error())
+	}
+	return nil
+}
+
+// DecodeExternal is a plain `JSONDecoder().decode(T.self, from:)` (Swift's
+// `JSONDecoder.externalProvider`): the same rules and DecodingError wording
+// as Decode, but keys are matched exactly as the payload spells them, with
+// no snake_case rewrite. Once the body validates it is decoded with
+// encoding/json, so v's json tags name the wire keys.
+func DecodeExternal(body []byte, v any) error {
+	var root json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil {
+		return Corrupted(err)
+	}
+	t := reflect.TypeOf(v)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if err := validate(root, t, nil, true); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, v); err != nil {
 		return httpx.BadRequest(err.Error())
 	}
 	return nil
@@ -248,8 +271,9 @@ func SwiftTypeName(t reflect.Type) string {
 	return dictType
 }
 
-// validate checks raw against t. The last argument marks the root value.
-func validate(raw json.RawMessage, t reflect.Type, path []string, _ bool) error {
+// validate checks raw against t. plain skips the backendAPI snake_case key
+// rewrite (a plain JSONDecoder, see DecodeExternal).
+func validate(raw json.RawMessage, t reflect.Type, path []string, plain bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -303,7 +327,7 @@ func validate(raw json.RawMessage, t reflect.Type, path []string, _ bool) error 
 			return Corrupted(err)
 		}
 		for i, item := range items {
-			if err := validate(item, t.Elem(), Append(path, fmt.Sprintf("Index %d", i)), false); err != nil {
+			if err := validate(item, t.Elem(), Append(path, fmt.Sprintf("Index %d", i)), plain); err != nil {
 				return err
 			}
 		}
@@ -320,13 +344,13 @@ func validate(raw json.RawMessage, t reflect.Type, path []string, _ bool) error 
 			return Corrupted(err)
 		}
 		for k, item := range items {
-			if err := validate(item, t.Elem(), Append(path, k), false); err != nil {
+			if err := validate(item, t.Elem(), Append(path, k), plain); err != nil {
 				return err
 			}
 		}
 		return nil
 	case reflect.Struct:
-		return validateStruct(raw, t, path)
+		return validateStruct(raw, t, path, plain)
 	}
 	return nil
 }
@@ -387,8 +411,12 @@ func Fields(raw json.RawMessage, path []string) (map[string]json.RawMessage, err
 	return out, nil
 }
 
-func validateStruct(raw json.RawMessage, t reflect.Type, path []string) error {
+func validateStruct(raw json.RawMessage, t reflect.Type, path []string, plain bool) error {
 	fields, err := Fields(raw, path)
+	if plain && err == nil {
+		fields = nil
+		err = json.Unmarshal(raw, &fields)
+	}
 	if err != nil {
 		return err
 	}
@@ -414,7 +442,7 @@ func validateStruct(raw json.RawMessage, t reflect.Type, path []string) error {
 		} else if !present {
 			return KeyNotFound(name, path)
 		}
-		if err := validate(val, f.Type, Append(path, name), false); err != nil {
+		if err := validate(val, f.Type, Append(path, name), plain); err != nil {
 			return err
 		}
 	}

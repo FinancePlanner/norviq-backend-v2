@@ -1,0 +1,72 @@
+# Banking + Telegram integrations. Seed parity/banking-setup.sql, then:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18116 -jwt-secret parity-secret \
+#     -headers Content-Type,Location -cases parity/banking.jsonl
+# Neither backend has a bank provider or bot configured (the shared Vapor
+# runs without PLAID_*/GOCARDLESS_*/ENABLEBANKING_*/TELEGRAM_*), so these
+# cover reads, validation, ownership, premium gating and the unconfigured
+# paths. parity/banking-writes.jsonl holds the import success case.
+{"name": "connections", "method": "GET", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "connections-empty", "method": "GET", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000003"}
+{"name": "connections-free", "method": "GET", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000001"}
+{"name": "connections-unauthenticated", "method": "GET", "path": "/v1/banks/connections"}
+{"name": "transactions", "method": "GET", "path": "/v1/banks/transactions", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "transactions-dismissed", "method": "GET", "path": "/v1/banks/transactions?status=dismissed", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "transactions-imported", "method": "GET", "path": "/v1/banks/transactions?status=imported", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "transactions-unknown-status", "method": "GET", "path": "/v1/banks/transactions?status=bogus", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "transactions-empty", "method": "GET", "path": "/v1/banks/transactions", "as": "b4b4b4b4-0000-4000-8000-000000000003"}
+{"name": "institutions-default", "method": "GET", "path": "/v1/banks/institutions", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "institutions-unknown-provider", "method": "GET", "path": "/v1/banks/institutions?provider=bogus", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "institutions-gocardless", "method": "GET", "path": "/v1/banks/institutions?provider=gocardless&country=pt", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "institutions-enablebanking", "method": "GET", "path": "/v1/banks/institutions?provider=EnableBanking", "as": "b4b4b4b4-0000-4000-8000-000000000001"}
+{"name": "institutions-unauthenticated", "method": "GET", "path": "/v1/banks/institutions"}
+{"name": "link-session-free", "method": "POST", "path": "/v1/banks/link-session", "as": "b4b4b4b4-0000-4000-8000-000000000001"}
+{"name": "link-session-plaid", "method": "POST", "path": "/v1/banks/link-session", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "link-session-hosted-no-allowlist", "method": "POST", "path": "/v1/banks/link-session", "as": "b4b4b4b4-0000-4000-8000-000000000002", "body": {"institutionId": "PT:Banco Teste", "redirectURI": "norviqa://oauth/bank-callback"}}
+{"name": "link-session-hosted-provider", "method": "POST", "path": "/v1/banks/link-session?provider=gocardless", "as": "b4b4b4b4-0000-4000-8000-000000000002", "body": {"institution_id": "X", "redirect_uri": "https://evil.example"}}
+{"name": "link-session-unknown-provider", "method": "POST", "path": "/v1/banks/link-session?provider=nope", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "exchange-free", "method": "POST", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000001", "body": {"publicToken": "p"}}
+{"name": "exchange-missing-token", "method": "POST", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000002", "body": {}}
+{"name": "exchange-plaid", "method": "POST", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000002", "body": {"publicToken": "public-sandbox-1"}}
+{"name": "exchange-snake", "method": "POST", "path": "/v1/banks/connections", "as": "b4b4b4b4-0000-4000-8000-000000000002", "body": {"public_token": "public-sandbox-1"}}
+{"name": "disconnect", "method": "DELETE", "path": "/v1/banks/connections/b4c00000-0000-4000-8000-000000000004", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "disconnect-lowercase-missing", "method": "DELETE", "path": "/v1/banks/connections/b4ffffff-0000-4000-8000-000000000000", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "disconnect-other-user", "method": "DELETE", "path": "/v1/banks/connections/b4c00000-0000-4000-8000-000000000001", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "disconnect-bad-id", "method": "DELETE", "path": "/v1/banks/connections/not-a-uuid", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "sync-not-configured", "method": "POST", "path": "/v1/banks/connections/b4c00000-0000-4000-8000-000000000003/sync", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "sync-free", "method": "POST", "path": "/v1/banks/connections/b4c00000-0000-4000-8000-000000000005/sync", "as": "b4b4b4b4-0000-4000-8000-000000000001"}
+{"name": "sync-missing", "method": "POST", "path": "/v1/banks/connections/b4ffffff-0000-4000-8000-000000000000/sync", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "sync-bad-id", "method": "POST", "path": "/v1/banks/connections/x/sync", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "import-already-imported", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000013/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}
+{"name": "import-missing-pillar", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000011/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {}}
+{"name": "import-other-user", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000001/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}
+{"name": "import-free", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000001/import", "as": "b4b4b4b4-0000-4000-8000-000000000001", "body": {"pillar": "fun"}}
+{"name": "import-bad-id", "method": "POST", "path": "/v1/banks/transactions/123/import", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"pillar": "fun"}}
+{"name": "dismiss", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000012/dismiss", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "dismiss-missing", "method": "POST", "path": "/v1/banks/transactions/b4ffffff-0000-4000-8000-000000000000/dismiss", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "dismiss-bad-id", "method": "POST", "path": "/v1/banks/transactions/nope/dismiss", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "dismiss-unauthenticated", "method": "POST", "path": "/v1/banks/transactions/b4f00000-0000-4000-8000-000000000012/dismiss"}
+{"name": "eb-callback-no-state", "method": "GET", "path": "/v1/banks/enablebanking/callback"}
+{"name": "eb-callback-unknown-state", "method": "GET", "path": "/v1/banks/enablebanking/callback?state=parity-banking-nope&code=x"}
+{"name": "eb-callback-bank-error", "method": "GET", "path": "/v1/banks/enablebanking/callback?state=parity-banking-state-live&error=access_denied&error_description=User%20cancelled"}
+{"name": "eb-callback-not-configured", "method": "GET", "path": "/v1/banks/enablebanking/callback?state=parity-banking-state-live&code=abc"}
+{"name": "eb-callback-expired", "method": "GET", "path": "/v1/banks/enablebanking/callback?state=parity-banking-state-expired&code=abc"}
+{"name": "gc-callback-no-ref", "method": "GET", "path": "/v1/banks/gocardless/callback"}
+{"name": "gc-callback-not-configured", "method": "GET", "path": "/v1/banks/gocardless/callback?ref=parity-banking-ref-live"}
+{"name": "gc-callback-error", "method": "GET", "path": "/v1/banks/gocardless/callback?ref=parity-banking-ref-live&error=UserCancelledSession"}
+{"name": "plaid-webhook-not-configured", "method": "POST", "path": "/webhooks/plaid", "body": {"webhook_type": "TRANSACTIONS", "webhook_code": "SYNC_UPDATES_AVAILABLE", "item_id": "parity-banking-item-2"}}
+{"name": "plaid-webhook-empty", "method": "POST", "path": "/webhooks/plaid", "rawBody": ""}
+{"name": "telegram-status", "method": "GET", "path": "/v1/integrations/telegram", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "telegram-status-unauthenticated", "method": "GET", "path": "/v1/integrations/telegram"}
+{"name": "telegram-code-not-configured", "method": "POST", "path": "/v1/integrations/telegram/code", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "telegram-disconnect", "method": "DELETE", "path": "/v1/integrations/telegram", "as": "b4b4b4b4-0000-4000-8000-000000000004"}
+{"name": "telegram-preferences", "method": "GET", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000002"}
+{"name": "telegram-preferences-empty", "method": "GET", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000003"}
+{"name": "telegram-preferences-put", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "earnings", "enabled": true, "quietHoursStart": 23, "quietHoursEnd": 6, "timezone": "America/New_York"}}
+{"name": "telegram-preferences-put-snake", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "tax", "enabled": false, "quiet_hours_start": 1, "quiet_hours_end": 2}}
+{"name": "telegram-preferences-unknown-kind", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "nope", "enabled": true}}
+{"name": "telegram-preferences-half-quiet", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget", "enabled": true, "quietHoursEnd": 6}}
+{"name": "telegram-preferences-quiet-range", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget", "enabled": true, "quietHoursStart": -1, "quietHoursEnd": 6}}
+{"name": "telegram-preferences-bad-timezone", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget", "enabled": true, "timezone": "Mars/Olympus"}}
+{"name": "telegram-preferences-local-timezone", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget", "enabled": true, "timezone": "Local"}}
+{"name": "telegram-preferences-missing-enabled", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget"}}
+{"name": "telegram-preferences-wrong-type", "method": "PUT", "path": "/v1/integrations/telegram/preferences", "as": "b4b4b4b4-0000-4000-8000-000000000004", "body": {"kind": "budget", "enabled": "yes"}}

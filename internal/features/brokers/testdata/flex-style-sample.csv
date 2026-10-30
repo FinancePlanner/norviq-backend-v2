@@ -1,0 +1,6 @@
+Open Positions,Header,Symbol,Quantity,Currency,Cost Basis Price
+Open Positions,Data,AAPL,10,USD,150.25
+Open Positions,Data,MSFT,5,USD,300.00
+Trades,Header,Symbol,Quantity,TradePrice,Buy/Sell
+Trades,Data,AAPL,2,155.00,BUY
+Trades,Data,MSFT,1,305.50,SELL

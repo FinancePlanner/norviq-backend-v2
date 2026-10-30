@@ -20,8 +20,10 @@ import (
 	"norviq-api/internal/features/autobuys"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
+	"norviq-api/internal/features/banking"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
+	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/crypto"
 	"norviq-api/internal/features/dashboard"
@@ -36,6 +38,7 @@ import (
 	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/groups"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/integrations"
 	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/marketbrief"
@@ -190,6 +193,12 @@ func All() []server.Feature {
 		autobuys.Feature{},
 		// PlanningController (/v1/planning).
 		planning.Feature{},
+		// BankController, the hosted-link callbacks and the Plaid webhook.
+		banking.Feature{},
+		// MessagingController (/v1/integrations/telegram).
+		integrations.Feature{},
+		// BrokerController and the IBKR OAuth callback.
+		brokers.Feature{},
 	}
 }
 
@@ -274,6 +283,10 @@ func AllJobs() []Job {
 		boards.DailyPostJob{},
 		// MarketBriefJob (also needs MARKET_BRIEF_ENABLED, as in Vapor).
 		marketbrief.Job{},
+		// Bank reconcile sync (bank_sync_job).
+		banking.SyncJob{},
+		// IBKR daily sync (ibkr_sync_job).
+		brokers.IBKRSyncJob{},
 	}
 }
 

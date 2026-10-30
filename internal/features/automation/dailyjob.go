@@ -39,6 +39,7 @@ import (
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/platform/push"
+	"norviq-api/internal/platform/telegram"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/automationdb"
 	"norviq-api/internal/store/notificationsdb"
@@ -129,9 +130,8 @@ func (j DailyJob) Runner(d *server.Deps) (*DailyRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Vapor offered the event to APNS then Telegram; the Telegram channel
-	// arrives with the messaging port.
-	pub := inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger)
+	// Vapor offered the event to APNS then Telegram.
+	pub := inbox.NewPublisher(notificationsdb.New(d.DB), p, d.Logger, telegram.Channels(d)...)
 	if j.Now != nil {
 		pub.Now = j.Now
 	}

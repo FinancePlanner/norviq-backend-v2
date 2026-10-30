@@ -152,3 +152,39 @@ func TestJobSettings(t *testing.T) {
 		t.Fatal("lock name")
 	}
 }
+
+type failingPublisher struct {
+	recordingPublisher
+	failFor uuid.UUID
+}
+
+func (p *failingPublisher) PublishAndPush(ctx context.Context, m inbox.Message) (inbox.Event, error) {
+	if m.UserID == p.failFor {
+		return inbox.Event{}, errors.New("push down")
+	}
+	return p.recordingPublisher.PublishAndPush(ctx, m)
+}
+
+// One failing goal no longer stops the others or the prune (Vapor's loop
+// aborted the whole run on the first error).
+func TestDailyJobContinuesPastAFailingGoal(t *testing.T) {
+	e := newJobEnv(t)
+	badUser, badGoal := e.seedGoal("Bad", 200, 100000)
+	_, goodGoal := e.seedGoal("Good", 150, 100000)
+	e.exec(`INSERT INTO financial_goal_progress_snapshots (id, goal_id, user_id, current_value, planned_value, projected_value,
+		drift_state, is_month_end, calculated_at)
+		SELECT gen_random_uuid(), id, user_id, 1, 0, 0, 'behind', false, now() - interval '500 days' FROM financial_goals WHERE id = $1`, goodGoal)
+	pub := &failingPublisher{failFor: badUser}
+	e.run.pub = pub
+	err := e.run.runOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "push down") {
+		t.Fatalf("err %v", err)
+	}
+	if len(pub.messages) != 1 || pub.messages[0].Title != "Good: 25% complete" {
+		t.Fatalf("messages %+v", pub.messages)
+	}
+	// The good goal got today's snapshot and its old daily row was pruned.
+	if e.snapshots(goodGoal) != 1 || e.snapshots(badGoal) != 1 {
+		t.Fatalf("snapshots good %d bad %d", e.snapshots(goodGoal), e.snapshots(badGoal))
+	}
+}

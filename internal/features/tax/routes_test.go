@@ -213,6 +213,13 @@ func TestDashboardScenarioAndActionPlan(t *testing.T) {
 	a.json(http.MethodGet, "/v1/tax/scenarios/"+uuid.NewString(), s.token, nil, 404)
 	a.json(http.MethodPost, "/v1/tax/scenarios", s.token, map[string]any{"taxYear": 2026, "opportunityIds": []string{"nope"}, "plannedReplacementInstrumentIds": map[string]string{}}, 422)
 
+	// A malformed scenarioId is a 400 (Vapor: 404), on both plan routes.
+	for _, path := range []string{"/v1/tax/action-plans", "/v1/tax/placement-plans"} {
+		bad := a.json(http.MethodPost, path, s.token, map[string]any{"scenarioId": "not-a-uuid", "idempotencyKey": "bad-" + path}, 400)
+		if bad["reason"] != "Invalid tax scenario id." {
+			t.Fatalf("%s malformed scenarioId %v", path, bad)
+		}
+	}
 	planReq := map[string]any{"scenarioId": scenario["id"], "idempotencyKey": "k1"}
 	if o["status"] != "actionable" {
 		a.json(http.MethodPost, "/v1/tax/action-plans", s.token, planReq, 422)

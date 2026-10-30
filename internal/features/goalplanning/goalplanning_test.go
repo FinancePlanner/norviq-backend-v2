@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -234,7 +235,10 @@ func TestCreateValidation(t *testing.T) {
 	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, wide), http.StatusUnprocessableEntity, "within one percentage point")
 
 	blank := goalBody("  ", p, 0, 0)
-	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, blank), http.StatusInternalServerError, "invalidName")
+	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, blank), http.StatusBadRequest, "Goal name is required")
+	badCurrency := goalBody("Currency", p, 0, 0)
+	badCurrency["baseCurrency"] = "EURO"
+	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, badCurrency), http.StatusBadRequest, "3-letter code")
 
 	foreign := goalBody("Foreign", uuid.New(), 0, 0)
 	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, foreign), http.StatusNotFound, "Portfolio not found")
@@ -267,7 +271,7 @@ func TestFreeUsersGetOneActiveGoal(t *testing.T) {
 	// A paused goal does not count against the limit.
 	paused := goalBody("Paused", e.portfolio(user, "C"), 0, 0)
 	paused["status"] = "paused"
-	e.create(token, paused)
+	pausedGoal := e.create(token, paused)
 
 	// Activating both through bulk breaks the limit too.
 	r = e.Do(http.MethodPatch, "/v1/financial-goals/bulk", token, map[string]any{"goalIds": []string{first.ID}, "status": "paused"})
@@ -276,6 +280,17 @@ func TestFreeUsersGetOneActiveGoal(t *testing.T) {
 	expectStatus(t, r, http.StatusBadRequest, "Invalid goal ids")
 	r = e.Do(http.MethodPatch, "/v1/financial-goals/bulk", token, map[string]any{"goalIds": []string{uuid.NewString()}, "status": "paused"})
 	expectStatus(t, r, http.StatusNotFound, "Financial goal not found")
+	// A repeated id counts once (Vapor: 404) and the response keeps the
+	// request's order.
+	r = e.Do(http.MethodPatch, "/v1/financial-goals/bulk", token, map[string]any{
+		"goalIds": []string{pausedGoal.ID, first.ID, strings.ToLower(first.ID)}, "status": "paused",
+	})
+	expectStatus(t, r, http.StatusOK, "")
+	var bulk []goalplanning.FinancialGoal
+	r.JSON(t, &bulk)
+	if len(bulk) != 2 || bulk[0].ID != pausedGoal.ID || bulk[1].ID != first.ID {
+		t.Fatalf("bulk %+v", bulk)
+	}
 
 	var overview goalplanning.Overview
 	r = e.Do(http.MethodGet, "/v1/financial-goals/overview", token, nil)
@@ -299,7 +314,7 @@ func TestAllocationCapacity(t *testing.T) {
 
 	over := goalBody("Over", p, 0, 0)
 	over["portfolioAllocations"] = []any{map[string]any{"id": uuid.NewString(), "portfolioListId": p.String(), "allocationPercentage": 120}}
-	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, over), http.StatusInternalServerError, "invalidAllocation")
+	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals", token, over), http.StatusBadRequest, "at most 100")
 }
 
 func TestUpdateDeleteAndTemplates(t *testing.T) {
@@ -463,6 +478,11 @@ func TestSuggestionsAcceptAndDrafts(t *testing.T) {
 	expectStatus(t, r, http.StatusOK, `"destination":"goal"`)
 	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals/"+goal.ID+"/suggestions/"+suggestions[0].ID+"/dismiss", token, nil), http.StatusNoContent, "")
 	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals/"+goal.ID+"/suggestions/"+uuid.NewString()+"/dismiss", token, nil), http.StatusNotFound, "Suggestion not found")
+	// Accepting again, or accepting a dismissed suggestion, is a 409 and
+	// creates no draft (Vapor made another draft each time).
+	expectStatus(t, e.Do(http.MethodPost, extend+"/accept", token, nil), http.StatusConflict, "Suggestion is no longer open")
+	expectStatus(t, e.Do(http.MethodPost, "/v1/financial-goals/"+goal.ID+"/suggestions/"+suggestions[0].ID+"/accept", token, nil),
+		http.StatusConflict, "Suggestion is no longer open")
 
 	r = e.Do(http.MethodGet, "/v1/financial-goals/"+goal.ID+"/adjustment-drafts", token, nil)
 	var drafts []goalplanning.AdjustmentDraft
@@ -501,5 +521,41 @@ func TestRoutesFollowTheFlag(t *testing.T) {
 	t.Setenv("GOAL_PLANNING_ENABLED", "")
 	if !goalplanning.RoutesEnabled() {
 		t.Fatal("an empty value keeps the routes on")
+	}
+}
+
+// A quote of 0 is no live price: the purchase price is used, with the
+// warning (Vapor valued the holding at 0).
+func TestZeroQuoteFallsBackToPurchasePrice(t *testing.T) {
+	e := newEnv(t, stubQuotes{"AAPL": 0})
+	user, token := e.user("zeroquote")
+	p := e.portfolio(user, "Main")
+	e.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, 'AAPL', 10, 100, '2024-01-01', now(), $3)`, uuid.New(), user, p)
+	goal := e.create(token, goalBody("Zero", p, 0, 0))
+	progress := e.progress(token, goal.ID)
+	if progress.CurrentValue != 1000 || !slices.Contains(progress.Warnings, "Live price unavailable for AAPL; purchase price used.") {
+		t.Fatalf("progress %v %v", progress.CurrentValue, progress.Warnings)
+	}
+}
+
+// When starting capital stands in for unvalued holdings, the warnings are
+// deduplicated and sorted (Vapor returned them raw, with duplicates).
+func TestStartingCapitalFallbackWarningsAreUnique(t *testing.T) {
+	e := newEnv(t, nil)
+	user, token := e.user("fallbackwarn")
+	p := e.portfolio(user, "Main")
+	e.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, 'ZZZZ', 10, 0, '2024-01-01', now(), $3), ($4, $2, 'ZZZZ', 5, 0, '2024-02-01', now(), $3)`,
+		uuid.New(), user, p, uuid.New())
+	goal := e.create(token, goalBody("Fallback", p, 0, 0))
+	progress := e.progress(token, goal.ID)
+	want := []string{
+		"Linked portfolios have no valued holdings; starting capital is used.",
+		"Live price unavailable for ZZZZ; purchase price used.",
+		"No observed contribution history; projection uses the planned monthly contribution.",
+	}
+	if progress.CurrentValue != 10000 || !slices.Equal(progress.Warnings, want) {
+		t.Fatalf("progress %v %q", progress.CurrentValue, progress.Warnings)
 	}
 }

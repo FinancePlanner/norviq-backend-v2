@@ -41,12 +41,15 @@ type service struct {
 	now    func() time.Time
 }
 
-// validationError is a StockPlanShared validation error thrown by
-// FinancialGoalInput.validate(). It is no AbortError, so Vapor answered 500
-// with String(describing:) ("Internal Server Error" in production).
-type validationError string
-
-func (e validationError) Error() string { return string(e) }
+// Validation failures of FinancialGoalInput.validate(). Vapor threw a plain
+// Swift error (no AbortError), so they answered 500 with the case name; v2
+// answers 400 with a readable reason.
+var (
+	errInvalidName       = httpx.BadRequest("Goal name is required")
+	errInvalidCurrency   = httpx.BadRequest("Base currency must be a 3-letter code")
+	errInvalidAmount     = httpx.BadRequest("Goal amounts or rates are out of range")
+	errInvalidAllocation = httpx.BadRequest("Portfolio allocation percentages must be greater than 0 and at most 100")
+)
 
 func ownedGoalNotFound() *httpx.Error { return httpx.NotFound("Financial goal not found") }
 
@@ -247,8 +250,10 @@ func (s *service) currentValue(ctx context.Context, allocations []goalplanningdb
 		portfolioValue := 0.0
 		for _, h := range holdings {
 			price := h.BuyPrice
+			// A zero or non-finite quote is no price (Vapor valued the
+			// holding at 0 and called it live).
 			quote, qerr := s.quote(ctx, h.Symbol)
-			if qerr != nil {
+			if qerr != nil || !finite(quote.CurrentPrice) || quote.CurrentPrice <= 0 {
 				warnings = append(warnings, "Live price unavailable for "+h.Symbol+"; purchase price used.")
 			} else {
 				price = quote.CurrentPrice
@@ -258,9 +263,15 @@ func (s *service) currentValue(ctx context.Context, allocations []goalplanningdb
 		total += float64(portfolioValue*a.AllocationPercentage) / 100
 	}
 	if total == 0 && fallback > 0 {
+		// Deduplicated and sorted like the other path (Vapor returned
+		// these raw).
 		warnings = append(warnings, "Linked portfolios have no valued holdings; starting capital is used.")
-		return fallback, warnings, nil
+		return fallback, uniqueSorted(warnings), nil
 	}
+	return total, uniqueSorted(warnings), nil
+}
+
+func uniqueSorted(warnings []string) []string {
 	seen := map[string]bool{}
 	unique := []string{}
 	for _, w := range warnings {
@@ -270,7 +281,7 @@ func (s *service) currentValue(ctx context.Context, allocations []goalplanningdb
 		}
 	}
 	sort.Strings(unique)
-	return total, unique, nil
+	return unique
 }
 
 func (s *service) quote(ctx context.Context, symbol string) (marketdata.QuoteResponse, error) {
@@ -399,23 +410,23 @@ func makeTrajectory(goal *goalplanningdb.FinancialGoal, targetDate time.Time, cu
 // validateInput is FinancialGoalInput.validate().
 func validateInput(in *goalInput) error {
 	if strings.TrimSpace(in.Name) == "" {
-		return validationError("invalidName")
+		return errInvalidName
 	}
 	if utf8.RuneCountInString(in.BaseCurrency) != 3 {
-		return validationError("invalidCurrency")
+		return errInvalidCurrency
 	}
 	if !finite(in.TargetAmount) || !finite(in.StartingCapital) || !finite(in.MonthlyContribution) ||
 		!(in.TargetAmount > 0) || !(in.StartingCapital >= 0) || !(in.MonthlyContribution >= 0) {
-		return validationError("invalidAmount")
+		return errInvalidAmount
 	}
 	if !finite(in.AnnualContributionGrowth) || !finite(in.InflationAssumption) ||
 		!within(in.AnnualContributionGrowth, -1, 1) || !within(in.InflationAssumption, -1, 1) ||
 		(in.ExpectedAnnualReturn != nil && !(finite(*in.ExpectedAnnualReturn) && within(*in.ExpectedAnnualReturn, -0.5, 0.5))) {
-		return validationError("invalidAmount")
+		return errInvalidAmount
 	}
 	for _, a := range in.PortfolioAllocations {
 		if !(a.AllocationPercentage > 0 && a.AllocationPercentage <= 100) {
-			return validationError("invalidAllocation")
+			return errInvalidAllocation
 		}
 	}
 	return nil

@@ -1,0 +1,232 @@
+# Groups and digest parity (GroupsController, GroupMessagesController,
+# RealtimeStreamController, DigestController). Groups and digests are flagged,
+# so the reference is a second Vapor with SOCIAL_ENABLED=1 GROUPS_ENABLED=1
+# GROUPS_PUBLIC_ENABLED=1 DIGEST_ENABLED=1 DIGEST_EMAIL_ENABLED=0 on :18127,
+# and v2 on :18117 with the same flags. Every case here leaves the database
+# as it found it (reads, refusals, idempotent no-ops). Reset first:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/groups-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:18127 -b http://127.0.0.1:18117 -jwt-secret parity-secret \
+#     -cases parity/groups.jsonl -ignore requestId,serverTime
+# Result 2026-10-29: 218 cases, 2 diffs: create-invalid-json and
+# digest-prefs-put-invalid-json, where Darwin
+# Foundation's "Underlying error" text (NSCocoaErrorDomain 3840 with its
+# offset) is not reproduced; same as swiftjson.Corrupted in other domains.
+# The SSE stream itself is checked in groups/realtime_test.go.
+{"name": "my-groups-ana", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "my-groups-bo", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "my-groups-cy", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "my-groups-gus", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000008"}
+{"name": "my-groups-dee", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "my-groups-banned", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-000000000005"}
+{"name": "my-groups-anon", "path": "/v1/groups"}
+{"name": "my-groups-missing-user", "path": "/v1/groups", "as": "9a0e0000-0000-4000-8000-0000000009ff"}
+{"name": "unread-ana", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "unread-bo", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "unread-fay", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "unread-cy", "path": "/v1/groups/unread-count", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "invitations-fay", "path": "/v1/groups/invitations", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invitations-ana", "path": "/v1/groups/invitations", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "discover", "path": "/v1/groups/discover", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-q=parity", "path": "/v1/groups/discover?q=parity", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-q=PARITY%20nvda", "path": "/v1/groups/discover?q=PARITY%20nvda", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-ticker=nvda", "path": "/v1/groups/discover?ticker=nvda", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-ticker=$nvda", "path": "/v1/groups/discover?ticker=$nvda", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-tickers=NVDA,AAPL,parity", "path": "/v1/groups/discover?tickers=NVDA,AAPL,parity", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-topic=stock", "path": "/v1/groups/discover?topic=stock", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-topic=bogus", "path": "/v1/groups/discover?topic=bogus", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-cursor=1", "path": "/v1/groups/discover?cursor=1", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-cursor=abc", "path": "/v1/groups/discover?cursor=abc", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-cursor=-5", "path": "/v1/groups/discover?cursor=-5", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "path": "/v1/groups/discover?q=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-gus-hidden-by-cy-block", "path": "/v1/groups/discover?ticker=NVDA", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "discover-as-gus", "path": "/v1/groups/discover?ticker=NVDA", "as": "9a0e0000-0000-4000-8000-000000000008"}
+{"name": "discover-dee-no-guidelines", "path": "/v1/groups/discover", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "detail-g1-ana", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "detail-g1-eve", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "detail-g1-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "detail-g1-gus", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000008"}
+{"name": "detail-g1-cy-banned", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "detail-g1-fay", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "detail-g2-public-cy", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000102", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "detail-g3-public-cy-blocked-owner", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000103", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "detail-g4-deleted", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000104", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "detail-bad-id", "path": "/v1/groups/nope", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "detail-lowercase-id", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "detail-random", "path": "/v1/groups/9a0e0000-0000-4000-8000-0000000009ff", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-limit=2", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members?limit=2", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-limit=2-cursor=2", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members?limit=2&cursor=2", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-cursor=abc", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members?cursor=abc", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-limit=0", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members?limit=0", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-limit=1000", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members?limit=1000", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "members-as-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "members-outsider", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "members-public-outsider", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000102/members", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "bans-ana", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "bans-eve", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "bans-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "invites-ana", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "invites-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "invites-eve", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "messages", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-limit=2", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?limit=2", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-limit=2-before=4", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?limit=2&before=4", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-before=3", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?before=3", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-after=1", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?after=1", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-after=4", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?after=4", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-after=0-limit=1", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?after=0&limit=1", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-after=1-before=3", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?after=1&before=3", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-limit=abc", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?limit=abc", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-limit=0", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?limit=0", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-limit=500", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?limit=500", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-before=x", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?before=x", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-after=-1", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?after=-1", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-before=1", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages?before=1", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-bo", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "messages-gus", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000008"}
+{"name": "messages-eve", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "messages-outsider", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "messages-banned-from-group", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "messages-empty-channel", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000202/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-deleted-channel", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000205/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-deleted-group", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000206/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "messages-public-nonmember", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000203/messages", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "messages-bad-channel", "path": "/v1/group-channels/zzz/messages", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "invite-preview-ok", "path": "/v1/group-invites/PARITYCODE1", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-expired", "path": "/v1/group-invites/PARITYEXP1", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-revoked", "path": "/v1/group-invites/PARITYREV1", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-full", "path": "/v1/group-invites/PARITYFULL", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-unknown", "path": "/v1/group-invites/ZZZZZZZZ", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-malformed", "path": "/v1/group-invites/a!", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-short", "path": "/v1/group-invites/abc", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-lowercase", "path": "/v1/group-invites/paritycode1", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "invite-preview-member", "path": "/v1/group-invites/PARITYCODE1", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "invite-preview-banned", "path": "/v1/group-invites/PARITYCODE1", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "invite-preview-no-guidelines", "path": "/v1/group-invites/PARITYCODE1", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "create-no-guidelines", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000004", "body": {"name": "Club", "topic": "community", "visibility": "private"}}
+{"name": "create-banned", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000005", "body": {"name": "Club", "topic": "community", "visibility": "private"}}
+{"name": "create-empty-object", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {}}
+{"name": "create-short-name", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "a", "topic": "community", "visibility": "private"}}
+{"name": "create-bad-visibility", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "topic": "community", "visibility": "secret"}}
+{"name": "create-unknown-topic-bad-ticker", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "topic": "weird", "ticker": "AAPL", "visibility": "private"}}
+{"name": "create-bad-ticker", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "topic": "stock", "ticker": "AAPL!", "visibility": "private"}}
+{"name": "create-two-emoji", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "iconEmoji": "🍎🍏", "topic": "community", "visibility": "private"}}
+{"name": "create-letter-icon", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "iconEmoji": "A", "topic": "community", "visibility": "private"}}
+{"name": "create-long-description", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Club", "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "topic": "community", "visibility": "private"}}
+{"name": "create-slur", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "f4gg0t club", "topic": "community", "visibility": "private"}}
+{"name": "create-name-number", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": 5, "topic": "community", "visibility": "private"}}
+{"name": "create-array-body", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": [1]}
+{"name": "create-invalid-json", "path": "/v1/groups", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "rawBody": "{", "headers": {"Content-Type": "application/json"}}
+{"name": "update-g1-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"name": "Hijack"}}
+{"name": "update-g1-bad-name", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "x"}}
+{"name": "update-g1-bad-visibility-type", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"visibility": 1}}
+{"name": "delete-g1-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "delete-g1-eve", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000006"}
+{"name": "join-private", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/join", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "join-public-already-member", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000102/join", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "leave-owner", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/leave", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "leave-nonmember", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000102/leave", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "notifications-bad-body", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/notifications", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"pushEnabled": "yes"}}
+{"name": "notifications-nonmember", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/notifications", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {"pushEnabled": true}}
+{"name": "update-member-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000008", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"role": "admin"}}
+{"name": "update-member-bad-role", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000008", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"role": "owner"}}
+{"name": "update-member-eve-on-ana", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000001", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000006", "body": {"role": "member"}}
+{"name": "kick-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000008", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "kick-self", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000001", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "kick-nonmember", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/9a0e0000-0000-4000-8000-000000000007", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "kick-bad-user", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/members/nope", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "transfer-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/transfer", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"userId": "9a0e0000-0000-4000-8000-000000000008"}}
+{"name": "transfer-to-nonmember", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/transfer", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userId": "9a0e0000-0000-4000-8000-000000000007"}}
+{"name": "transfer-to-self", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/transfer", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userId": "9a0e0000-0000-4000-8000-000000000001"}}
+{"name": "transfer-bad-uuid", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/transfer", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userId": "x"}}
+{"name": "ban-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"userId": "9a0e0000-0000-4000-8000-000000000008"}}
+{"name": "ban-owner", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000006", "body": {"userId": "9a0e0000-0000-4000-8000-000000000001"}}
+{"name": "ban-self", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userId": "9a0e0000-0000-4000-8000-000000000001"}}
+{"name": "ban-missing-userid", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {}}
+{"name": "unban-bo-forbidden", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/bans/9a0e0000-0000-4000-8000-000000000003", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "channel-create-bo", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/channels", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"name": "mine"}}
+{"name": "channel-create-taken", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/channels", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "Earnings"}}
+{"name": "channel-create-bad-name", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/channels", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "ação"}}
+{"name": "channel-create-long-topic", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/channels", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "newone", "topic": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"}}
+{"name": "channel-update-bo", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000202", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"name": "x"}}
+{"name": "channel-update-taken", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000202", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "general"}}
+{"name": "channel-update-deleted", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000205", "method": "PATCH", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"name": "again"}}
+{"name": "channel-delete-bo", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000202", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "invite-create-outsider", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {}}
+{"name": "invite-create-bad-hours", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"expiresInHours": 0}}
+{"name": "invite-create-bad-uses", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invites", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"maxUses": 1001}}
+{"name": "invite-revoke-bo", "path": "/v1/group-invites/9a0e0000-0000-4000-8000-000000000401", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "invite-revoke-random", "path": "/v1/group-invites/9a0e0000-0000-4000-8000-0000000009ff", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "invitations-nonfriend", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invitations", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userIds": ["9a0e0000-0000-4000-8000-000000000003"]}}
+{"name": "invitations-empty", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invitations", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userIds": []}}
+{"name": "invitations-bad-uuid", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invitations", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userIds": ["x"]}}
+{"name": "invitations-too-many", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invitations", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"userIds": ["9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff", "9a0e0000-0000-4000-8000-0000000009ff"]}}
+{"name": "invitations-outsider", "path": "/v1/groups/9a0e0000-0000-4000-8000-000000000101/invitations", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {"userIds": ["9a0e0000-0000-4000-8000-000000000001"]}}
+{"name": "redeem-expired", "path": "/v1/group-invites/PARITYEXP1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000004"}
+{"name": "redeem-revoked", "path": "/v1/group-invites/PARITYREV1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "redeem-full", "path": "/v1/group-invites/PARITYFULL/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "redeem-banned", "path": "/v1/group-invites/PARITYCODE1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "redeem-member", "path": "/v1/group-invites/PARITYCODE1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "redeem-unknown", "path": "/v1/group-invites/ZZZZZZZZ/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "redeem-banned-community", "path": "/v1/group-invites/PARITYCODE1/redeem", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000005"}
+{"name": "accept-not-invitee", "path": "/v1/groups/invitations/9a0e0000-0000-4000-8000-000000000403/accept", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "decline-not-invitee", "path": "/v1/groups/invitations/9a0e0000-0000-4000-8000-000000000403/decline", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000003"}
+{"name": "accept-bad-id", "path": "/v1/groups/invitations/nope/accept", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "send-outsider", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {"clientMessageId": "x-1", "body": "hi"}}
+{"name": "send-no-guidelines", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000004", "body": {"clientMessageId": "x-1", "body": "hi"}}
+{"name": "send-duplicate-client-id", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "p-2", "body": "different"}}
+{"name": "send-duplicate-deleted", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "p-3", "body": "again"}}
+{"name": "send-blank", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "x-2", "body": "   "}}
+{"name": "send-too-long", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "x-3", "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+{"name": "send-slur", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "x-4", "body": "you f4gg0t"}}
+{"name": "send-empty-client-id", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "", "body": "hi"}}
+{"name": "send-long-client-id", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "body": "hi"}}
+{"name": "send-missing-body", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"clientMessageId": "x-5"}}
+{"name": "send-no-content-type", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "rawBody": "{}"}
+{"name": "send-empty-body", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/messages", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "rawBody": "", "headers": {"Content-Type": "application/json"}}
+{"name": "read-bad-seq", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/read", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"seq": "x"}}
+{"name": "read-float-seq", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/read", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"seq": 1.5}}
+{"name": "read-outsider", "path": "/v1/group-channels/9a0e0000-0000-4000-8000-000000000201/read", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {"seq": 1}}
+{"name": "delete-msg-random", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-0000000009ff", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "delete-msg-not-author", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000301", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "delete-msg-outsider", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000301", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000007"}
+{"name": "delete-msg-bad-id", "path": "/v1/group-messages/nope", "method": "DELETE", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "report-bad-reason", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302/report", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"reason": "nope"}}
+{"name": "report-long-note", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302/report", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {"reason": "spam", "note": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"}}
+{"name": "report-outsider", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302/report", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000007", "body": {"reason": "spam"}}
+{"name": "report-missing-reason", "path": "/v1/group-messages/9a0e0000-0000-4000-8000-000000000302/report", "method": "POST", "as": "9a0e0000-0000-4000-8000-000000000001", "body": {}}
+{"name": "stream-anon", "path": "/v1/realtime/stream"}
+{"name": "stream-banned", "path": "/v1/realtime/stream", "as": "9a0e0000-0000-4000-8000-000000000005"}
+{"name": "digests-ana", "path": "/v1/digests", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digests-bo", "path": "/v1/digests", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "digests-anon", "path": "/v1/digests"}
+{"name": "digest-801-ana", "path": "/v1/digests/9a0e0000-0000-4000-8000-000000000801", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-803-ana", "path": "/v1/digests/9a0e0000-0000-4000-8000-000000000803", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-801-bo", "path": "/v1/digests/9a0e0000-0000-4000-8000-000000000801", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "digest-802-no-payload", "path": "/v1/digests/9a0e0000-0000-4000-8000-000000000802", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-bad-id", "path": "/v1/digests/nope", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-lowercase-id", "path": "/v1/digests/9a0e0000-0000-4000-8000-000000000801", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-prefs-ana", "path": "/v1/digest-preferences", "as": "9a0e0000-0000-4000-8000-000000000001"}
+{"name": "digest-prefs-bo", "path": "/v1/digest-preferences", "as": "9a0e0000-0000-4000-8000-000000000002"}
+{"name": "digest-prefs-anon", "path": "/v1/digest-preferences"}
+{"name": "digest-prefs-put-weekday-0", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"weekday": 0}}
+{"name": "digest-prefs-put-weekday-8", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"weekday": 8}}
+{"name": "digest-prefs-put-hour-24", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"localHour": 24}}
+{"name": "digest-prefs-put-hour-neg", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"localHour": -1}}
+{"name": "digest-prefs-put-tz-bad", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"timezone": "Mars/Olympus"}}
+{"name": "digest-prefs-put-tz-local", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"timezone": "Local"}}
+{"name": "digest-prefs-put-tz-empty", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"timezone": ""}}
+{"name": "digest-prefs-put-country-xx", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"country": "XX"}}
+{"name": "digest-prefs-put-country-blank", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"country": "  "}}
+{"name": "digest-prefs-put-weekday-string", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"weekday": "7"}}
+{"name": "digest-prefs-put-weekday-float", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"weekday": 7.5}}
+{"name": "digest-prefs-put-email-string", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"emailEnabled": "true"}}
+{"name": "digest-prefs-put-array", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": []}
+{"name": "digest-prefs-put-weekday-huge", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "body": {"weekday": 99999999999999999999}}
+{"name": "digest-prefs-put-no-content-type", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "rawBody": "{}"}
+{"name": "digest-prefs-put-invalid-json", "path": "/v1/digest-preferences", "method": "PUT", "as": "9a0e0000-0000-4000-8000-000000000002", "rawBody": "{", "headers": {"Content-Type": "application/json"}}
+{"name": "unsubscribe-missing", "path": "/v1/digest/unsubscribe", "method": "POST"}
+{"name": "unsubscribe-empty", "path": "/v1/digest/unsubscribe?token=", "method": "POST"}
+{"name": "unsubscribe-long", "path": "/v1/digest/unsubscribe?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "method": "POST"}
+{"name": "unsubscribe-unknown", "path": "/v1/digest/unsubscribe?token=nope", "method": "POST"}
+{"name": "unsubscribe-eve-already-off-later", "path": "/v1/digest/unsubscribe?token=parity-groups-unsub-unknown2", "method": "POST"}

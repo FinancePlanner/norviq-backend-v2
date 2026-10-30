@@ -43,6 +43,38 @@ func TestResendSendsPayload(t *testing.T) {
 	}
 }
 
+func TestResendSendsHTMLAndHeaders(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"id":"em_2"}`))
+	}))
+	defer srv.Close()
+	m := New(Settings{APIKey: "key", FromEmail: "from@norviq.org", BaseURL: srv.URL}, slog.New(slog.DiscardHandler))
+	html := "<p>Hi</p>"
+	if err := m.Send(t.Context(), Message{
+		To: "a@b.com", Subject: "S", Body: "B", HTMLBody: &html,
+		Headers: map[string]string{"List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := got["headers"].(map[string]any)
+	if got["html"] != html || h["List-Unsubscribe-Post"] != "List-Unsubscribe=One-Click" {
+		t.Errorf("payload %v", got)
+	}
+	// Without them, both keys are absent, as Vapor's encoder left them out.
+	got = nil
+	if err := m.Send(t.Context(), Message{To: "a@b.com", Subject: "S", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["html"]; ok {
+		t.Errorf("html present: %v", got)
+	}
+	if _, ok := got["headers"]; ok {
+		t.Errorf("headers present: %v", got)
+	}
+}
+
 func TestResendFailureIs503(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)

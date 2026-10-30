@@ -30,6 +30,9 @@ type Feature struct {
 	// Sources wires the other domains' services the AI surfaces read; see
 	// Sources. Nil leaves every source-dependent route on Vapor.
 	Sources SourcesFunc
+
+	// memo is PositionMemoService; tests inject one.
+	memo memoGenerator
 }
 
 // Name implements server.Feature.
@@ -93,6 +96,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	h, err := newHandlers(d, f.Now, f.Sources)
 	if err != nil {
 		return err
+	}
+	if f.memo != nil {
+		h.memo = f.memo
 	}
 
 	// ActionCatalogController: any authenticated credential, no limiter.

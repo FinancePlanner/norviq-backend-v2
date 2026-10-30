@@ -1,8 +1,10 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"unicode"
@@ -127,6 +129,15 @@ func (h *handlers) chat(c *echo.Context) error {
 // `done`. Every failure, including a 404 or a decode error, is an `error`
 // frame inside a 200 stream, as in Vapor.
 func (h *handlers) streamChat(c *echo.Context) error {
+	// Vapor collected the body before the handler ran. net/http will not
+	// read a request body once the response has been flushed, so buffer it.
+	if req := c.Request(); req.Body != nil {
+		raw, err := io.ReadAll(io.LimitReader(req.Body, 16<<20))
+		if err != nil {
+			return err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(raw))
+	}
 	sse := startSSE(c)
 	_ = sse.frame("started", "{}")
 	turn, err := h.turnHTTP(c, sse.tool)

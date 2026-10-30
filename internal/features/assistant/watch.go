@@ -543,22 +543,19 @@ func (h *handlers) appendProactive(ctx context.Context, text, sourceLabel string
 }
 
 // pushProactive is AIAssistantProactive.push. Best effort.
-func (h *handlers) pushProactive(ctx context.Context, msg proactiveMessage, title, body string, userID uuid.UUID) push.Summary {
+func (h *handlers) pushProactive(ctx context.Context, msg proactiveMessage, title, body string, userID uuid.UUID) {
 	svc, err := push.From(h.d)
 	if err == nil {
 		label := msg.sourceLabel
 		if label == "" {
 			label = standingTaskLabel
 		}
-		var s push.Summary
-		s, err = svc.SendToUser(ctx, userID, push.AssistantMessage(msg.conversationID, msg.id, label,
+		_, err = svc.SendToUser(ctx, userID, push.AssistantMessage(msg.conversationID, msg.id, label,
 			graphemePrefix(title, 80), graphemePrefix(body, 180)))
-		if err == nil {
-			return s
-		}
 	}
-	h.d.Logger.Warn("ai_assistant.proactive_push_failed", "error", err)
-	return push.Summary{}
+	if err != nil {
+		h.d.Logger.Warn("ai_assistant.proactive_push_failed", "error", err)
+	}
 }
 
 // deliverDailyTip posts a tip into the latest thread and pushes it when the

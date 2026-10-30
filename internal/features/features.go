@@ -141,7 +141,7 @@ func All() []server.Feature {
 		financing.Feature{},
 		// AI assistant, memos, action catalog, AI chat/insights/view
 		// summaries.
-		assistant.Feature{},
+		assistant.Feature{Sources: assistantSources},
 		// Terminal position sizing and its AI suggestions
 		// (TerminalPositionsController, TerminalPositionsAIController).
 		terminalpositions.Feature{},
@@ -205,7 +205,19 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		// AI assistant: thread/tip/proposal retention, daily tips, standing
+		// tasks (the last needs every read-tool source; see assistantSources).
+		assistant.RetentionJob{},
+		assistant.DailyTipJob{},
+		assistant.WatchJob{Sources: assistantSources},
 	}
+}
+
+// assistantSources wires the other domains' services the AI surfaces read
+// (assistant.Sources). A nil field keeps the routes that need it on Vapor
+// and the standing-task job off; fill each one in as its domain lands.
+func assistantSources(*server.Deps) (assistant.Sources, error) {
+	return assistant.Sources{}, nil
 }
 
 // Jobs tracks running jobs for shutdown.

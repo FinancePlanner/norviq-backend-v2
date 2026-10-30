@@ -2,16 +2,15 @@ package automation
 
 // WealthAutomationController's /v1/net-worth-forecasts routes.
 //
-// Vapor bug, ported: POST /:forecastID/runs stores the run's assumptions
-// through WealthAutomationCoding.json, which decodes ScenarioJSON (a
-// synthesized {"values": …} wrapper) from the snake_case defaults and always
-// fails with a 400 DecodingError. No run is ever saved, so GET runs/latest
-// answers 404 (or 400 for a row written some other way, via codingDecode).
+// v2 fix: POST /:forecastID/runs stores its run. In Vapor storing the
+// assumptions through WealthAutomationCoding.json always failed with a 400
+// "No such key 'values'" (see codingJSON), so no run was ever saved and GET
+// runs/latest could only answer 404.
 
 import (
 	"context"
-	"encoding/json"
 	"math"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -429,14 +428,14 @@ func (h *handler) forecastStartingValue(ctx context.Context, m *automationdb.Net
 	return total, nil
 }
 
-// runForecast is runForecast(req:). Everything up to storing the run is
-// ported (auth, ownership, the cash-flow defaults and the snapshot capture,
-// whose errors surface first); storing then fails exactly as Vapor's does.
-//
-// Deviation: Vapor runs ScenarioEngine.simulateNetFlow (pathCount paths ×
-// horizonMonths) before the doomed store and discards the result; v2 skips
-// the simulation, so the 400 arrives without the CPU cost. Nothing else is
-// observable from it.
+// Simulation parameters runForecast hard-codes, as in Vapor.
+const (
+	forecastAnnualReturn     = 0.07
+	forecastAnnualVolatility = 0.16
+)
+
+// runForecast is runForecast(req:): cash-flow defaults, the snapshot's
+// starting value, ScenarioEngine.simulateNetFlow, then the stored run.
 func (h *handler) runForecast(c *echo.Context) error {
 	userID, err := h.authorizeForecasts(c)
 	if err != nil {
@@ -461,45 +460,90 @@ func (h *handler) runForecast(c *echo.Context) error {
 	if m.MonthlyIncomeOverride != nil || m.MonthlySpendingOverride != nil {
 		source = CashFlowManual
 	}
-	assumptions := newDefaults(m.BaseCurrency, income, spending, source, defaults.IncludedFinancing, defaults.Warnings)
-	if _, err := h.forecastStartingValue(ctx, &m, userID); err != nil {
-		return err
+	warnings := defaults.Warnings
+	if warnings == nil {
+		warnings = []string{}
 	}
-	if _, err := codingJSONValue(snakeDefaults(assumptions)); err != nil {
-		return err
-	}
-	// Unreachable while codingJSONValue fails (see the file comment).
-	return httpx.BadRequest("")
-}
-
-// snakeDefaults is NetWorthForecastDefaults under
-// WealthAutomationCoding.encoder (.convertToSnakeCase).
-func snakeDefaults(d NetWorthForecastDefaults) map[string]any {
-	return map[string]any{
-		"base_currency": d.BaseCurrency, "monthly_income": d.MonthlyIncome, "monthly_spending": d.MonthlySpending,
-		"monthly_net_flow": d.MonthlyNetFlow, "cash_flow_source": string(d.CashFlowSource),
-		"included_financing": d.IncludedFinancing, "warnings": d.Warnings,
-	}
-}
-
-// codingJSONValue is WealthAutomationCoding.json(_:) for an already
-// snake_cased value.
-func codingJSONValue(v map[string]any) (scenarios.ScenarioJSON, error) {
-	for _, x := range v {
-		if f, ok := x.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
-			// JSONEncoder refuses non-finite doubles (EncodingError → 500).
-			return scenarios.ScenarioJSON{}, httpx.Abort(500, "Internal Server Error")
-		}
-	}
-	data, err := json.Marshal(v)
+	assumptions := newDefaults(m.BaseCurrency, income, spending, source, defaults.IncludedFinancing, warnings)
+	startingValue, err := h.forecastStartingValue(ctx, &m, userID)
 	if err != nil {
-		return scenarios.ScenarioJSON{}, err
+		return err
 	}
-	var out scenarios.ScenarioJSON
-	if err := portfolios.DecodeSwift(data, &out, portfolios.KeysConvertFromSnakeCase); err != nil {
-		return scenarios.ScenarioJSON{}, err
+	// req.query[UInt64.self, at: "seed"] ?? .random: an unparsable seed is
+	// ignored.
+	seed, err := strconv.ParseUint(c.QueryParam("seed"), 10, 64)
+	if err != nil {
+		seed = rand.Uint64() //nolint:gosec // simulation seed, not a secret
 	}
-	return out, nil
+	sim := scenarios.Engine{Canceled: func() bool { return ctx.Err() != nil }}.SimulateNetFlow(scenarios.NetFlowSimulationSpec{
+		InitialValue: startingValue, MonthlyIncome: assumptions.MonthlyIncome, MonthlySpending: assumptions.MonthlySpending,
+		AnnualIncomeGrowth: m.AnnualIncomeGrowth, AnnualSpendingGrowth: m.AnnualSpendingGrowth,
+		AnnualReturn: forecastAnnualReturn, AnnualVolatility: forecastAnnualVolatility, AnnualInflation: m.InflationAssumption,
+		HorizonMonths: int(m.HorizonMonths), PathCount: int(m.PathCount), Seed: seed, TargetAmount: m.TargetAmount,
+	})
+	now := h.now()
+	timeline := make([]NetWorthForecastPoint, 0, len(sim.Bands))
+	for _, band := range sim.Bands {
+		elapsed := float64(max(0, band.Month-1)) / 12
+		timeline = append(timeline, NetWorthForecastPoint{
+			ID: strconv.Itoa(band.Month), Month: band.Month, Date: forecastMonth(band.Month, now),
+			MonthlyIncome:   assumptions.MonthlyIncome * math.Pow(1+m.AnnualIncomeGrowth, elapsed),
+			MonthlySpending: assumptions.MonthlySpending * math.Pow(1+m.AnnualSpendingGrowth, elapsed),
+			Bands: []ForecastProbabilityBand{
+				{Percentile: 10, Value: band.P10},
+				{Percentile: 25, Value: band.P25},
+				{Percentile: 50, Value: band.P50},
+				{Percentile: 75, Value: band.P75},
+				{Percentile: 90, Value: band.P90},
+			},
+		})
+	}
+	storedAssumptions, err := codingJSON(assumptions)
+	if err != nil {
+		return err
+	}
+	storedTimeline, err := codingJSON(forecastTimelineEnvelope{Timeline: timeline})
+	if err != nil {
+		return err
+	}
+	assumptionsRaw, err := apijson.Marshal(storedAssumptions)
+	if err != nil {
+		return err
+	}
+	timelineRaw, err := apijson.Marshal(storedTimeline)
+	if err != nil {
+		return err
+	}
+	completed := h.now()
+	run := automationdb.NetWorthForecastRun{
+		ID: uuid.New(), UserID: userID, ForecastID: m.ID, Status: "completed", StartingValue: startingValue,
+		Assumptions: assumptionsRaw, Timeline: timelineRaw, TargetProbability: sim.GoalProbability,
+		Seed: strconv.FormatUint(seed, 10), CreatedAt: &completed, CompletedAt: &completed,
+	}
+	if err := h.q.InsertNetWorthForecastRun(ctx, automationdb.InsertNetWorthForecastRunParams{
+		ID: run.ID, UserID: run.UserID, ForecastID: run.ForecastID, Status: run.Status, StartingValue: run.StartingValue,
+		Assumptions: run.Assumptions, Timeline: run.Timeline, TargetProbability: run.TargetProbability, Seed: run.Seed,
+		CreatedAt: run.CreatedAt, CompletedAt: run.CompletedAt,
+	}); err != nil {
+		return err
+	}
+	out, err := forecastRunResponse(&run)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, out)
+}
+
+// forecastMonth is forecastMonth(_:from:): the Gregorian calendar (local time
+// zone) adds the months, clamping the day to the target month's length, and
+// ISO8601DateFormatter renders it in UTC without fractional seconds.
+func forecastMonth(month int, from time.Time) string {
+	local := from.In(time.Local)
+	first := time.Date(local.Year(), local.Month(), 1, local.Hour(), local.Minute(), local.Second(), local.Nanosecond(), time.Local)
+	target := first.AddDate(0, month, 0)
+	lastDay := time.Date(target.Year(), target.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
+	value := target.AddDate(0, 0, min(local.Day(), lastDay)-1)
+	return value.UTC().Format("2006-01-02T15:04:05Z")
 }
 
 func (h *handler) latestForecastRun(c *echo.Context) error {
@@ -525,9 +569,8 @@ func (h *handler) latestForecastRun(c *echo.Context) error {
 	return httpx.OK(c, out)
 }
 
-// forecastRunResponse is forecastRunResponse(_:). Fluent decoded the jsonb
-// columns as ScenarioJSON, then codingDecode re-wraps them: the defaults
-// never decode (Vapor bug, see the file comment).
+// forecastRunResponse is forecastRunResponse(_:): the jsonb columns are
+// ScenarioJSON, decoded by codingDecode.
 func forecastRunResponse(r *automationdb.NetWorthForecastRun) (NetWorthForecastRun, error) {
 	storedAssumptions, err := scenarios.ParseScenarioJSON(r.Assumptions)
 	if err != nil {

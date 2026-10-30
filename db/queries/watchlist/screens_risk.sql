@@ -16,6 +16,37 @@ WHERE user_id = $1 AND screen_id = $2
 ORDER BY evaluated_at DESC
 LIMIT 30;
 
+-- name: InsertWatchlistScreen :exec
+INSERT INTO watchlist_screens (
+    id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(now), sqlc.arg(now));
+
+-- name: UpdateWatchlistScreen :exec
+UPDATE watchlist_screens SET
+    name = $2, watchlist_list_ids = $3, logical_operator = $4, groups = $5, alerts_enabled = $6,
+    last_evaluated_at = NULL, updated_at = sqlc.arg(now)
+WHERE id = $1;
+
+-- name: DeleteScreenEvaluations :exec
+DELETE FROM watchlist_screen_evaluations WHERE screen_id = $1;
+
+-- name: ScreenWatchlistSymbols :many
+SELECT symbol FROM watchlist_items WHERE user_id = $1 AND watchlist_list_id = ANY(sqlc.arg(list_ids)::uuid[]);
+
+-- name: LatestScreenEvaluation :many
+SELECT * FROM watchlist_screen_evaluations
+WHERE user_id = $1 AND screen_id = $2
+ORDER BY evaluated_at DESC
+LIMIT 1;
+
+-- name: InsertScreenEvaluation :exec
+INSERT INTO watchlist_screen_evaluations (
+    id, user_id, screen_id, symbol_count, match_symbols, result, is_alert_baseline, evaluated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: MarkScreenEvaluated :exec
+UPDATE watchlist_screens SET last_evaluated_at = sqlc.arg(now), updated_at = sqlc.arg(now) WHERE id = $1;
+
 -- name: ListHoldingRiskProfiles :many
 SELECT * FROM holding_risk_profiles WHERE user_id = $1 ORDER BY updated_at DESC;
 

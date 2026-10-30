@@ -19,6 +19,7 @@ type Querier interface {
 	CountWatchlistLists(ctx context.Context, userID uuid.UUID) (int64, error)
 	DefaultWatchlistList(ctx context.Context, userID uuid.UUID) (WatchlistList, error)
 	DeleteHoldingRiskProfile(ctx context.Context, id uuid.UUID) error
+	DeleteScreenEvaluations(ctx context.Context, screenID uuid.UUID) error
 	DeleteTarget(ctx context.Context, id uuid.UUID) error
 	DeleteWatchlistItem(ctx context.Context, id uuid.UUID) error
 	DeleteWatchlistList(ctx context.Context, id uuid.UUID) error
@@ -33,9 +34,12 @@ type Querier interface {
 	HoldingUserIDsForSymbol(ctx context.Context, symbol string) ([]uuid.UUID, error)
 	InsertEarningsReminderDelivery(ctx context.Context, arg InsertEarningsReminderDeliveryParams) error
 	InsertHoldingRiskProfile(ctx context.Context, arg InsertHoldingRiskProfileParams) (HoldingRiskProfile, error)
+	InsertScreenEvaluation(ctx context.Context, arg InsertScreenEvaluationParams) error
 	InsertTarget(ctx context.Context, arg InsertTargetParams) (Target, error)
 	InsertWatchlistItem(ctx context.Context, arg InsertWatchlistItemParams) (WatchlistItem, error)
 	InsertWatchlistList(ctx context.Context, arg InsertWatchlistListParams) (WatchlistList, error)
+	InsertWatchlistScreen(ctx context.Context, arg InsertWatchlistScreenParams) error
+	LatestScreenEvaluation(ctx context.Context, arg LatestScreenEvaluationParams) ([]WatchlistScreenEvaluation, error)
 	// WatchlistService.list (the AI action catalog's list_watchlist): every
 	// item the user has, across lists, by symbol.
 	ListAllWatchlistItemsBySymbol(ctx context.Context, userID uuid.UUID) ([]WatchlistItem, error)
@@ -48,6 +52,7 @@ type Querier interface {
 	// Smart screens (watchlist_screens, watchlist_screen_evaluations), holding
 	// risk profiles, and the earnings reminder poller's state.
 	ListWatchlistScreens(ctx context.Context, userID uuid.UUID) ([]WatchlistScreen, error)
+	MarkScreenEvaluated(ctx context.Context, arg MarkScreenEvaluatedParams) error
 	MarkTargetTriggered(ctx context.Context, arg MarkTargetTriggeredParams) error
 	OldestWatchlistListExcluding(ctx context.Context, arg OldestWatchlistListExcludingParams) (WatchlistList, error)
 	OwnedHolding(ctx context.Context, arg OwnedHoldingParams) (OwnedHoldingRow, error)
@@ -58,12 +63,14 @@ type Querier interface {
 	OwnedWatchlistScreen(ctx context.Context, arg OwnedWatchlistScreenParams) (WatchlistScreen, error)
 	RenameWatchlistList(ctx context.Context, arg RenameWatchlistListParams) (WatchlistList, error)
 	ScreenEvaluationHistory(ctx context.Context, arg ScreenEvaluationHistoryParams) ([]WatchlistScreenEvaluation, error)
+	ScreenWatchlistSymbols(ctx context.Context, arg ScreenWatchlistSymbolsParams) ([]string, error)
 	SetWatchlistListDefault(ctx context.Context, arg SetWatchlistListDefaultParams) error
 	TargetForUpdate(ctx context.Context, id uuid.UUID) (Target, error)
 	UnresolvedTargets(ctx context.Context) ([]Target, error)
 	UpdateHoldingRiskProfile(ctx context.Context, arg UpdateHoldingRiskProfileParams) (HoldingRiskProfile, error)
 	UpdateTarget(ctx context.Context, arg UpdateTargetParams) (Target, error)
 	UpdateWatchlistItem(ctx context.Context, arg UpdateWatchlistItemParams) (WatchlistItem, error)
+	UpdateWatchlistScreen(ctx context.Context, arg UpdateWatchlistScreenParams) error
 	WatchlistItemBySymbol(ctx context.Context, arg WatchlistItemBySymbolParams) (WatchlistItem, error)
 	WatchlistItemsInList(ctx context.Context, arg WatchlistItemsInListParams) ([]WatchlistItem, error)
 	WatchlistListNames(ctx context.Context, userID uuid.UUID) ([]string, error)

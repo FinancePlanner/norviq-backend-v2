@@ -7,6 +7,7 @@ package automationdb
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -171,6 +172,46 @@ func (q *Queries) InsertNetWorthForecast(ctx context.Context, arg InsertNetWorth
 		arg.TargetAmount,
 		arg.PathCount,
 		arg.Now,
+	)
+	return err
+}
+
+const insertNetWorthForecastRun = `-- name: InsertNetWorthForecastRun :exec
+INSERT INTO net_worth_forecast_runs (
+    id, user_id, forecast_id, status, starting_value, assumptions, timeline, target_probability, seed,
+    failure_reason, created_at, completed_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+`
+
+type InsertNetWorthForecastRunParams struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	ForecastID        uuid.UUID
+	Status            string
+	StartingValue     float64
+	Assumptions       json.RawMessage
+	Timeline          json.RawMessage
+	TargetProbability *float64
+	Seed              string
+	FailureReason     *string
+	CreatedAt         *time.Time
+	CompletedAt       *time.Time
+}
+
+func (q *Queries) InsertNetWorthForecastRun(ctx context.Context, arg InsertNetWorthForecastRunParams) error {
+	_, err := q.db.Exec(ctx, insertNetWorthForecastRun,
+		arg.ID,
+		arg.UserID,
+		arg.ForecastID,
+		arg.Status,
+		arg.StartingValue,
+		arg.Assumptions,
+		arg.Timeline,
+		arg.TargetProbability,
+		arg.Seed,
+		arg.FailureReason,
+		arg.CreatedAt,
+		arg.CompletedAt,
 	)
 	return err
 }

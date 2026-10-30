@@ -1,0 +1,52 @@
+# Terminal position read, error and AI-gate cases. Each backend runs against its own
+# copy of the scratch DB seeded with parity/terminal-positions-setup.sql (see there):
+#   Vapor: DATABASE_NAME=parity_terminal_a JWT_SECRET=parity-secret StockPlanBackend serve --port 18128   (no AI keys)
+#   v2:    DATABASE_NAME=parity_terminal_b PORT=18118 go run ./cmd/api serve
+#   go run ./cmd/parity -a http://127.0.0.1:18128 -b http://127.0.0.1:18118 -jwt-secret parity-secret -cases parity/terminal-positions.jsonl
+{"name": "list", "method": "GET", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "list ticker filter lowercase + spaces", "method": "GET", "path": "/v1/terminal-positions?ticker=%20amzn%20", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "list ticker filter unknown", "method": "GET", "path": "/v1/terminal-positions?ticker=zzz", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "list blank ticker", "method": "GET", "path": "/v1/terminal-positions?ticker=", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "list empty user (USD fallback)", "method": "GET", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000005"}
+{"name": "list writer (CHF)", "method": "GET", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000002"}
+{"name": "summary", "method": "GET", "path": "/v1/terminal-positions/summary", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "summary empty", "method": "GET", "path": "/v1/terminal-positions/summary", "as": "7e000000-0000-4000-8000-000000000005"}
+{"name": "list via planning:read PAT", "method": "GET", "path": "/v1/terminal-positions", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab01"}}
+{"name": "create via planning:read PAT is 403", "method": "POST", "path": "/v1/terminal-positions", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab01"}, "body": {"ticker": "x", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": 1}}
+{"name": "list no token", "method": "GET", "path": "/v1/terminal-positions"}
+{"name": "summary no token", "method": "GET", "path": "/v1/terminal-positions/summary"}
+{"name": "empty PATCH writes nothing", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {}}
+{"name": "PATCH other user's row 404", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000009", "body": {"valueWanted": 1}}
+{"name": "PATCH bad id", "method": "PATCH", "path": "/v1/terminal-positions/nope", "as": "7e000000-0000-4000-8000-000000000001", "body": {"valueWanted": 1}}
+{"name": "PATCH bad body before bad id", "method": "PATCH", "path": "/v1/terminal-positions/nope", "as": "7e000000-0000-4000-8000-000000000001", "body": {"valueWanted": "x"}}
+{"name": "PATCH unknown clear", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"clear": ["valueWanted", "zeta", "abc"]}}
+{"name": "PATCH negative value", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"valueWanted": -1}}
+{"name": "PATCH bad ticker", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "$$"}}
+{"name": "PATCH too large", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"terminalMarketCap": 1e+19}}
+{"name": "PATCH notes too long", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"notes": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+{"name": "PATCH zero shares outstanding", "method": "PATCH", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000001", "body": {"sharesOutstanding": 0}}
+{"name": "DELETE other user's row 404", "method": "DELETE", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01", "as": "7e000000-0000-4000-8000-000000000009"}
+{"name": "DELETE bad id", "method": "DELETE", "path": "/v1/terminal-positions/123", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "duplicate other user's row 404", "method": "POST", "path": "/v1/terminal-positions/7e000000-0000-4000-8000-000000000c01/duplicate", "as": "7e000000-0000-4000-8000-000000000009"}
+{"name": "duplicate bad id", "method": "POST", "path": "/v1/terminal-positions/zz/duplicate", "as": "7e000000-0000-4000-8000-000000000001"}
+{"name": "create bad ticker", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "  $$ ", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": 1}}
+{"name": "create too large", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "BIG", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": 1e+19}}
+{"name": "create negative sharesOwned", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "X", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": 1, "sharesOwned": -2}}
+{"name": "create zero price", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "X", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": 1, "currentSharePrice": 0}}
+{"name": "create missing terminalShareCount", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "X", "terminalMarketCap": 1, "valueWanted": 1}}
+{"name": "create null valueWanted", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "X", "terminalShareCount": 1, "terminalMarketCap": 1, "valueWanted": null}}
+{"name": "create string number", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ticker": "X", "terminalShareCount": "1", "terminalMarketCap": 1, "valueWanted": 1}}
+{"name": "create empty body", "method": "POST", "path": "/v1/terminal-positions", "as": "7e000000-0000-4000-8000-000000000001", "headers": {"Content-Type": "application/json"}, "raw": ""}
+{"name": "order missing ids", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000001", "body": {}}
+{"name": "order invalid id", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ids": ["nope"]}}
+{"name": "order incomplete", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000001", "body": {"ids": ["7e000000-0000-4000-8000-000000000c01"]}}
+{"name": "order duplicated", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000006", "body": {"ids": ["7e000000-0000-4000-8000-000000000c21", "7e000000-0000-4000-8000-000000000c21"]}}
+{"name": "order foreign", "method": "PUT", "path": "/v1/terminal-positions/order", "as": "7e000000-0000-4000-8000-000000000006", "body": {"ids": ["7e000000-0000-4000-8000-000000000c21", "7e000000-0000-4000-8000-000000000c01"]}}
+{"name": "ai share-facts free user is upgrade_required", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000003", "body": {"ticker": "amzn"}}
+{"name": "ai scenario free user is upgrade_required", "method": "POST", "path": "/v1/terminal-positions/ai/scenario", "as": "7e000000-0000-4000-8000-000000000003", "body": {"ticker": "amzn", "horizonYears": 5}}
+{"name": "ai share-facts pro, no client: 503", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "amzn"}}
+{"name": "ai scenario pro, no client: 503", "method": "POST", "path": "/v1/terminal-positions/ai/scenario", "as": "7e000000-0000-4000-8000-000000000004", "body": {"ticker": "sofi"}}
+{"name": "ai share-facts pro, bad body still 503 (client checked first)", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000004", "body": {"nope": 1}}
+{"name": "ai share-facts no token", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "body": {"ticker": "amzn"}}
+{"name": "ai share-facts research PAT is 403", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "headers": {"Authorization": "Bearer nvq_pat_7e00000000000000000000000000ab02"}, "body": {"ticker": "amzn"}}
+{"name": "ai share-facts free bad body still upgrade", "method": "POST", "path": "/v1/terminal-positions/ai/share-facts", "as": "7e000000-0000-4000-8000-000000000003", "body": {"ticker": 5}}

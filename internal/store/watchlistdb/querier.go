@@ -36,6 +36,9 @@ type Querier interface {
 	InsertTarget(ctx context.Context, arg InsertTargetParams) (Target, error)
 	InsertWatchlistItem(ctx context.Context, arg InsertWatchlistItemParams) (WatchlistItem, error)
 	InsertWatchlistList(ctx context.Context, arg InsertWatchlistListParams) (WatchlistList, error)
+	// WatchlistService.list (the AI action catalog's list_watchlist): every
+	// item the user has, across lists, by symbol.
+	ListAllWatchlistItemsBySymbol(ctx context.Context, userID uuid.UUID) ([]WatchlistItem, error)
 	ListHoldingRiskProfiles(ctx context.Context, userID uuid.UUID) ([]HoldingRiskProfile, error)
 	// Price targets (targets) and the target alert poller.
 	ListTargets(ctx context.Context, arg ListTargetsParams) ([]Target, error)

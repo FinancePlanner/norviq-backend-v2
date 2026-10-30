@@ -20,7 +20,10 @@ client release. Then archive the Vapor repo.
 - v2 takes all API traffic from the first deploy. Unported routes are proxied
   to Vapor untouched, so deploying v2 changes nothing observable.
 - Each domain flips when its parity suite passes, simply by being registered.
-  `V2_DISABLED_ROUTES` sends any route back to Vapor without a deploy. The
+  `V2_DISABLED_ROUTES` sends any route back to Vapor without a deploy.
+  `V2_NATIVE_PREFIXES` (e.g. `/v1/auth,/health,/.well-known`) narrows v2 to
+  the ported routes under those prefixes, so production can widen domain by
+  domain with a values change. The
   ingress pointing back at the Vapor service is the full rollback.
 - Shared Redis keeps rate-limit buckets and idempotency keys consistent across
   both processes. The Vapor-compatible cache format is in
@@ -62,7 +65,8 @@ client release. Then archive the Vapor repo.
 ## Deliberate deviations from Vapor
 
 Vapor bugs are ported faithfully unless listed here. Each fix is v2-only;
-Vapor is archived after cutover, not patched.
+Vapor is archived after cutover, not patched. **No line of code is added to
+the Vapor repo.** The faithfully ported bugs are fixed in Go, after cutover.
 
 - **RevenueCat decoding** (billing): Vapor's `JSONDecoder.backendAPI`
   rewrote RevenueCat's snake_case keys to camelCase, so every snake_case

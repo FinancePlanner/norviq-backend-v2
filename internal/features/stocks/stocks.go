@@ -550,8 +550,15 @@ func (h *handlers) deleteStock(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	current, err := h.findStock(ctx, h.db, id, s.UserID)
+	if err := h.remove(c.Request().Context(), id, s.UserID); err != nil {
+		return err
+	}
+	return httpx.NoContent(c)
+}
+
+// remove is StockServiceImpl.delete.
+func (h *handlers) remove(ctx context.Context, id, userID uuid.UUID) error {
+	current, err := h.findStock(ctx, h.db, id, userID)
 	if err != nil {
 		return err
 	}
@@ -564,10 +571,7 @@ func (h *handlers) deleteStock(c *echo.Context) error {
 	if err := stocksdb.New(h.db).DeleteStock(ctx, current.ID); err != nil {
 		return err
 	}
-	if err := h.syncHoldings(ctx, s.UserID); err != nil {
-		return err
-	}
-	return httpx.NoContent(c)
+	return h.syncHoldings(ctx, userID)
 }
 
 // ---- POST /v1/stocks/id/:stockId/sell -------------------------------------------
@@ -585,30 +589,37 @@ func (h *handlers) sellStock(c *echo.Context) error {
 	if err := decodeBody(c, sellStockRequestSpec, &p); err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	userID := s.UserID
-	stock, err := h.findStock(ctx, h.db, id, userID)
+	out, err := h.sell(c.Request().Context(), id, p, s.UserID)
 	if err != nil {
 		return err
 	}
+	return httpx.OK(c, out)
+}
+
+// sell is StockServiceImpl.sell.
+func (h *handlers) sell(ctx context.Context, id uuid.UUID, p sellStockRequest, userID uuid.UUID) (StockResponse, error) {
+	stock, err := h.findStock(ctx, h.db, id, userID)
+	if err != nil {
+		return StockResponse{}, err
+	}
 	if stock == nil {
-		return errStockNotFound()
+		return StockResponse{}, errStockNotFound()
 	}
 	if err := portfolios.EnsureNotFollowed(ctx, h.db, stock.PortfolioListID); err != nil {
-		return err
+		return StockResponse{}, err
 	}
 	tradeDate, err := parseRequiredDate(p.SellDate, "sellDate")
 	if err != nil {
-		return err
+		return StockResponse{}, err
 	}
 	if !(p.SharesToSell > 0) {
-		return httpx.BadRequest("Shares to sell must be greater than 0.")
+		return StockResponse{}, httpx.BadRequest("Shares to sell must be greater than 0.")
 	}
 	if !(p.SellPrice > 0) {
-		return httpx.BadRequest("Sell price must be greater than 0.")
+		return StockResponse{}, httpx.BadRequest("Sell price must be greater than 0.")
 	}
 	if !(p.SharesToSell <= stock.Shares) {
-		return httpx.BadRequest("Cannot sell more shares than owned.")
+		return StockResponse{}, httpx.BadRequest("Cannot sell more shares than owned.")
 	}
 	proceeds := p.SharesToSell * p.SellPrice
 
@@ -641,9 +652,9 @@ func (h *handlers) sellStock(c *echo.Context) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return StockResponse{}, err
 	}
-	return httpx.OK(c, stockResponse(*stock))
+	return stockResponse(*stock), nil
 }
 
 // emptyNotFound is `Response(status: .notFound)`: a 404 with no body.

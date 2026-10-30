@@ -1,0 +1,6 @@
+# Creation cases: each server mints its own id and timestamps.
+# Run with -ignore requestId,id,createdAt,updatedAt.
+{"name": "conv-create", "method": "POST", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000004", "body": {"title": "  Parity  chat  "}}
+{"name": "conv-create-default-title", "method": "POST", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000004", "body": {}}
+{"name": "conv-create-snake-null", "method": "POST", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000004", "body": {"title": null}}
+{"name": "msg-create", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c3/messages", "as": "a2a2a2a2-0000-4000-8000-000000000003", "body": {"content": "  hello  "}}

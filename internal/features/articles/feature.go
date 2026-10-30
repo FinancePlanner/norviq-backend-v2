@@ -3,7 +3,7 @@
 // ArticleTickerVerifier, ArticleViewerCredentials): user-published,
 // ticker-tagged write-ups under /v1/articles, behind ARTICLES_ENABLED.
 //
-// PUT /v1/admin/articles/:ref/visibility stays with the /v1/admin port.
+// PUT /v1/admin/articles/:ref/visibility is in admin.go.
 package articles
 
 import (
@@ -155,6 +155,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	v1.DELETE("/articles/:ref/vote", h.unvote, with(write, vote)...)
 	v1.POST("/articles/:ref/report", h.report, with(with(trie, write...), lim.Limit(20, 3600*time.Second, "ratelimit:article-report"))...)
 	v1.POST("/articles/images", h.uploadImage, with(write, lim.Limit(20, 3600*time.Second, "ratelimit:article-image"))...)
+
+	// Moderation: the flag, then the write gate (CommunityAccessMiddleware
+	// included); the handler checks the viewer's admin flag.
+	v1.PUT("/admin/articles/:ref/visibility", h.setVisibility, write...)
 	return nil
 }
 

@@ -10,16 +10,20 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/accountdeletion"
 	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
+	"norviq-api/internal/features/admin"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/dataexport"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
@@ -29,19 +33,23 @@ import (
 	"norviq-api/internal/features/insights"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/ops"
 	"norviq-api/internal/features/pilots"
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
+	"norviq-api/internal/features/research"
 	"norviq-api/internal/features/retirement"
 	"norviq-api/internal/features/scenarios"
+	"norviq-api/internal/features/sharing"
 	"norviq-api/internal/features/simulations"
 	"norviq-api/internal/features/social"
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/features/tax"
+	"norviq-api/internal/features/terminalpositions"
 	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
@@ -115,6 +123,8 @@ func All() []server.Feature {
 		simulations.Feature{},
 		// Holdings, manual transactions and the stock share page.
 		stocks.Feature{},
+		// StockController research notes (/v1/research).
+		research.Feature{},
 		// RetirementController portfolio routes.
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// ScenarioController portfolio snapshot routes.
@@ -138,6 +148,23 @@ func All() []server.Feature {
 		// InsightsController (/v1/insights/*): Hermes insights and retail
 		// sentiment.
 		insights.Feature{},
+		// AI assistant, memos, action catalog, AI chat/insights/view
+		// summaries.
+		assistant.Feature{Sources: assistantSources},
+		// Terminal position sizing and its AI suggestions
+		// (TerminalPositionsController, TerminalPositionsAIController).
+		terminalpositions.Feature{},
+		// /v1/admin moderation (CommunityAdminController,
+		// SocialModerationController).
+		admin.Feature{},
+		// UserProfileService.delete (DELETE /v1/users, /v1/users/:id).
+		accountdeletion.Feature{},
+		// DataExportController, ExportFileController (/v1/api/v3/export).
+		dataexport.Feature{},
+		// PortfolioShareController's public route.
+		sharing.Feature{},
+		// /docs, /openapi.yaml, /metrics, /internal/metrics.
+		ops.Feature{},
 	}
 }
 
@@ -202,7 +229,21 @@ func AllJobs() []Job {
 		insights.HermesSyncJob{},
 		insights.SentimentAggregationJob{},
 		insights.SentimentRetentionJob{},
+		// AI assistant: thread/tip/proposal retention, daily tips, standing
+		// tasks (the last needs every read-tool source; see assistantSources).
+		assistant.RetentionJob{},
+		assistant.DailyTipJob{},
+		assistant.WatchJob{Sources: assistantSources},
+		// DataExportCleanupJob.
+		dataexport.CleanupJob{},
 	}
+}
+
+// assistantSources wires the other domains' services the AI surfaces read
+// (assistant.Sources). A nil field keeps the routes that need it on Vapor
+// and the standing-task job off; fill each one in as its domain lands.
+func assistantSources(*server.Deps) (assistant.Sources, error) {
+	return assistant.Sources{}, nil
 }
 
 // Jobs tracks running jobs for shutdown.

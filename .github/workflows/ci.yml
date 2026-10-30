@@ -100,3 +100,41 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Staging deploys on every main push, as Vapor's deploy-k3s did: write the
+  # new image tag into the infra repo, and ArgoCD rolls api-v2 in
+  # norviq-staging. Production is promoted from infra (promote-norviq.yml).
+  # Needs the INFRA_TOKEN secret (PAT, contents:write on LuminaVaultInfra);
+  # without it the job only logs that it skipped.
+  bump-staging:
+    name: Bump api-v2 staging tag in infra
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      HAS_INFRA_TOKEN: ${{ secrets.INFRA_TOKEN != '' }}
+    steps:
+      - name: Skip without INFRA_TOKEN
+        if: env.HAS_INFRA_TOKEN != 'true'
+        run: echo "INFRA_TOKEN not set; staging tag not bumped"
+      - uses: actions/checkout@v6
+        if: env.HAS_INFRA_TOKEN == 'true'
+        with:
+          repository: LuminaVault/LuminaVaultInfra
+          token: ${{ secrets.INFRA_TOKEN }}
+          ref: main
+      - name: Write staging image tag
+        if: env.HAS_INFRA_TOKEN == 'true'
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq -i ".image.tag = \"${{ github.sha }}\"" apps/norviq/api-v2/values-staging.yaml
+      - name: Commit and push
+        if: env.HAS_INFRA_TOKEN == 'true'
+        run: |
+          git config user.name "norviq-backend-v2-ci"
+          git config user.email "ci@norviq.org"
+          if git diff --quiet; then echo "no tag change"; exit 0; fi
+          git add apps/norviq/api-v2/values-staging.yaml
+          git commit -m "chore(api-v2): bump staging image to ${{ github.sha }}"
+          git pull --rebase origin main
+          git push origin main

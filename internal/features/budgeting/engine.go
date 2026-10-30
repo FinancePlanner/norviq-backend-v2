@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -31,6 +33,15 @@ type Engine struct {
 	Quotes    Quoter
 	Evaluator *Evaluator
 	Now       func() time.Time
+	// Logger receives best-effort failures (nil: slog.Default()).
+	Logger *slog.Logger
+}
+
+func (e *Engine) logger() *slog.Logger {
+	if e.Logger != nil {
+		return e.Logger
+	}
+	return slog.Default()
 }
 
 func (e *Engine) now() time.Time {
@@ -82,12 +93,29 @@ func (e *Engine) Dashboard(ctx context.Context, db budgetingdb.DBTX, userID, sna
 // snapshotNear is the private snapshot(userId:monthStart:) lookup: the
 // snapshot closest to the month's first day within a day either side.
 func snapshotNear(ctx context.Context, q *budgetingdb.Queries, userID uuid.UUID, month time.Time) (*budgetingdb.BudgetSnapshot, error) {
+	return snapshotNearExcluding(ctx, q, userID, month, uuid.Nil)
+}
+
+// snapshotNearExcluding is snapshotNear ignoring one snapshot. A
+// reallocation's next-month lookup excludes its source: a source dated late
+// in a month (2026-01-31) sits inside the next month's one-day window, and
+// Vapor then reallocated into the source itself.
+func snapshotNearExcluding(ctx context.Context, q *budgetingdb.Queries, userID uuid.UUID, month time.Time, exclude uuid.UUID) (*budgetingdb.BudgetSnapshot, error) {
 	start := monthStartOf(month)
-	cands, err := q.SnapshotsInRange(ctx, budgetingdb.SnapshotsInRangeParams{
+	all, err := q.SnapshotsInRange(ctx, budgetingdb.SnapshotsInRangeParams{
 		UserID: userID, FromTs: start.AddDate(0, 0, -1), ToTs: start.AddDate(0, 0, 1),
 	})
-	if err != nil || len(cands) == 0 {
+	if err != nil {
 		return nil, err
+	}
+	cands := all[:0]
+	for i := range all {
+		if all[i].ID != exclude {
+			cands = append(cands, all[i])
+		}
+	}
+	if len(cands) == 0 {
+		return nil, nil
 	}
 	best := 0
 	for i := 1; i < len(cands); i++ {
@@ -97,6 +125,11 @@ func snapshotNear(ctx context.Context, q *budgetingdb.Queries, userID uuid.UUID,
 	}
 	return &cands[best], nil
 }
+
+// nextMonthStart is the first day of the month after a snapshot's month.
+// (Vapor added a calendar month to the stored date, so a source dated
+// 2026-01-31 targeted 2026-02-28 and its clone was stored on the 28th.)
+func nextMonthStart(t time.Time) time.Time { return addMonths(monthStartOf(t), 1) }
 
 // --- spend to units ----------------------------------------------------------
 
@@ -455,8 +488,8 @@ func (e *Engine) preview(ctx context.Context, userID uuid.UUID, req previewReque
 	}
 	cur := snap.CurrencyCode
 	freed := roundedFor(sum, cur)
-	nextMonth := addMonths(snap.MonthStart, 1)
-	existing, err := snapshotNear(ctx, q, userID, nextMonth)
+	nextMonth := nextMonthStart(snap.MonthStart)
+	existing, err := snapshotNearExcluding(ctx, q, userID, nextMonth, snap.ID)
 	if err != nil {
 		return reallocationPreviewResponse{}, err
 	}
@@ -554,7 +587,7 @@ func (e *Engine) commit(ctx context.Context, userID uuid.UUID, requestIDRaw stri
 			return err
 		}
 		now := e.now()
-		effectiveMonth := addMonths(source.MonthStart, 1)
+		effectiveMonth := nextMonthStart(source.MonthStart)
 		target, err := e.cloneSnapshotIfNeeded(ctx, q, source, effectiveMonth, userID, now)
 		if err != nil {
 			return err
@@ -655,7 +688,7 @@ func (e *Engine) commit(ctx context.Context, userID uuid.UUID, requestIDRaw stri
 }
 
 func (e *Engine) cloneSnapshotIfNeeded(ctx context.Context, q *budgetingdb.Queries, source budgetingdb.BudgetSnapshot, month time.Time, userID uuid.UUID, now time.Time) (budgetingdb.BudgetSnapshot, error) {
-	existing, err := snapshotNear(ctx, q, userID, month)
+	existing, err := snapshotNearExcluding(ctx, q, userID, month, source.ID)
 	if err != nil {
 		return budgetingdb.BudgetSnapshot{}, err
 	}
@@ -771,9 +804,13 @@ func (e *Engine) bulkUpdate(ctx context.Context, userID, snapshotID uuid.UUID, w
 	if err != nil {
 		return BudgetDriftDashboard{}, err
 	}
+	// The targets are committed by now, so a failed drift evaluation (alert
+	// state, push) is logged and the dashboard still returned. Vapor answered
+	// 500 here, inviting a retry of a change that had already landed.
 	if e.Evaluator != nil {
 		if err := e.Evaluator.Evaluate(ctx, userID, snap.MonthStart, true); err != nil {
-			return BudgetDriftDashboard{}, err
+			e.logger().Warn("budget drift evaluation after bulk target update failed",
+				"userId", uuidString(userID), "snapshotId", uuidString(snapshotID), "error", err)
 		}
 	}
 	return e.Dashboard(ctx, nil, userID, snapshotID)
@@ -808,6 +845,16 @@ func validateTemplate(name string, items []templateItem) error {
 	return nil
 }
 
+// templateWriteError maps the unique (user, name) violation to a 409.
+// (Vapor let it through as a 500.)
+func templateWriteError(err error) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
+		return httpx.Conflict("A template with this name already exists.")
+	}
+	return err
+}
+
 func (e *Engine) listTemplates(ctx context.Context, userID uuid.UUID) ([]templateResponse, error) {
 	rows, err := e.q(nil).TemplatesForUser(ctx, userID)
 	if err != nil {
@@ -835,7 +882,7 @@ func (e *Engine) createTemplate(ctx context.Context, userID uuid.UUID, name stri
 	now := e.now()
 	m := budgetingdb.BudgetTemplate{ID: uuid.New(), UserID: userID, Name: strings.TrimSpace(name), Items: payload, CreatedAt: &now, UpdatedAt: &now}
 	if err := e.q(nil).InsertTemplate(ctx, budgetingdb.InsertTemplateParams{ID: m.ID, UserID: userID, Name: m.Name, Items: payload, Now: &now}); err != nil {
-		return templateResponse{}, err
+		return templateResponse{}, templateWriteError(err)
 	}
 	return templateResponseFor(m)
 }
@@ -859,7 +906,7 @@ func (e *Engine) updateTemplate(ctx context.Context, userID, id uuid.UUID, name 
 	now := e.now()
 	m.Name, m.Items, m.UpdatedAt = strings.TrimSpace(name), payload, &now
 	if err := q.UpdateTemplate(ctx, budgetingdb.UpdateTemplateParams{ID: m.ID, Name: m.Name, Items: payload, UpdatedAt: &now}); err != nil {
-		return templateResponse{}, err
+		return templateResponse{}, templateWriteError(err)
 	}
 	return templateResponseFor(m)
 }

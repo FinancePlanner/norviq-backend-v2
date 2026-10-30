@@ -156,6 +156,46 @@ func calculate(snapshot budgetingdb.BudgetSnapshot, items []budgetingdb.BudgetPl
 
 	consumedCategories := map[uuid.UUID]bool{}
 	consumedTitles := map[string]bool{}
+	// Several plan items can draw on one category (or title). Their spend is
+	// shared in proportion to their targets (equally when every target is
+	// zero), so it is counted once. Vapor gave each item the full amount.
+	type pool struct {
+		targets float64
+		items   int
+	}
+	poolKey := func(it *budgetingdb.BudgetPlanItem) (string, bool) {
+		if _, linked := actualByItem[it.ID]; linked {
+			return "", false
+		}
+		if it.CategoryID != nil {
+			return "c:" + it.CategoryID.String(), true
+		}
+		return "t:" + normalizeTitle(it.Title), true
+	}
+	pools := map[string]*pool{}
+	for i := range items {
+		it := &items[i]
+		if key, ok := poolKey(it); ok {
+			p := pools[key]
+			if p == nil {
+				p = &pool{}
+				pools[key] = p
+			}
+			p.targets += effectiveAmount(it.PlannedAmount, string(it.SplitMode), it.UserSharePercent)
+			p.items++
+		}
+	}
+	share := func(it *budgetingdb.BudgetPlanItem, target, spend float64) float64 {
+		key, _ := poolKey(it)
+		p := pools[key]
+		if p.items <= 1 {
+			return spend
+		}
+		if p.targets > 0 {
+			return spend * target / p.targets
+		}
+		return spend / float64(p.items)
+	}
 	rows := make([]BudgetCategoryDrift, 0, len(items))
 	for i := range items {
 		it := &items[i]
@@ -164,11 +204,11 @@ func calculate(snapshot budgetingdb.BudgetSnapshot, items []budgetingdb.BudgetPl
 		if linked, ok := actualByItem[it.ID]; ok {
 			actual = linked
 		} else if it.CategoryID != nil {
-			actual = actualByCategory[*it.CategoryID]
+			actual = share(it, target, actualByCategory[*it.CategoryID])
 			consumedCategories[*it.CategoryID] = true
 		} else {
 			key := normalizeTitle(it.Title)
-			actual = actualByTitle[key]
+			actual = share(it, target, actualByTitle[key])
 			consumedTitles[key] = true
 		}
 		rows = append(rows, driftRow(it, target, actual, snapshot.CategoryDriftThreshold))
@@ -219,7 +259,7 @@ func calculate(snapshot budgetingdb.BudgetSnapshot, items []budgetingdb.BudgetPl
 		TotalDriftAmount:             roundedFor(totalDrift, cur),
 		TotalDriftPercent:            totalPercent,
 		TotalLevel:                   driftLevel(totalDrift, totalPercent, totalTarget, snapshot.TotalDriftThreshold),
-		InvestmentContributionTarget: investmentTarget,
+		InvestmentContributionTarget: roundedFor(investmentTarget, cur),
 		LostInvestmentCapital:        roundedFor(max(totalDrift, 0), cur),
 		Categories:                   rows,
 	}

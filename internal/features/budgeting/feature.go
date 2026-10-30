@@ -79,7 +79,7 @@ func (f Feature) engine(d *server.Deps) (*Engine, error) {
 		}
 		pub = ip
 	}
-	e := &Engine{DB: d.DB, Quotes: quotes, Now: f.Now}
+	e := &Engine{DB: d.DB, Quotes: quotes, Now: f.Now, Logger: d.Logger}
 	e.Evaluator = &Evaluator{Engine: e, Publisher: pub, AlertsEnabled: config.Bool(s.DriftAlertsEnabled, true)}
 	return e, nil
 }

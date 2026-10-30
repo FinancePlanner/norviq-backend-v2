@@ -1,0 +1,46 @@
+# Market brief parity, against the shared Vapor (MARKET_BRIEF_ENABLED unset):
+# GET /v1/market/brief answers the disabled card; the push opt-in routes are
+# not gated. Reset fixtures first, every run:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/market-brief-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18118 -jwt-secret parity-secret \
+#     -cases parity/market-brief.jsonl -ignore requestId \
+#     -headers Content-Type,Cache-Control,X-Frame-Options,X-Content-Type-Options,Referrer-Policy
+# Run v2 with MARKET_BRIEF_ENABLED unset. The enabled card is in
+# parity/market-brief-enabled.jsonl.
+# Expected diffs (2026-10-30: 27 cases, 3 differ), all foundation-wide, not
+# brief-specific:
+# - "brief bad token": Vapor's reason is JWTKit's "Token parts count is not
+#   3."; v2 says "Unauthorized" (same on every d.Auth.Scoped() route, e.g.
+#   /v1/market/fx).
+# - "prefs put malformed": the "Underlying error" tail of the DecodingError
+#   reason is Foundation's NSError text in Vapor, Go's in v2.
+# - "prefs put form": Vapor's URLEncodedFormDecoder reads "true" as a Bool;
+#   swiftjson.decodeForm passes form values as JSON strings, so v2 answers
+#   400. iOS and the web send JSON.
+{"name":"brief disabled","method":"GET","path":"/v1/market/brief","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief disabled pt","method":"GET","path":"/v1/market/brief?lang=pt","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief disabled PT-br","method":"GET","path":"/v1/market/brief?lang=PT-br","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief disabled de","method":"GET","path":"/v1/market/brief?lang=de","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief disabled ignores bad slot","method":"GET","path":"/v1/market/brief?slot=noon&date=x","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief disabled exact","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"brief unauth","method":"GET","path":"/v1/market/brief"}
+{"name":"brief bad token","method":"GET","path":"/v1/market/brief","headers":{"Authorization":"Bearer nope"}}
+{"name":"brief POST","method":"POST","path":"/v1/market/brief","as":"ae00b000-0000-4000-8000-000000000001","body":{}}
+{"name":"prefs none","method":"GET","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"prefs opted in","method":"GET","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000002"}
+{"name":"prefs unauth","method":"GET","path":"/v1/market/brief/notifications"}
+{"name":"prefs put pt","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"enabled":true,"language":"pt"}}
+{"name":"prefs after put","method":"GET","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003"}
+{"name":"prefs put de","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000002","body":{"enabled":true,"language":"de"}}
+{"name":"prefs put back pt-PT","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000002","body":{"enabled":true,"language":" pt-PT "}}
+{"name":"prefs put extra keys","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"enabled":false,"language":"en","extra":1}}
+{"name":"prefs put missing language","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"enabled":true}}
+{"name":"prefs put missing enabled","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"language":"en"}}
+{"name":"prefs put enabled string","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"enabled":"yes","language":"en"}}
+{"name":"prefs put language null","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":{"enabled":true,"language":null}}
+{"name":"prefs put array","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","body":[1]}
+{"name":"prefs put malformed","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","rawBody":"{nope","headers":{"Content-Type":"application/json"}}
+{"name":"prefs put empty","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","rawBody":"","headers":{"Content-Type":"application/json"}}
+{"name":"prefs put form","method":"PUT","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003","rawBody":"enabled=true&language=pt","headers":{"Content-Type":"application/x-www-form-urlencoded"}}
+{"name":"prefs put unauth","method":"PUT","path":"/v1/market/brief/notifications","body":{"enabled":true,"language":"en"}}
+{"name":"prefs final","method":"GET","path":"/v1/market/brief/notifications","as":"ae00b000-0000-4000-8000-000000000003"}

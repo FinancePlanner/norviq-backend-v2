@@ -206,25 +206,15 @@ func (h *handler) discover(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Groups owned by someone hidden from the viewer are left out by the
+	// query, before paging.
 	rows, err := h.s.q().GroupDiscover(ctx, groupsdb.GroupDiscoverParams{
-		Tickers: tickers, NamePattern: pattern, Off: int64(offset), Lim: pageSize + 1,
+		Tickers: tickers, NamePattern: pattern, Hidden: keys(hidden), Off: int64(offset), Lim: pageSize + 1,
 	})
 	if err != nil {
 		return err
 	}
-	// Groups owned by someone hidden from the viewer drop out after paging.
-	page := []groupsdb.Group{}
-	for i := range rows {
-		if i >= pageSize {
-			break
-		}
-		if g := &rows[i]; g.OwnerID != nil {
-			if _, h := hidden[*g.OwnerID]; h {
-				continue
-			}
-		}
-		page = append(page, rows[i])
-	}
+	page := rows[:min(len(rows), pageSize)]
 	items, err := h.s.summaries(ctx, page, v.UserID, hidden)
 	if err != nil {
 		return err

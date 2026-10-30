@@ -34,11 +34,15 @@ type Querier interface {
 	// field, so message queries see tombstones.
 	// ---- Groups -----------------------------------------------------------------
 	GroupByID(ctx context.Context, id uuid.UUID) ([]Group, error)
-	// `.withDeleted()`: deleted groups still count toward the daily cap.
+	// `.withDeleted()` on purpose: deleted groups still count toward the daily
+	// cap, or deleting would refill the quota. Not a bug.
 	GroupCountCreatedSince(ctx context.Context, arg GroupCountCreatedSinceParams) (int64, error)
 	GroupCountOwned(ctx context.Context, ownerID *uuid.UUID) (int64, error)
 	// Public groups, most members first. Fluent sorts `.descending`, so groups
 	// without messages (NULL last_message_at) come first among equal counts.
+	// Groups owned by someone hidden from the viewer are filtered here, before
+	// paging, so a page is full whenever a next one exists (Vapor filtered after
+	// paging and could return short pages with a cursor).
 	GroupDiscover(ctx context.Context, arg GroupDiscoverParams) ([]Group, error)
 	GroupInsert(ctx context.Context, arg GroupInsertParams) error
 	GroupRefreshMemberCount(ctx context.Context, groupID uuid.UUID) error
@@ -51,7 +55,8 @@ type Querier interface {
 	GroupUsernames(ctx context.Context, ids []uuid.UUID) ([]GroupUsernamesRow, error)
 	GroupsByIDs(ctx context.Context, ids []uuid.UUID) ([]Group, error)
 	InvitationsPendingFor(ctx context.Context, inviteeID *uuid.UUID) ([]GroupInvite, error)
-	// The ban's sweep: revoked_at is overwritten even on already revoked rows.
+	// The ban's sweep. Already revoked rows keep their original revoked_at
+	// (Vapor overwrote it).
 	InvitationsRevokeForInvitee(ctx context.Context, arg InvitationsRevokeForInviteeParams) error
 	InviteAccept(ctx context.Context, arg InviteAcceptParams) error
 	InviteByCode(ctx context.Context, code *string) ([]GroupInvite, error)

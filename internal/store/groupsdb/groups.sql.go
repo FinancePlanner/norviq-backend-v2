@@ -378,7 +378,8 @@ type GroupCountCreatedSinceParams struct {
 	CreatedAt time.Time
 }
 
-// `.withDeleted()`: deleted groups still count toward the daily cap.
+// `.withDeleted()` on purpose: deleted groups still count toward the daily
+// cap, or deleting would refill the quota. Not a bug.
 func (q *Queries) GroupCountCreatedSince(ctx context.Context, arg GroupCountCreatedSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, groupCountCreatedSince, arg.OwnerID, arg.CreatedAt)
 	var count int64
@@ -402,23 +403,29 @@ SELECT id, name, description, icon_emoji, topic, ticker, visibility, owner_id, m
 WHERE visibility = 'public' AND deleted_at IS NULL
   AND (cardinality($1::text[]) = 0 OR ticker = ANY($1::text[]))
   AND ($2::text = '' OR name ILIKE $2::text)
+  AND (cardinality($3::uuid[]) = 0 OR owner_id IS NULL OR owner_id <> ALL($3::uuid[]))
 ORDER BY member_count DESC, last_message_at DESC, id ASC
-LIMIT $4::bigint OFFSET $3::bigint
+LIMIT $5::bigint OFFSET $4::bigint
 `
 
 type GroupDiscoverParams struct {
 	Tickers     []string
 	NamePattern string
+	Hidden      []uuid.UUID
 	Off         int64
 	Lim         int64
 }
 
 // Public groups, most members first. Fluent sorts `.descending`, so groups
 // without messages (NULL last_message_at) come first among equal counts.
+// Groups owned by someone hidden from the viewer are filtered here, before
+// paging, so a page is full whenever a next one exists (Vapor filtered after
+// paging and could return short pages with a cursor).
 func (q *Queries) GroupDiscover(ctx context.Context, arg GroupDiscoverParams) ([]Group, error) {
 	rows, err := q.db.Query(ctx, groupDiscover,
 		arg.Tickers,
 		arg.NamePattern,
+		arg.Hidden,
 		arg.Off,
 		arg.Lim,
 	)
@@ -707,7 +714,7 @@ func (q *Queries) InvitationsPendingFor(ctx context.Context, inviteeID *uuid.UUI
 
 const invitationsRevokeForInvitee = `-- name: InvitationsRevokeForInvitee :exec
 UPDATE group_invites SET revoked_at = $3
-WHERE group_id = $1 AND invitee_id = $2 AND accepted_at IS NULL
+WHERE group_id = $1 AND invitee_id = $2 AND accepted_at IS NULL AND revoked_at IS NULL
 `
 
 type InvitationsRevokeForInviteeParams struct {
@@ -716,7 +723,8 @@ type InvitationsRevokeForInviteeParams struct {
 	RevokedAt *time.Time
 }
 
-// The ban's sweep: revoked_at is overwritten even on already revoked rows.
+// The ban's sweep. Already revoked rows keep their original revoked_at
+// (Vapor overwrote it).
 func (q *Queries) InvitationsRevokeForInvitee(ctx context.Context, arg InvitationsRevokeForInviteeParams) error {
 	_, err := q.db.Exec(ctx, invitationsRevokeForInvitee, arg.GroupID, arg.InviteeID, arg.RevokedAt)
 	return err

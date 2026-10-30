@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/boards"
@@ -653,4 +654,59 @@ func TestGlobalBan(t *testing.T) {
 	r := e.do(http.MethodGet, "/v1/groups", ana, nil)
 	expect(t, r, http.StatusForbidden)
 	expectCode(t, r, "community_banned")
+}
+
+// Groups owned by someone hidden from the viewer are filtered before paging,
+// so the first page holds the visible group and no cursor (Vapor filtered
+// after paging: an empty page that still had a nextCursor).
+func TestDiscoverHidesBlockedOwnersBeforePaging(t *testing.T) {
+	e := newEnv(t)
+	ana, hid, bo := e.member("dsc"), e.member("dschid"), e.member("dscbo")
+	visible := e.create(ana, "Visible", groups.TopicStock, ptr("AAPL"), groups.VisibilityPublic)
+	seed := e.create(hid, "Hidden", groups.TopicStock, ptr("MSFT"), groups.VisibilityPublic)
+	e.exec(`INSERT INTO groups
+		SELECT (jsonb_populate_record(NULL::groups, to_jsonb(g) || jsonb_build_object('id', gen_random_uuid(), 'name', 'Hidden ' || n))).*
+		FROM groups g, generate_series(1, 25) n WHERE g.id = $1`, seed.Group.ID.Std())
+	e.exec(`UPDATE groups SET member_count = 50 WHERE owner_id = $1`, hid.id)
+	expect(t, e.do(http.MethodPost, "/v1/community/blocks", bo, map[string]any{"username": "grp_dschid"}), http.StatusNoContent)
+
+	r := e.do(http.MethodGet, "/v1/groups/discover", bo, nil)
+	expect(t, r, http.StatusOK)
+	var p groups.GroupDirectoryPage
+	r.JSON(t, &p)
+	if len(p.Items) != 1 || p.Items[0].ID != visible.Group.ID || p.NextCursor != nil {
+		t.Fatalf("page: %d items, cursor %v", len(p.Items), p.NextCursor)
+	}
+	// Someone who blocked nobody still pages through all 27.
+	r = e.do(http.MethodGet, "/v1/groups/discover", ana, nil)
+	r.JSON(t, &p)
+	if len(p.Items) != 25 || p.NextCursor == nil {
+		t.Fatalf("unblocked page: %d items, cursor %v", len(p.Items), p.NextCursor)
+	}
+}
+
+// A ban revokes the user's pending invitations; one revoked earlier keeps
+// its revoked_at (Vapor overwrote it with the ban time).
+func TestBanKeepsEarlierRevocation(t *testing.T) {
+	e := newEnv(t)
+	ana, cy := e.member("bsw"), e.member("bswcy")
+	g := e.createDefault(ana)
+	earlier := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	old, pending := uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{old, pending} {
+		e.exec(`INSERT INTO group_invites (id, group_id, created_by, invitee_id, expires_at, uses, created_at)
+			VALUES ($1, $2, $3, $4, now() + interval '7 days', 0, now())`, id, g.Group.ID.Std(), ana.id, cy.id)
+	}
+	e.exec(`UPDATE group_invites SET revoked_at = $2 WHERE id = $1`, old, earlier)
+	expect(t, e.do(http.MethodPost, "/v1/groups/"+g.Group.ID.String()+"/bans", ana, map[string]any{"userId": cy.id.String()}), http.StatusNoContent)
+	var kept time.Time
+	if err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT revoked_at FROM group_invites WHERE id = $1`, old).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if !kept.Equal(earlier) {
+		t.Fatalf("earlier revocation overwritten: %v", kept)
+	}
+	if n := e.count(`SELECT count(*) FROM group_invites WHERE id = $1 AND revoked_at IS NOT NULL`, pending); n != 1 {
+		t.Fatal("pending invitation not revoked")
+	}
 }

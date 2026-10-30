@@ -277,9 +277,14 @@ func TestDeleteGuards(t *testing.T) {
 	e.exec(`INSERT INTO portfolio_memberships (id, portfolio_id, user_id, role, status, created_at) VALUES ($1, $2, $3, 'editor', 'active', now())`, uuid.New(), plain, other)
 	expectReason(t, e.do(http.MethodDelete, "/v1/portfolios/"+plain.String(), otherToken, nil), http.StatusForbidden, "Only the portfolio owner can perform this action.")
 
-	// Plain holdings hit stocks' ON DELETE RESTRICT: a 500, as in Vapor.
+	// Plain holdings hit stocks' ON DELETE RESTRICT: a raw 500 in Vapor, a
+	// 409 in v2, and the portfolio stays.
 	e.stock(userID, plain, "MSFT", 1, 10, nil)
-	expectStatus(t, e.do(http.MethodDelete, "/v1/portfolios/"+plain.String(), token, nil), http.StatusInternalServerError)
+	expectReason(t, e.do(http.MethodDelete, "/v1/portfolios/"+plain.String(), token, nil), http.StatusConflict,
+		"Remove or move this portfolio's holdings before deleting it.")
+	if e.count(`SELECT count(*) FROM portfolio_lists WHERE id = $1`, plain) != 1 {
+		t.Fatal("portfolio deleted")
+	}
 	empty := e.list(userID, "Empty", false, "")
 	expectStatus(t, e.do(http.MethodDelete, "/v1/portfolios/"+empty.String(), token, nil), http.StatusNoContent)
 }
@@ -481,23 +486,27 @@ func TestCreateWithSourceAndClone(t *testing.T) {
 	_, freeToken := e.user("mgmt-clone-free@example.com")
 	expectStatus(t, e.do(http.MethodPost, "/v1/portfolios/"+source.String()+"/clone", freeToken, map[string]any{"name": "x", "copyRetirementPlan": false}), http.StatusNotFound)
 
-	// POST /v1/portfolios with a source the caller cannot see: the list is
-	// saved before the 404 (Vapor bug, ported).
+	// POST /v1/portfolios with a source the caller cannot see: 404 and,
+	// unlike Vapor (which saved the list first), no orphan list.
 	stranger, strangerToken := e.user("mgmt-clone-stranger@example.com")
 	e.grantPro(stranger)
 	r = e.do(http.MethodPost, "/v1/portfolios", strangerToken, map[string]any{"name": "Peek", "purpose": "personal", "ownership": "individual", "mode": "hypothetical", "baseCurrency": "USD", "sourcePortfolioId": source.String(), "copyRetirementPlan": false})
 	expectReason(t, r, http.StatusNotFound, "Portfolio not found.")
-	if e.count(`SELECT count(*) FROM portfolio_lists WHERE user_id = $1 AND name = 'Peek'`, stranger) != 1 {
-		t.Fatal("orphan not saved")
+	if e.count(`SELECT count(*) FROM portfolio_lists WHERE user_id = $1 AND name = 'Peek'`, stranger) != 0 {
+		t.Fatal("orphan saved")
 	}
-	// A malformed source id is dropped, clonedAt is still set.
+	// A malformed source id is a 400 (Vapor dropped it and still set
+	// clonedAt).
 	r = e.do(http.MethodPost, "/v1/portfolios", strangerToken, map[string]any{"name": "Bad", "purpose": "personal", "ownership": "individual", "mode": "hypothetical", "baseCurrency": "USD", "sourcePortfolioId": "nope", "copyRetirementPlan": false})
-	expectStatus(t, r, http.StatusCreated)
-	p = portfolioDTO{}
-	r.JSON(t, &p)
-	if p.SourcePortfolioID != nil || p.ClonedAt == nil {
-		t.Fatalf("bad source %s", r.Body)
+	expectReason(t, r, http.StatusBadRequest, "Invalid sourcePortfolioId.")
+	if e.count(`SELECT count(*) FROM portfolio_lists WHERE user_id = $1 AND name = 'Bad'`, stranger) != 0 {
+		t.Fatal("bad source saved")
 	}
+	// A duplicate name is a 409 (Vapor: raw 500), for clone and rename.
+	expectReason(t, e.do(http.MethodPost, "/v1/portfolios/"+source.String()+"/clone", token, map[string]any{"name": "Copy 2", "copyRetirementPlan": false}),
+		http.StatusConflict, "A portfolio with this name already exists.")
+	expectReason(t, e.do(http.MethodPatch, "/v1/portfolios/"+p.ID, token, map[string]any{"name": "Copy"}),
+		http.StatusConflict, "A portfolio with this name already exists.")
 }
 
 func TestUpdateArchiveGet(t *testing.T) {

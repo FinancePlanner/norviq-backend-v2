@@ -186,25 +186,41 @@ func (h *handlers) insertAndCopy(c *echo.Context, userID uuid.UUID, payload crea
 	params.Ownership = payload.Ownership
 	params.Mode = payload.Mode
 	params.BaseCurrency = normalizeCurrency(payload.BaseCurrency)
-	// sourcePortfolioId.flatMap(UUID.init(uuidString:)): a malformed id is
-	// silently dropped, while clonedAt still follows the raw field.
+	// Vapor dropped a malformed sourcePortfolioId silently (while still
+	// setting clonedAt), and checked the source only after saving the new
+	// list, so an unseen source left an orphan list behind its 404. v2
+	// rejects a malformed id, checks the source first, and saves the list
+	// and its copied sandbox in one transaction.
 	if payload.SourcePortfolioID != nil {
-		if id, ok := portfolios.ParseSwiftUUID(*payload.SourcePortfolioID); ok {
-			params.SourcePortfolioID = &id
+		id, ok := portfolios.ParseSwiftUUID(*payload.SourcePortfolioID)
+		if !ok {
+			return httpx.BadRequest("Invalid sourcePortfolioId.")
 		}
+		if _, err := h.access.Require(ctx, h.db, id, userID, portfolios.RequireOptions{}); err != nil {
+			return err
+		}
+		if params.Mode != portfolios.ModeHypothetical {
+			return httpx.BadRequest("Only hypothetical portfolios can clone holdings.")
+		}
+		params.SourcePortfolioID = &id
 	}
 	if cloned {
 		now := params.CreatedAt
 		params.ClonedAt = &now
 	}
-	dest, err := portfoliocoredb.New(h.db).InsertPortfolioList(ctx, params)
+	var dest portfoliocoredb.PortfolioList
+	err = pgx.BeginFunc(ctx, h.db, func(tx pgx.Tx) error {
+		var err error
+		if dest, err = portfoliocoredb.New(tx).InsertPortfolioList(ctx, params); err != nil {
+			return listNameConflict(err)
+		}
+		if dest.SourcePortfolioID != nil {
+			return copySandbox(ctx, tx, *dest.SourcePortfolioID, dest, userID, payload.CopyRetirementPlan)
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	if dest.SourcePortfolioID != nil {
-		if err := h.copySandbox(ctx, *dest.SourcePortfolioID, dest, userID, payload.CopyRetirementPlan); err != nil {
-			return err
-		}
 	}
 	ac, err := h.access.Require(ctx, h.db, dest.ID, userID, portfolios.RequireOptions{})
 	if err != nil {
@@ -214,16 +230,10 @@ func (h *handlers) insertAndCopy(c *echo.Context, userID uuid.UUID, payload crea
 }
 
 // copySandbox copies the source's holdings, cash positions and (optionally)
-// retirement plan into a new hypothetical portfolio. It runs after the
-// destination is saved and outside a transaction, as in Vapor.
-func (h *handlers) copySandbox(ctx context.Context, sourceID uuid.UUID, dest portfoliocoredb.PortfolioList, userID uuid.UUID, copyRetirementPlan bool) error {
-	if _, err := h.access.Require(ctx, h.db, sourceID, userID, portfolios.RequireOptions{}); err != nil {
-		return err
-	}
-	if dest.Mode != portfolios.ModeHypothetical {
-		return httpx.BadRequest("Only hypothetical portfolios can clone holdings.")
-	}
-	q := portfoliomgmtdb.New(h.db)
+// retirement plan into a new hypothetical portfolio, inside the transaction
+// that saved it. The caller has checked access to the source and the mode.
+func copySandbox(ctx context.Context, tx pgx.Tx, sourceID uuid.UUID, dest portfoliocoredb.PortfolioList, userID uuid.UUID, copyRetirementPlan bool) error {
+	q := portfoliomgmtdb.New(tx)
 	stocks, err := q.StocksForPortfolio(ctx, sourceID)
 	if err != nil {
 		return err
@@ -354,7 +364,7 @@ func (h *handlers) update(c *echo.Context) error {
 			ID: p.ID, Name: p.Name, Purpose: p.Purpose, Ownership: p.Ownership, BaseCurrency: p.BaseCurrency, UpdatedAt: ptr(portfolios.Now()),
 		})
 		if err != nil {
-			return err
+			return listNameConflict(err)
 		}
 		p = coreList(row)
 	}
@@ -426,8 +436,8 @@ func (h *handlers) delete(c *echo.Context) error {
 			}
 		}
 		// Holdings that are not pilot leftovers hit stocks' ON DELETE
-		// RESTRICT here and fail the request with a 500, as in Vapor.
-		return q.DeletePortfolioList(ctx, id)
+		// RESTRICT here: a raw 500 in Vapor, a 409 in v2.
+		return holdingsConflict(q.DeletePortfolioList(ctx, id))
 	})
 	if err != nil {
 		return err

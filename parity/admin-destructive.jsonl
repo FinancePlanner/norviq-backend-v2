@@ -1,0 +1,10 @@
+# One-shot cases: the first backend to run a case consumes its fixture, so the
+# second always sees the aftermath. Run twice from fresh fixtures, once each
+# way round, and check that the first-run and second-run responses match
+# across the two passes:
+#   psql ... < parity/admin-setup.sql; go run ./cmd/parity -a <vapor> -b <v2> -cases parity/admin-destructive.jsonl ...
+#   psql ... < parity/admin-setup.sql; go run ./cmd/parity -a <v2> -b <vapor> -cases parity/admin-destructive.jsonl ...
+{"name":"board-delete","method":"DELETE","path":"/v1/admin/boards/PARITY-ADMIN-DOOMED","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"board-delete-creatorless","method":"DELETE","path":"/v1/admin/boards/parity-admin-doomed2","as":"ad000000-0000-4000-8000-000000000001"}
+{"name":"user-delete","method":"DELETE","path":"/v1/users","as":"ad000000-0000-4000-8000-000000000005"}
+{"name":"user-delete-by-id","method":"DELETE","path":"/v1/users/AD000000-0000-4000-8000-000000000006","as":"ad000000-0000-4000-8000-000000000006"}

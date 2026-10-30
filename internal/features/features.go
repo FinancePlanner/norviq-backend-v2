@@ -10,8 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"norviq-api/internal/features/accountdeletion"
 	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
+	"norviq-api/internal/features/admin"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
@@ -22,6 +24,7 @@ import (
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/crypto"
 	"norviq-api/internal/features/dashboard"
+	"norviq-api/internal/features/dataexport"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
 	"norviq-api/internal/features/expenses"
@@ -32,6 +35,7 @@ import (
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/news"
 	"norviq-api/internal/features/notifications"
+	"norviq-api/internal/features/ops"
 	"norviq-api/internal/features/pilots"
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
@@ -40,6 +44,7 @@ import (
 	"norviq-api/internal/features/reporting"
 	"norviq-api/internal/features/retirement"
 	"norviq-api/internal/features/scenarios"
+	"norviq-api/internal/features/sharing"
 	"norviq-api/internal/features/simulations"
 	"norviq-api/internal/features/social"
 	"norviq-api/internal/features/statistics"
@@ -146,6 +151,17 @@ func All() []server.Feature {
 		dashboard.Feature{},
 		// CryptoController (/v1/crypto/*, incl. the markets view).
 		crypto.Feature{},
+		// /v1/admin moderation (CommunityAdminController,
+		// SocialModerationController).
+		admin.Feature{},
+		// UserProfileService.delete (DELETE /v1/users, /v1/users/:id).
+		accountdeletion.Feature{},
+		// DataExportController, ExportFileController (/v1/api/v3/export).
+		dataexport.Feature{},
+		// PortfolioShareController's public route.
+		sharing.Feature{},
+		// /docs, /openapi.yaml, /metrics, /internal/metrics.
+		ops.Feature{},
 	}
 }
 
@@ -212,6 +228,8 @@ func AllJobs() []Job {
 		macro.RefreshJob{},
 		// Crypto markets snapshot (CoinGecko + FMP YTD bases).
 		crypto.RefreshJob{},
+		// DataExportCleanupJob.
+		dataexport.CleanupJob{},
 	}
 }
 

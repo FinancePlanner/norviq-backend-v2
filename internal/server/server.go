@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/config"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/middleware"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,7 +72,7 @@ type Server struct {
 
 // New builds the server and mounts features.
 func New(d *Deps, features []Feature) (*Server, error) {
-	st, err := newStrangler(d.Config.LegacyUpstreamURL, d.Config.ExtraDisabledRoutes, d.Logger)
+	st, err := newStrangler(d.Config.LegacyUpstreamURL, d.Config.ExtraDisabledRoutes, d.Config.NativePrefixes, d.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +84,11 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		IPExtractor:      d.Limiter.ClientIP.Resolve,
 		OnAddRoute:       st.mirror,
 	})
+
+	// HTTPMetricsMiddleware, `at: .beginning` (PROMETHEUS_ENABLED only).
+	if metrics.Enabled() {
+		e.Use(metrics.HTTPMiddleware(metrics.Shared))
+	}
 
 	bodyLimits := map[string]int64{}
 	origins, err := allowedOrigins(d.Config.AllowedOrigins, d.Config.IsProduction())

@@ -272,7 +272,7 @@ func TestFilingPackRenderer(t *testing.T) {
 		t.Fatalf("quoting %s", csv)
 	}
 	pdf := string(renderFilingPDF(pack))
-	if !strings.HasPrefix(pdf, "%PDF") || !strings.Contains(pdf, "Anexo J") || !strings.Contains(pdf, "(Norviq ? IRS Modelo 3 ? Anexo J ? 2025) Tj") {
+	if !strings.HasPrefix(pdf, "%PDF") || !strings.Contains(pdf, "Anexo J") || !strings.Contains(pdf, `(Norviq \227 IRS Modelo 3 \227 Anexo J \227 2025) Tj`) {
 		t.Fatalf("pdf %s", pdf)
 	}
 }
@@ -288,6 +288,11 @@ func TestMinimalPDFLayout(t *testing.T) {
 	}
 	if !strings.Contains(pdf, `(line \(a\)) Tj`) || !strings.HasSuffix(pdf, "%%EOF\n") {
 		t.Fatal("escape / trailer")
+	}
+	// Latin-1 text is written in WinAnsi (Vapor: every non-ASCII scalar as "?").
+	accented := string(minimalPDF([]string{"Ação € Müller 日"}))
+	if !strings.Contains(accented, `(A\347\343o \200 M\374ller ?) Tj`) || !strings.Contains(accented, "/Encoding /WinAnsiEncoding") {
+		t.Fatalf("winansi %s", accented)
 	}
 	// The xref offsets point at each object.
 	idx := strings.Index(pdf, "xref\n")

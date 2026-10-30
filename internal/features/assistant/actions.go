@@ -210,11 +210,12 @@ func (s *actionServices) updateExpense(ctx context.Context, userID uuid.UUID, ar
 	if err != nil {
 		return "", err
 	}
-	// `$0.id == idStr`: a string comparison against the uppercase uuidString,
-	// so a lowercase id is "not found" (Vapor quirk, ported).
+	// Compared as UUIDs. Deliberate fix: Swift compared the string with the
+	// uppercase uuidString, so the lowercase ids models usually send were
+	// "expense not found".
 	var existing *expenses.ExpenseResponse
 	for i := range items {
-		if items[i].ID == idStr {
+		if strings.EqualFold(items[i].ID, id.String()) {
 			existing = &items[i]
 			break
 		}

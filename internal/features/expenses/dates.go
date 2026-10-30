@@ -52,11 +52,12 @@ func FormatISOMillis(t time.Time) string {
 	return t.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 }
 
-// ParseISOMillis is that formatter's date(from:): fractional seconds are
-// required.
+// ParseISOMillis parses an ISO 8601 cursor with or without fractional
+// seconds. (Vapor's formatter required them and silently ignored a cursor
+// such as "2026-10-01T00:00:00Z", so the first page came back again.)
 func ParseISOMillis(s string) (time.Time, bool) {
 	t, err := time.Parse("2006-01-02T15:04:05.999999999Z07:00", s)
-	if err != nil || !strings.Contains(s, ".") {
+	if err != nil {
 		return time.Time{}, false
 	}
 	return t, true

@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/features/autobuys"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
@@ -38,6 +39,7 @@ import (
 	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/groups"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/insights"
 	"norviq-api/internal/features/integrations"
 	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
@@ -53,6 +55,7 @@ import (
 	"norviq-api/internal/features/recaps"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
+	"norviq-api/internal/features/research"
 	"norviq-api/internal/features/retirement"
 	"norviq-api/internal/features/scenarios"
 	"norviq-api/internal/features/sharing"
@@ -61,6 +64,7 @@ import (
 	"norviq-api/internal/features/statistics"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/features/tax"
+	"norviq-api/internal/features/terminalpositions"
 	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/achievementhooks"
 	"norviq-api/internal/platform/entitlements"
@@ -138,6 +142,8 @@ func All() []server.Feature {
 		simulations.Feature{},
 		// Holdings, manual transactions and the stock share page.
 		stocks.Feature{},
+		// StockController research notes (/v1/research).
+		research.Feature{},
 		// RetirementController portfolio routes.
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// ScenarioController: snapshot, scenario and scenario-run routes.
@@ -169,6 +175,12 @@ func All() []server.Feature {
 		dashboard.Feature{},
 		// CryptoController (/v1/crypto/*, incl. the markets view).
 		crypto.Feature{},
+		// AI assistant, memos, action catalog, AI chat/insights/view
+		// summaries.
+		assistant.Feature{Sources: assistantSources},
+		// Terminal position sizing and its AI suggestions
+		// (TerminalPositionsController, TerminalPositionsAIController).
+		terminalpositions.Feature{},
 		// /v1/admin moderation (CommunityAdminController,
 		// SocialModerationController).
 		admin.Feature{},
@@ -180,6 +192,9 @@ func All() []server.Feature {
 		sharing.Feature{},
 		// /docs, /openapi.yaml, /metrics, /internal/metrics.
 		ops.Feature{},
+		// InsightsController (/v1/insights/*): Hermes insights and retail
+		// sentiment.
+		insights.Feature{},
 		// Groups (GroupsController, GroupMessagesController) and the
 		// realtime stream; behind SOCIAL_ENABLED and GROUPS_ENABLED, read
 		// per request.
@@ -265,8 +280,17 @@ func AllJobs() []Job {
 		macro.RefreshJob{},
 		// Crypto markets snapshot (CoinGecko + FMP YTD bases).
 		crypto.RefreshJob{},
+		// AI assistant: thread/tip/proposal retention, daily tips, standing
+		// tasks (the last needs every read-tool source; see assistantSources).
+		assistant.RetentionJob{},
+		assistant.DailyTipJob{},
+		assistant.WatchJob{Sources: assistantSources},
 		// DataExportCleanupJob.
 		dataexport.CleanupJob{},
+		// Insights: Hermes pull, daily sentiment roll-up, retention.
+		insights.HermesSyncJob{},
+		insights.SentimentAggregationJob{},
+		insights.SentimentRetentionJob{},
 		// WeeklyDigestJob (lock weekly_digest_job); runs only with
 		// DIGEST_ENABLED on, and Vapor's copy is off once Vapor has
 		// DIGEST_ENABLED=false.
@@ -288,6 +312,21 @@ func AllJobs() []Job {
 		// IBKR daily sync (ibkr_sync_job).
 		brokers.IBKRSyncJob{},
 	}
+}
+
+// assistantSources wires the other domains' services the AI surfaces read
+// (assistant.Sources). A nil field keeps the routes that need it on Vapor
+// and the standing-task job off; fill each one in as its domain lands.
+func assistantSources(d *server.Deps) (assistant.Sources, error) {
+	var src assistant.Sources
+	ins, err := insights.SharedService(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	src.InsightsSummary = func(ctx context.Context, days int) (any, error) {
+		return ins.Summary(ctx, days)
+	}
+	return src, nil
 }
 
 // Jobs tracks running jobs for shutdown.

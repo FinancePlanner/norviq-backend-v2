@@ -1,0 +1,54 @@
+# AI assistant CRUD, memos and the action catalog. Run parity/ai-assistant-setup.sql first.
+# Run with -ignore requestId.
+{"name": "catalog", "method": "GET", "path": "/v1/actions/catalog", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "catalog-unauth", "method": "GET", "path": "/v1/actions/catalog"}
+{"name": "conv-list", "method": "GET", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "conv-list-empty", "method": "GET", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000004"}
+{"name": "conv-list-unauth", "method": "GET", "path": "/v1/ai/assistant/conversations"}
+{"name": "conv-get", "method": "GET", "path": "/v1/ai/assistant/conversations/A2A2A2A2-0000-4000-8000-0000000000C1", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "conv-get-expired-still-readable", "method": "GET", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c2", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "conv-get-foreign", "method": "GET", "path": "/v1/ai/assistant/conversations/A2A2A2A2-0000-4000-8000-0000000000C1", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "conv-get-bad-id", "method": "GET", "path": "/v1/ai/assistant/conversations/not-a-uuid", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "conv-create-bad-type", "method": "POST", "path": "/v1/ai/assistant/conversations", "as": "a2a2a2a2-0000-4000-8000-000000000004", "body": {"title": 5}}
+{"name": "conv-delete", "method": "DELETE", "path": "/v1/ai/assistant/conversations/A2A2A2A2-0000-4000-8000-0000000000C1", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "conv-delete-missing", "method": "DELETE", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000ff", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "msg-create-empty", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c3/messages", "as": "a2a2a2a2-0000-4000-8000-000000000003", "body": {"content": "   "}}
+{"name": "msg-create-missing-key", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c3/messages", "as": "a2a2a2a2-0000-4000-8000-000000000003", "body": {}}
+{"name": "msg-create-foreign", "method": "POST", "path": "/v1/ai/assistant/conversations/a2a2a2a2-0000-4000-8000-0000000000c3/messages", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"content": "x"}}
+{"name": "prefs-get", "method": "GET", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "prefs-get-default", "method": "GET", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000004"}
+{"name": "prefs-put", "method": "PUT", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"proactiveTipsEnabled": true, "pushEnabled": false, "timezone": "Europe/Lisbon"}}
+{"name": "prefs-put-snake", "method": "PUT", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"proactive_tips_enabled": true, "push_enabled": false, "timezone": "Europe/Lisbon"}}
+{"name": "prefs-put-bad-tz", "method": "PUT", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"proactiveTipsEnabled": true, "pushEnabled": false, "timezone": "Mars/Olympus"}}
+{"name": "prefs-put-missing", "method": "PUT", "path": "/v1/ai/assistant/preferences", "as": "a2a2a2a2-0000-4000-8000-000000000001", "body": {"proactiveTipsEnabled": true}}
+{"name": "tips-list", "method": "GET", "path": "/v1/ai/assistant/tips", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "tips-seen", "method": "POST", "path": "/v1/ai/assistant/tips/a2a2a2a2-0000-4000-8000-0000000000a1/seen", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "tips-seen-foreign", "method": "POST", "path": "/v1/ai/assistant/tips/a2a2a2a2-0000-4000-8000-0000000000a1/seen", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "tips-dismiss-already", "method": "DELETE", "path": "/v1/ai/assistant/tips/a2a2a2a2-0000-4000-8000-0000000000a4", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "tips-dismiss-bad", "method": "DELETE", "path": "/v1/ai/assistant/tips/bad", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "usage-free", "method": "GET", "path": "/v1/ai/assistant/usage", "as": "a2a2a2a2-0000-4000-8000-000000000003"}
+{"name": "usage-pro", "method": "GET", "path": "/v1/ai/assistant/usage", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "actions-list", "method": "GET", "path": "/v1/ai/assistant/actions", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "actions-cancel", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/cancel", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "actions-cancel-not-pending", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b3/cancel", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "actions-cancel-foreign", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/cancel", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-free-gated", "method": "GET", "path": "/v1/ai/memos", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "memos-list", "method": "GET", "path": "/v1/ai/memos", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-list-bookmarked", "method": "GET", "path": "/v1/ai/memos?bookmarked=true", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-list-bad-filter", "method": "GET", "path": "/v1/ai/memos?bookmarked=maybe&conversationId=zzz", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-get", "method": "GET", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-000000000041", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-get-bad", "method": "GET", "path": "/v1/ai/memos/nope", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-get-missing", "method": "GET", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-0000000000ff", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-bookmark", "method": "POST", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-000000000042/bookmark", "as": "a2a2a2a2-0000-4000-8000-000000000002", "body": {"bookmarked": true}}
+{"name": "memos-bookmark-missing-body", "method": "POST", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-000000000042/bookmark", "as": "a2a2a2a2-0000-4000-8000-000000000002", "body": {}}
+{"name": "memos-delete", "method": "DELETE", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-000000000041", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-delete-missing", "method": "DELETE", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-0000000000ff", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-list-empty-filter", "method": "GET", "path": "/v1/ai/memos?bookmarked=", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "memos-list-flag", "method": "GET", "path": "/v1/ai/memos?bookmarked", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "confirm-bad-id", "method": "POST", "path": "/v1/ai/assistant/actions/not-a-uuid/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-unknown", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000ff/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-foreign", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "confirm-not-pending", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b3/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-expired", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b4/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-unauth", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm"}
+{"name": "confirm-exec-missing-expense", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}

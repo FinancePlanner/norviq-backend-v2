@@ -54,7 +54,9 @@ type Querier interface {
 	ListScenarioRunsByIDs(ctx context.Context, arg ListScenarioRunsByIDsParams) ([]ScenarioRun, error)
 	// ScenarioController snapshot routes and ScenarioSnapshotCaptureService.
 	ListScenarioSnapshots(ctx context.Context, userID uuid.UUID) ([]PortfolioScenarioSnapshot, error)
-	ListUnsavedScenarioDefinitionIDs(ctx context.Context) ([]uuid.UUID, error)
+	// Unsaved scenarios older than the cutoff: a scenario created moments ago
+	// is about to get its first run (Vapor deleted those too).
+	ListUnsavedScenarioDefinitionIDs(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error)
 	// PortfolioList.query.filter(id).filter(userId).first() != nil
 	OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfolioListExistsParams) (bool, error)
 	RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) error

@@ -101,7 +101,12 @@ func TestListGetAndProviderValidation(t *testing.T) {
 	if r.Status != http.StatusOK || strings.TrimSpace(string(r.Body)) != "[]" {
 		t.Fatalf("list = %d %s", r.Status, r.Body)
 	}
-	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/ibkr", tok, nil), http.StatusNotFound, "Broker not found.")
+	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/IBKR", tok, nil), http.StatusNotFound, "Broker not found.")
+	// GET /v1/brokers/ibkr never reaches :provider in Vapor (the GET trie's
+	// "ibkr" node shadows it): route-not-found, even unsigned.
+	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/ibkr", tok, nil), http.StatusNotFound, "Not Found")
+	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/ibkr", "", nil), http.StatusNotFound, "Not Found")
+	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/import", tok, nil), http.StatusNotFound, "Broker not found.")
 	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/Pilot", tok, nil), http.StatusBadRequest, `"pilot" is reserved.`)
 	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/%20-%20", tok, nil), http.StatusBadRequest, "Invalid broker provider.")
 	expectError(t, h.app.Do(http.MethodGet, "/v1/brokers/ibkr/sync/status", tok, nil), http.StatusNotFound, "IBKR connection not found")

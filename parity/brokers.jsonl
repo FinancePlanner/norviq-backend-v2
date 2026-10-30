@@ -13,6 +13,9 @@
 {"name": "brokers-get-ibkr-alias", "method": "GET", "path": "/v1/brokers/Interactive%20Brokers", "as": "b7e0c000-0000-4000-8000-000000000001"}
 {"name": "brokers-get-ibkr-none", "method": "GET", "path": "/v1/brokers/ibkr", "as": "b7e0c000-0000-4000-8000-000000000002"}
 {"name": "brokers-get-ibkr-error", "method": "GET", "path": "/v1/brokers/ibkr", "as": "b7e0c000-0000-4000-8000-000000000003"}
+{"name": "brokers-get-ibkr-unauthenticated", "method": "GET", "path": "/v1/brokers/ibkr"}
+{"name": "brokers-get-import", "method": "GET", "path": "/v1/brokers/import", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-get-ibkr-uppercase", "method": "GET", "path": "/v1/brokers/IBKR", "as": "b7e0c000-0000-4000-8000-000000000001"}
 {"name": "brokers-get-unknown", "method": "GET", "path": "/v1/brokers/robinhood", "as": "b7e0c000-0000-4000-8000-000000000001"}
 {"name": "brokers-get-reserved", "method": "GET", "path": "/v1/brokers/manual", "as": "b7e0c000-0000-4000-8000-000000000001"}
 {"name": "brokers-holdings-pro", "method": "GET", "path": "/v1/brokers/holdings", "as": "b7e0c000-0000-4000-8000-000000000001"}

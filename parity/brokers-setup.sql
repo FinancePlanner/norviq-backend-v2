@@ -12,6 +12,8 @@ BEGIN;
 
 DELETE FROM stocks WHERE user_id::text LIKE 'b7e0c000-0000-4000-8000-%';
 DELETE FROM broker_connections WHERE user_id::text LIKE 'b7e0c000-0000-4000-8000-%';
+-- CSV commits into a list create its brokerage account (ON DELETE RESTRICT).
+DELETE FROM accounts WHERE portfolio_id IN (SELECT id FROM portfolio_lists WHERE user_id::text LIKE 'b7e0c000-0000-4000-8000-%');
 DELETE FROM portfolio_lists WHERE user_id::text LIKE 'b7e0c000-0000-4000-8000-%';
 DELETE FROM entitlements WHERE user_id::text LIKE 'b7e0c000-0000-4000-8000-%';
 DELETE FROM users WHERE id::text LIKE 'b7e0c000-0000-4000-8000-%';
@@ -37,6 +39,9 @@ INSERT INTO broker_connections (id, user_id, provider, external_id, status, crea
    NULL, NULL, NULL);
 
 INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, created_at) VALUES
-  ('b7e0c000-0000-4000-8000-0000000000f1', 'b7e0c000-0000-4000-8000-000000000001', 'b7e0c000-0000-4000-8000-0000000000c1', 'KO', 10, 60.5, '2026-09-01', '2026-09-01 12:00:00+00');
+  ('b7e0c000-0000-4000-8000-0000000000f1', 'b7e0c000-0000-4000-8000-000000000001', 'b7e0c000-0000-4000-8000-0000000000c1', 'KO', 10, 60.5, '2026-09-01', '2026-09-01 12:00:00+00'),
+  -- KO already in the hypothetical list, so the CSV commit case updates it on
+  -- both runs instead of inserting on the first and updating on the second.
+  ('b7e0c000-0000-4000-8000-0000000000f2', 'b7e0c000-0000-4000-8000-000000000001', 'b7e0c000-0000-4000-8000-0000000000c2', 'KO', 2, 50, '2026-09-01', '2026-09-01 12:00:00+00');
 
 COMMIT;

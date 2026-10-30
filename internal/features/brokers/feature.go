@@ -15,6 +15,7 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/market"
+	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
@@ -180,6 +181,11 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.GET("/brokers", h.listBrokers, read...)
 	r.V1.GET("/brokers/holdings", h.listHoldings, holdingsRead...)
 	r.V1.GET("/brokers/:provider", h.getBroker, read...)
+	// Vapor keeps one trie per method and never falls back from a constant
+	// segment to a parameter. GET /v1/brokers/ibkr enters the "ibkr" node
+	// (from GET ibkr/sync/status), which has no handler of its own: Vapor's
+	// route-not-found 404, before any group middleware (no 401 unsigned).
+	r.V1.GET("/brokers/ibkr", routeNotFound)
 	r.V1.POST("/brokers/import/csv", h.csvPreview, holdingsWrite...)
 	r.V1.POST("/brokers/import/csv/commit", h.csvCommit, holdingsWrite...)
 	// Three 8 MB screenshots outrun the app-wide body cap.
@@ -195,6 +201,11 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// AuthController: the provider redirects the browser here, unauthenticated.
 	r.V1.GET("/auth/brokers/ibkr/callback", h.callback)
 	return nil
+}
+
+// routeNotFound is Vapor's 404 for a path no route matches.
+func routeNotFound(*echo.Context) error {
+	return httpx.Abort(http.StatusNotFound, "Not Found")
 }
 
 func env(f Feature) func(string) string {

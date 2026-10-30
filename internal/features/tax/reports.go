@@ -257,7 +257,8 @@ func (h *handlers) ownedReport(c *echo.Context, requiresPro bool) (taxdb.TaxRepo
 
 // downloadReport streams the stored file the way Vapor's
 // FileIO.streamFile(at:) did: ETag "<mtime>-<size>", Last-Modified, a 304
-// on a matching If-None-Match, and a single byte range.
+// on a matching If-None-Match, and a single byte range (with the standard
+// Accept-Ranges and 416 that Vapor got wrong).
 func (h *handlers) downloadReport(c *echo.Context) error {
 	r, err := h.ownedReport(c, true)
 	if err != nil {
@@ -289,10 +290,6 @@ func (h *handlers) downloadReport(c *echo.Context) error {
 func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	req := c.Request()
 	hdr := c.Response().Header()
-	// The controller sets these before FileIO runs, so even its 400 for a
-	// bad Range carries them.
-	hdr.Set(echo.HeaderContentType, contentType)
-	hdr.Set("Content-Disposition", disposition)
 	info, err := os.Stat(path)
 	if err != nil {
 		return c.NoContent(http.StatusInternalServerError)
@@ -304,14 +301,22 @@ func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	start, length := int64(0), size
 	partial := false
 	if raw := req.Header.Get("Range"); raw != "" {
-		s, n, ok := parseSingleRange(raw, size)
-		if !ok {
-			return c.NoContent(http.StatusBadRequest)
-		}
-		if n >= 0 {
+		// Deliberate fix: Vapor answered an empty 400 here. RFC 9110 says
+		// an unsatisfiable range is a 416 with "Content-Range: bytes */size",
+		// and a malformed one is ignored (the whole file is served).
+		s, n, outcome := parseSingleRange(raw, size)
+		switch outcome {
+		case rangeUnsatisfiable:
+			hdr.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+			return c.NoContent(http.StatusRequestedRangeNotSatisfiable)
+		case rangeSatisfiable:
 			start, length, partial = s, n, true
+		case rangeIgnored:
 		}
 	}
+	hdr.Set(echo.HeaderContentType, contentType)
+	hdr.Set("Content-Disposition", disposition)
+	hdr.Set("Accept-Ranges", "bytes")
 	hdr.Set("Last-Modified", modified.UTC().Format(http.TimeFormat))
 	hdr.Set("ETag", etag)
 	if etag == req.Header.Get("If-None-Match") {
@@ -326,8 +331,6 @@ func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	status := http.StatusOK
 	if partial {
 		status = http.StatusPartialContent
-		// Vapor adds the range unit as an Accept header (sic).
-		hdr.Add("Accept", "bytes")
 		hdr.Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(start+length-1, 10)+"/"+strconv.FormatInt(size, 10))
 		if _, err := f.Seek(start, io.SeekStart); err != nil {
 			return err
@@ -339,42 +342,58 @@ func streamFile(c *echo.Context, path, contentType, disposition string) error {
 	return err
 }
 
-// parseSingleRange reads a "bytes=" header with exactly one range. n < 0
-// means "serve the whole file" (another unit or several ranges); ok false
-// is Vapor's 400 for an unparsable or unsatisfiable range.
-func parseSingleRange(raw string, size int64) (start, n int64, ok bool) {
+// rangeOutcome is what a Range header asks of streamFile.
+type rangeOutcome int
+
+const (
+	rangeIgnored       rangeOutcome = iota // serve the whole file
+	rangeSatisfiable                       // serve [start, start+n)
+	rangeUnsatisfiable                     // 416
+)
+
+// parseSingleRange reads a "bytes=" header with exactly one range. Another
+// unit, several ranges, or a malformed spec are ignored (RFC 9110 14.2);
+// a well-formed range that starts past the end, or an empty suffix, is
+// unsatisfiable.
+func parseSingleRange(raw string, size int64) (start, n int64, outcome rangeOutcome) {
 	unit, spec, found := strings.Cut(strings.TrimSpace(raw), "=")
-	if !found {
-		return 0, 0, false
-	}
-	if strings.TrimSpace(unit) != "bytes" || strings.Contains(spec, ",") {
-		return 0, -1, true
+	if !found || strings.TrimSpace(unit) != "bytes" || strings.Contains(spec, ",") {
+		return 0, 0, rangeIgnored
 	}
 	lo, hi, found := strings.Cut(strings.TrimSpace(spec), "-")
 	if !found {
-		return 0, 0, false
+		return 0, 0, rangeIgnored
 	}
 	switch {
 	case lo == "":
 		tail, err := strconv.ParseInt(hi, 10, 64)
-		if err != nil || tail <= 0 {
-			return 0, 0, false
+		if err != nil || tail < 0 {
+			return 0, 0, rangeIgnored
+		}
+		if tail == 0 || size == 0 {
+			return 0, 0, rangeUnsatisfiable
 		}
 		tail = min(tail, size)
-		return size - tail, tail, true
+		return size - tail, tail, rangeSatisfiable
 	case hi == "":
 		from, err := strconv.ParseInt(lo, 10, 64)
-		if err != nil || from >= size || from < 0 {
-			return 0, 0, false
+		if err != nil || from < 0 {
+			return 0, 0, rangeIgnored
 		}
-		return from, size - from, true
+		if from >= size {
+			return 0, 0, rangeUnsatisfiable
+		}
+		return from, size - from, rangeSatisfiable
 	default:
 		from, err1 := strconv.ParseInt(lo, 10, 64)
 		to, err2 := strconv.ParseInt(hi, 10, 64)
-		if err1 != nil || err2 != nil || from < 0 || to < from || from >= size {
-			return 0, 0, false
+		if err1 != nil || err2 != nil || from < 0 || to < from {
+			return 0, 0, rangeIgnored
+		}
+		if from >= size {
+			return 0, 0, rangeUnsatisfiable
 		}
 		to = min(to, size-1)
-		return from, to - from + 1, true
+		return from, to - from + 1, rangeSatisfiable
 	}
 }

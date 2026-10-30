@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/text/encoding/charmap"
+
 	dec "norviq-api/internal/platform/nsdecimal"
 	"norviq-api/internal/store/taxdb"
 
@@ -311,8 +313,11 @@ func reportPDF(d DashboardResponse, kind string, plans []ActionPlanResponse, led
 	return minimalPDF(lines)
 }
 
-// minimalPDF is MinimalPDF.make: 27 lines per page, Helvetica, non-ASCII
-// scalars written as "?".
+// minimalPDF is MinimalPDF.make: 27 lines per page, Helvetica. Deliberate
+// fix: Vapor wrote every non-ASCII scalar as "?" (so "Anexo J — 2025" and
+// any accented name were mangled). The font now declares WinAnsiEncoding
+// and text is written in Windows-1252, so Latin-1 letters, the euro sign
+// and dashes render; only characters outside that code page become "?".
 func minimalPDF(lines []string) []byte {
 	const pageSize = 27
 	pages := [][]string{}
@@ -338,7 +343,7 @@ func minimalPDF(lines []string) []byte {
 				" 0 R >> >> /Contents "+strconv.Itoa(4+i*2)+" 0 R >>",
 			"<< /Length "+strconv.Itoa(len(content))+" >>\nstream\n"+content+"\nendstream")
 	}
-	objects = append(objects, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+	objects = append(objects, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
 	var pdf strings.Builder
 	pdf.WriteString("%PDF-1.4\n")
 	offsets := make([]int, 0, len(objects))
@@ -374,10 +379,16 @@ func pdfEscape(v string) string {
 	v = strings.ReplaceAll(v, ")", "\\)")
 	var b strings.Builder
 	for _, r := range v {
-		if r < 0x80 {
+		switch {
+		case r < 0x80:
 			b.WriteRune(r)
-		} else {
-			b.WriteByte('?')
+		default:
+			// Octal escapes keep the content stream ASCII.
+			if c, ok := charmap.Windows1252.EncodeRune(r); ok {
+				fmt.Fprintf(&b, "\\%03o", c)
+			} else {
+				b.WriteByte('?')
+			}
 		}
 	}
 	return b.String()

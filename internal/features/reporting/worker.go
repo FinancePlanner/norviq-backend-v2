@@ -289,11 +289,20 @@ func (w *worker) enqueueDueSchedules(ctx context.Context) error {
 		if scheduledFor != nil {
 			after = *scheduledFor
 		}
-		if today+len(in.OutputFormats) > 100 {
-			next, err := nextRun(after, in.Recurrence)
-			if err != nil {
+		// Deliberate fix: Vapor let a recurrence it could not compute fail
+		// the whole tick, leaving the schedule claimed until it was
+		// reclaimed 10 minutes later (and failing again forever). It is now
+		// paused with reason invalid_recurrence and the tick goes on.
+		next, nextErr := nextRun(after, in.Recurrence)
+		if nextErr != nil {
+			sc.NextRunAt, sc.PausedReason = nil, strp("invalid_recurrence")
+			if err := w.saveSchedule(ctx, sc); err != nil {
 				return err
 			}
+			w.logger.Warn("advanced_report.schedule_paused reason=invalid_recurrence schedule_id=" + formatUUID(sc.ID) + " error=" + nextErr.Error())
+			continue
+		}
+		if today+len(in.OutputFormats) > 100 {
 			sc.LastRunAt, sc.NextRunAt, sc.PausedReason = scheduledFor, &next, nil
 			if err := w.saveSchedule(ctx, sc); err != nil {
 				return err
@@ -320,10 +329,6 @@ func (w *worker) enqueueDueSchedules(ctx context.Context) error {
 			OutputFormatsJson: formatsJSON, RecipientUserIdsJson: recipientsJSON,
 			Status: "pending", ScheduledFor: scheduledFor, Now: w.now(),
 		}); err != nil {
-			return err
-		}
-		next, err := nextRun(after, in.Recurrence)
-		if err != nil {
 			return err
 		}
 		sc.LastRunAt, sc.NextRunAt, sc.PausedReason = scheduledFor, &next, nil

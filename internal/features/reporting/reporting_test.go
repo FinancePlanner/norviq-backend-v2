@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -172,6 +173,23 @@ func TestTemplateLifecycle(t *testing.T) {
 	expectStatus(t, a.Do(http.MethodPut, "/v1/reporting/templates/"+tmpl.ID, tok, templateBody("Again", p)), http.StatusNotFound)
 	expectStatus(t, a.Do(http.MethodDelete, "/v1/reporting/schedules/"+sched.ID, tok, nil), http.StatusNoContent)
 	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/schedules/"+sched.ID, tok, nil), http.StatusNotFound)
+}
+
+func TestTemplateAcceptsSnakeCaseShowSourceURLs(t *testing.T) {
+	a := newApp(t)
+	owner := a.user("owner", true)
+	tok := a.Token(owner)
+	p := a.portfolio(owner, "Main")
+
+	// snake_case show_source_urls is accepted (Vapor: 400 "No such key 'showSourceURLs'").
+	snake := templateBody("Snake case", p)
+	block := snake["blocks"].([]any)[0].(map[string]any)
+	block["settings"] = map[string]any{"visualization": "automatic", "show_legend": true, "show_details": true, "show_source_urls": true}
+	r := a.Do(http.MethodPost, "/v1/reporting/templates", tok, snake)
+	expectStatus(t, r, http.StatusCreated)
+	if got := decodeJSON[Template](t, r); !got.Input.Blocks[0].Settings.ShowSourceURLs {
+		t.Fatalf("snake template = %+v", got)
+	}
 }
 
 func TestValidationReasons(t *testing.T) {
@@ -407,7 +425,26 @@ func TestWorkerGeneratesDeliversAndDownloads(t *testing.T) {
 	if !strings.Contains(string(r.Body), "No value found (expected type 'Int64') at path 'expires'.") {
 		t.Fatalf("body = %s", r.Body)
 	}
-	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/artifacts/"+art.ID+"/link", a.Token(a.user("x", true)), nil), http.StatusNotFound)
+	stranger := a.user("x", true)
+	expectStatus(t, a.Do(http.MethodGet, "/v1/reporting/artifacts/"+art.ID+"/link", a.Token(stranger), nil), http.StatusNotFound)
+
+	// A recipient stored in lowercase can still download (Vapor compared
+	// strings against the uppercase UUID and answered 403).
+	a.exec(`UPDATE advanced_report_runs SET requested_by_user_id = $1, recipient_user_ids_json = $2 WHERE id = $3`,
+		stranger, `["`+owner.String()+`"]`, uuid.MustParse(runID))
+	expectStatus(t, a.Do(http.MethodGet, u.Path+"?"+u.RawQuery, "", nil), http.StatusOK)
+	// A validly signed link for someone not on the run gets the same reason
+	// as a bad signature (Vapor: a bare "Forbidden").
+	artID := uuid.MustParse(art.ID)
+	other := uuid.New()
+	expiresAt := time.Now().Add(time.Hour)
+	sig := Signer{Secret: a.settings.SigningSecret}.Signature(artID, time.Unix(expiresAt.Unix(), 0), &other)
+	r = a.Do(http.MethodGet, fmt.Sprintf("%s?expires=%d&recipient=%s&signature=%s", u.Path, expiresAt.Unix(), strings.ToUpper(other.String()), url.QueryEscape(sig)), "", nil)
+	expectStatus(t, r, http.StatusForbidden)
+	if !strings.Contains(string(r.Body), "This report link is invalid or expired.") {
+		t.Fatalf("not-a-recipient body = %s", r.Body)
+	}
+	a.exec(`UPDATE advanced_report_runs SET requested_by_user_id = $1 WHERE id = $2`, owner, uuid.MustParse(runID))
 
 	// Retention: expire the artifacts and their files go.
 	a.exec(`UPDATE advanced_report_artifacts SET expires_at = now() - interval '1 day'`)
@@ -447,6 +484,11 @@ func TestWorkerEnqueuesDueSchedules(t *testing.T) {
 	freeSched := uuid.New()
 	in, _ := encodeReportJSON(ScheduleInput{Name: "x", TemplateID: tmpl.ID, OutputFormats: []string{"pdf"}, Recurrence: Recurrence{Frequency: "weekly", TimeZone: "UTC", LocalTime: "09:00", Weekday: intp(2)}, RecipientUserIDs: []string{}, IsEnabled: true})
 	a.exec(`INSERT INTO advanced_report_schedules (id, owner_user_id, input_json, next_run_at, created_at, updated_at) VALUES ($1, $2, $3, now() - interval '1 minute', now(), now())`, freeSched, freeUser, in)
+	// A schedule whose next run cannot be computed is paused, and the tick
+	// still enqueues the others (Vapor failed the whole tick).
+	badSched := uuid.New()
+	bad, _ := encodeReportJSON(ScheduleInput{Name: "bad", TemplateID: tmpl.ID, OutputFormats: []string{"pdf"}, Recurrence: Recurrence{Frequency: "weekly", TimeZone: "Mars/Olympus", LocalTime: "09:00", Weekday: intp(2)}, RecipientUserIDs: []string{}, IsEnabled: true})
+	a.exec(`INSERT INTO advanced_report_schedules (id, owner_user_id, input_json, next_run_at, created_at, updated_at) VALUES ($1, $2, $3, now() - interval '1 hour', now(), now())`, badSched, owner, bad)
 
 	w := a.worker("http://127.0.0.1:1", &fakeMailer{})
 	if err := w.enqueueDueSchedules(context.Background()); err != nil {
@@ -464,5 +506,9 @@ func TestWorkerEnqueuesDueSchedules(t *testing.T) {
 	_ = a.Deps.DB.QueryRow(context.Background(), `SELECT paused_reason FROM advanced_report_schedules WHERE id = $1`, freeSched).Scan(&paused)
 	if paused != "subscription_required" {
 		t.Fatalf("free schedule paused_reason = %q", paused)
+	}
+	_ = a.Deps.DB.QueryRow(context.Background(), `SELECT paused_reason FROM advanced_report_schedules WHERE id = $1 AND next_run_at IS NULL`, badSched).Scan(&paused)
+	if paused != "invalid_recurrence" {
+		t.Fatalf("bad schedule paused_reason = %q", paused)
 	}
 }

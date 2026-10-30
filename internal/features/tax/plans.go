@@ -179,7 +179,8 @@ func (s *service) createActionPlan(ctx context.Context, userID uuid.UUID, req Ac
 	notFound := httpx.NotFound("Tax scenario not found.")
 	scenarioID, ok := parseUUID(req.ScenarioID)
 	if !ok {
-		return ActionPlanResponse{}, notFound
+		// Deliberate fix: Vapor answered 404 for a malformed id.
+		return ActionPlanResponse{}, httpx.BadRequest("Invalid tax scenario id.")
 	}
 	scenario, err := s.q.ScenarioForUser(ctx, taxdb.ScenarioForUserParams{ID: scenarioID, UserID: userID})
 	if isNoRows(err) {
@@ -808,7 +809,8 @@ func (s *service) createPlacementPlan(ctx context.Context, userID uuid.UUID, req
 	notFound := httpx.NotFound("Asset-location scenario not found.")
 	scenarioID, ok := parseUUID(req.ScenarioID)
 	if !ok {
-		return ActionPlanResponse{}, notFound
+		// Deliberate fix: Vapor answered 404 for a malformed id.
+		return ActionPlanResponse{}, httpx.BadRequest("Invalid tax scenario id.")
 	}
 	scenario, err := s.q.ScenarioForUserOfKind(ctx, taxdb.ScenarioForUserOfKindParams{ID: scenarioID, UserID: userID, Kind: "asset_location"})
 	if isNoRows(err) {

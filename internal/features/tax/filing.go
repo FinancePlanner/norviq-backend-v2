@@ -207,26 +207,38 @@ func (r fxResolver) convert(ctx context.Context, amount dec.Decimal, currency, r
 	return fxConversion{amount: converted, rate: fixing.rate, fixingDate: fixing.date, sourceCurrency: from}, nil
 }
 
-// cachedRates returns any cached fixing in the window (even a partial
-// set, as Vapor did) before asking the provider, and caches what the
-// provider returns.
+// cachedRates answers from the cache when it already holds the fixing for
+// the last day of the window, and otherwise asks the provider, caches what
+// it returns, and merges it with the cached rows. Deliberate fix: Vapor
+// returned any cached rows in the window, even a partial set, so a cache
+// filled earlier in the window hid the newer fixing and the conversion used
+// a stale rate. When the provider fails, the cached rows are still used.
 func (r fxResolver) cachedRates(ctx context.Context, quote string, from, to time.Time) ([]fxDailyRate, error) {
+	var cached []fxDailyRate
 	if r.q != nil {
-		cached, err := r.q.CachedFXRates(ctx, taxdb.CachedFXRatesParams{Quote: quote, StartAt: from, EndAt: to})
+		rows, err := r.q.CachedFXRates(ctx, taxdb.CachedFXRatesParams{Quote: quote, StartAt: from, EndAt: to})
 		if err != nil {
 			return nil, err
 		}
-		if len(cached) > 0 {
-			out := make([]fxDailyRate, 0, len(cached))
-			for _, c := range cached {
-				rate, _ := dec.Parse(c.Rate)
-				out = append(out, fxDailyRate{date: utcDay(c.Date), base: c.Base, quote: c.Quote, rate: rate})
+		cached = make([]fxDailyRate, 0, len(rows))
+		last := time.Time{}
+		for _, c := range rows {
+			rate, _ := dec.Parse(c.Rate)
+			row := fxDailyRate{date: utcDay(c.Date), base: c.Base, quote: c.Quote, rate: rate}
+			cached = append(cached, row)
+			if row.date.After(last) {
+				last = row.date
 			}
-			return out, nil
+		}
+		if len(cached) > 0 && !last.Before(utcDay(to)) {
+			return cached, nil
 		}
 	}
 	fresh, err := r.provider.rates(ctx, quote, from, to)
 	if err != nil {
+		if len(cached) > 0 {
+			return cached, nil
+		}
 		return nil, err
 	}
 	if r.q != nil {
@@ -235,6 +247,15 @@ func (r fxResolver) cachedRates(ctx context.Context, quote string, from, to time
 			_ = r.q.InsertFXRate(ctx, taxdb.InsertFXRateParams{
 				ID: uuid.New(), Date: row.date, Base: row.base, Quote: row.quote, Rate: row.rate.String(),
 			})
+		}
+	}
+	seen := make(map[time.Time]bool, len(fresh))
+	for _, row := range fresh {
+		seen[utcDay(row.date)] = true
+	}
+	for _, row := range cached {
+		if !seen[row.date] {
+			fresh = append(fresh, row)
 		}
 	}
 	return fresh, nil

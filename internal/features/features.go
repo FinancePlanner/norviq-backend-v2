@@ -33,6 +33,7 @@ import (
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
+	"norviq-api/internal/features/marketbrief"
 	"norviq-api/internal/features/news"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/ops"
@@ -87,6 +88,8 @@ func All() []server.Feature {
 		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
+		// MarketBriefController (/v1/market/brief, behind MARKET_BRIEF_ENABLED).
+		marketbrief.Feature{},
 		earnings.Feature{},
 		// MacroController (/v1/macro/*).
 		macro.Feature{},
@@ -232,6 +235,8 @@ func AllJobs() []Job {
 		dataexport.CleanupJob{},
 		// DailyBoardPostJob (also needs DAILY_BOARD_POST_ENABLED, as in Vapor).
 		boards.DailyPostJob{},
+		// MarketBriefJob (also needs MARKET_BRIEF_ENABLED, as in Vapor).
+		marketbrief.Job{},
 	}
 }
 

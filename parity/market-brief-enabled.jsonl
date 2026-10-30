@@ -1,0 +1,33 @@
+# Market brief parity with MARKET_BRIEF_ENABLED=true on both sides. The
+# shared Vapor has the flag off, so start a second Vapor with it on (outside
+# the 08:15-12:00 and 22:30-24:00 Lisbon windows, so its job never ticks a
+# slot), and v2 with MARKET_BRIEF_ENABLED=true:
+#   docker exec -i norviq-v2-schema-pg psql -U pg -d norviq < parity/market-brief-setup.sql
+#   go run ./cmd/parity -a http://127.0.0.1:18119 -b http://127.0.0.1:18118 -jwt-secret parity-secret \
+#     -cases parity/market-brief-enabled.jsonl -ignore requestId \
+#     -headers Content-Type,Cache-Control,X-Frame-Options,X-Content-Type-Options,Referrer-Policy
+# Not yet run against Vapor (2026-10-30: the snapshot's .build was gone, so no
+# second Vapor could be started); the Go route tests cover these paths.
+# "latest" reads the newest trading date in the whole database, so both
+# sides must share it (they do: same scratch DB).
+{"name":"latest en","method":"GET","path":"/v1/market/brief","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"latest pt","method":"GET","path":"/v1/market/brief?lang=pt","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"latest de","method":"GET","path":"/v1/market/brief?lang=de","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact morning en","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact morning pt","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-28&lang=pt-PT","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact evening en","method":"GET","path":"/v1/market/brief?slot=evening&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact friday evening lossy","method":"GET","path":"/v1/market/brief?slot=evening&date=2026-09-25","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact friday evening pt","method":"GET","path":"/v1/market/brief?slot=evening&date=2026-09-25&lang=pt","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact first brief","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-24","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact missing","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-26","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"exact missing pt only en","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-24&lang=pt","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"bad slot","method":"GET","path":"/v1/market/brief?slot=noon&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"empty slot","method":"GET","path":"/v1/market/brief?slot=&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"slot flag","method":"GET","path":"/v1/market/brief?slot","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"Morning case","method":"GET","path":"/v1/market/brief?slot=Morning&date=2026-09-28","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"bad date","method":"GET","path":"/v1/market/brief?slot=morning&date=28-09-2026","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"missing date","method":"GET","path":"/v1/market/brief?slot=morning","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"date with time","method":"GET","path":"/v1/market/brief?slot=morning&date=2026-09-28T00","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"date arabic digits","method":"GET","path":"/v1/market/brief?slot=morning&date=%D9%A2%D9%A0%D9%A2%D9%A6-%D9%A0%D9%A9-%D9%A2%D9%A8","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"date only","method":"GET","path":"/v1/market/brief?date=2026-09-24","as":"ae00b000-0000-4000-8000-000000000001"}
+{"name":"unauth","method":"GET","path":"/v1/market/brief"}

@@ -254,7 +254,7 @@ func (n *Notifier) page(ctx context.Context, viewer uuid.UUID, raw *string) (*Bo
 		next := encodeCursor(last.CreatedAt, last.ID)
 		out.NextCursor = &next
 	}
-	if out.UnreadCount, err = s.Q.BoardUnreadCount(ctx, viewer); err != nil {
+	if out.UnreadCount, err = s.Q.BoardUnreadCount(ctx, boardsdb.BoardUnreadCountParams{Viewer: viewer, Hidden: keys(hidden)}); err != nil {
 		return nil, err
 	}
 	return out, nil

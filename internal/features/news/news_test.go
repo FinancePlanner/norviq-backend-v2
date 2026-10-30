@@ -592,6 +592,30 @@ func TestThesisWatchIngestFeedAndNotify(t *testing.T) {
 	if lawsuit == nil || lawsuit.Relationship != relHolding || lawsuit.EventType != "legal" || lawsuit.Exposure == nil {
 		t.Fatalf("lawsuit story = %+v", lawsuit)
 	}
+	// The GET is read-only: the analysis is shown but not stored, and an
+	// unclustered article stays unclustered until the ingestion job runs
+	// (Vapor clustered and inserted state rows on every GET).
+	if lawsuit.ThesisImpact != impactChallenges || lawsuit.WhyItMatters == nil {
+		t.Fatalf("lawsuit analysis = %+v", lawsuit)
+	}
+	countRows := func(sql string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(context.Background(), sql).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := countRows(`SELECT count(*) FROM thesis_watch_user_states`); n != 0 {
+		t.Fatalf("feed GET stored %d state rows", n)
+	}
+	exec(t, pool, `INSERT INTO market_news_archive (id, provider, symbol, headline, url, source, published_at, fetched_at, created_at)
+		SELECT gen_random_uuid(), provider, symbol, 'Late headline', url || '?late', source, now(), now(), now() FROM market_news_archive WHERE symbol = 'ZZNA'`)
+	stories := countRows(`SELECT count(*) FROM thesis_watch_stories`)
+	e.app.Do(http.MethodGet, "/v1/news/thesis-watch", tok, nil).JSON(t, &feed)
+	if countRows(`SELECT count(*) FROM thesis_watch_stories`) != stories || countRows(`SELECT count(*) FROM market_news_archive WHERE story_id IS NULL`) != 1 {
+		t.Fatal("feed GET clustered articles")
+	}
 	expectError(t, e.app.Do(http.MethodGet, "/v1/news/thesis-watch?scope=bogus", tok, nil), http.StatusBadRequest, "Invalid Thesis Watch scope.")
 
 	// Story, feedback and read.
@@ -608,6 +632,10 @@ func TestThesisWatchIngestFeedAndNotify(t *testing.T) {
 	e.app.Do(http.MethodGet, "/v1/news/thesis-watch/"+lawsuit.ID, tok, nil).JSON(t, &story)
 	if !story.IsRead || story.Feedback == nil || *story.Feedback != "relevant" {
 		t.Fatalf("story after feedback = %+v", story)
+	}
+	// The row feedback created has no analysis; the feed still shows it.
+	if story.ThesisImpact != impactChallenges || story.WhyItMatters == nil || story.Summary == nil {
+		t.Fatalf("analysis lost after feedback = %+v", story)
 	}
 
 	// Notification preferences; Pro only.
@@ -694,4 +722,42 @@ func postWebhook(t *testing.T, app *testutil.App, body []byte, secret string) *t
 		t.Fatal(err)
 	}
 	return &testutil.Response{Status: resp.StatusCode, Header: resp.Header, Body: data}
+}
+
+// One user whose delivery fails no longer ends the tick for everyone after
+// them (Vapor broke out of the loop on the first error).
+func TestThesisNotifyOneFailureDoesNotStopOthers(t *testing.T) {
+	now := time.Now()
+	archive := stubProvider{name: "finnhub", items: []newsprovider.Item{
+		{Symbol: "ZZNF", Headline: "ZZNF faces lawsuit over fraud claims", URL: ptr("https://example.com/f1"), PublishedAt: now.Add(-2 * time.Hour)},
+	}}
+	pro := stubPro{}
+	e := newEnv(t, nil, pro, archive)
+	pool := e.app.Deps.DB
+	var users []uuid.UUID
+	for _, name := range []string{"fa", "fb"} {
+		id, _ := e.user(t, name)
+		pro[id] = true
+		seedStock(t, pool, id, "ZZNF", 1, 100)
+		exec(t, pool, `INSERT INTO thesis_watch_notification_preferences (id, user_id, enabled, timezone, created_at, updated_at)
+			VALUES ($1, $2, true, 'UTC', now(), now())`, uuid.New(), id)
+		users = append(users, id)
+	}
+	svc := e.service(t)
+	svc.IngestOnce(context.Background(), &roundRobin{}, 30)
+	// Every insert for the first user fails. The preference query has no
+	// ORDER BY; a fresh table scans in insertion order, so fa comes first.
+	first := users[0]
+	exec(t, pool, `CREATE FUNCTION fail_first() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN IF NEW.user_id = '`+first.String()+`'::uuid THEN RAISE EXCEPTION 'boom'; END IF; RETURN NEW; END $$`)
+	exec(t, pool, `CREATE TRIGGER fail_first BEFORE INSERT ON notification_events FOR EACH ROW EXECUTE FUNCTION fail_first()`)
+	pub := &inbox.Publisher{Q: notificationsdb.New(pool), Channels: []inbox.Channel{&recordingChannel{}}, Logger: slog.New(slog.DiscardHandler)}
+	svc.NotifyOnce(context.Background(), pub)
+	for _, id := range users {
+		var n int
+		_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM notification_events WHERE user_id = $1`, id).Scan(&n)
+		if want := map[bool]int{true: 0, false: 1}[id == first]; n != want {
+			t.Fatalf("user %s: %d events, want %d", id, n, want)
+		}
+	}
 }

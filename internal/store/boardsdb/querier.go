@@ -22,9 +22,12 @@ type Querier interface {
 	// Comments.
 	BoardCommentByID(ctx context.Context, id uuid.UUID) ([]BoardComment, error)
 	BoardCommentInsert(ctx context.Context, arg BoardCommentInsertParams) error
-	BoardCommentSoftDelete(ctx context.Context, arg BoardCommentSoftDeleteParams) error
+	// Returns the post id only when the comment was live, so a repeat delete
+	// does not decrement twice.
+	BoardCommentSoftDelete(ctx context.Context, arg BoardCommentSoftDeleteParams) ([]uuid.UUID, error)
 	BoardCommentsByIDs(ctx context.Context, ids []uuid.UUID) ([]BoardComment, error)
-	// withDeleted; no tiebreak, as Swift sorted by created_at only.
+	// withDeleted. The id tiebreak keeps comments made in the same instant in a
+	// stable order (Vapor sorted by created_at only).
 	BoardCommentsForPost(ctx context.Context, arg BoardCommentsForPostParams) ([]BoardComment, error)
 	BoardDeleteBlock(ctx context.Context, arg BoardDeleteBlockParams) error
 	BoardDeleteFriendRequests(ctx context.Context, arg BoardDeleteFriendRequestsParams) error
@@ -50,6 +53,8 @@ type Querier interface {
 	// Posts.
 	BoardPostByID(ctx context.Context, id uuid.UUID) ([]BoardPost, error)
 	BoardPostCommentBump(ctx context.Context, arg BoardPostCommentBumpParams) error
+	// A deleted comment leaves comment_count (Vapor never decremented it).
+	BoardPostCommentDrop(ctx context.Context, id uuid.UUID) error
 	BoardPostInsert(ctx context.Context, arg BoardPostInsertParams) error
 	BoardPostScoreMove(ctx context.Context, arg BoardPostScoreMoveParams) ([]int64, error)
 	BoardPostSoftDelete(ctx context.Context, arg BoardPostSoftDeleteParams) error
@@ -69,7 +74,9 @@ type Querier interface {
 	BoardSuspendedUserIDs(ctx context.Context) ([]uuid.UUID, error)
 	BoardTouch(ctx context.Context, arg BoardTouchParams) error
 	BoardUnfriend(ctx context.Context, arg BoardUnfriendParams) error
-	BoardUnreadCount(ctx context.Context, recipientID uuid.UUID) (int64, error)
+	// Counts only what the feed shows: the post and its board still exist, and
+	// the actor is not blocked either way (Vapor counted every unread row).
+	BoardUnreadCount(ctx context.Context, arg BoardUnreadCountParams) (int64, error)
 	BoardUpdateDescription(ctx context.Context, arg BoardUpdateDescriptionParams) error
 	// Fluent's .first() without a sort.
 	BoardUserIDByUsername(ctx context.Context, username *string) ([]uuid.UUID, error)

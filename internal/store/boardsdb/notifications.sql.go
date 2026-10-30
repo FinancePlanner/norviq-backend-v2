@@ -260,11 +260,22 @@ func (q *Queries) BoardRecentUpvoteNotifications(ctx context.Context, arg BoardR
 }
 
 const boardUnreadCount = `-- name: BoardUnreadCount :one
-SELECT count(*) FROM board_notifications WHERE recipient_id = $1 AND read_at IS NULL
+SELECT count(*) FROM board_notifications n
+JOIN board_posts p ON p.id = n.post_id AND p.deleted_at IS NULL
+JOIN boards b ON b.id = p.board_id AND b.deleted_at IS NULL
+WHERE n.recipient_id = $1 AND n.read_at IS NULL
+  AND (cardinality($2::uuid[]) = 0 OR n.actor_id IS NULL OR n.actor_id <> ALL($2::uuid[]))
 `
 
-func (q *Queries) BoardUnreadCount(ctx context.Context, recipientID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, boardUnreadCount, recipientID)
+type BoardUnreadCountParams struct {
+	Viewer uuid.UUID
+	Hidden []uuid.UUID
+}
+
+// Counts only what the feed shows: the post and its board still exist, and
+// the actor is not blocked either way (Vapor counted every unread row).
+func (q *Queries) BoardUnreadCount(ctx context.Context, arg BoardUnreadCountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, boardUnreadCount, arg.Viewer, arg.Hidden)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

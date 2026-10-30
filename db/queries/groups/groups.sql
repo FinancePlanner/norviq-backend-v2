@@ -13,7 +13,8 @@ SELECT * FROM groups WHERE id = $1 AND deleted_at IS NULL;
 SELECT * FROM groups WHERE id = ANY(@ids::uuid[]) AND deleted_at IS NULL;
 
 -- name: GroupCountCreatedSince :one
--- `.withDeleted()`: deleted groups still count toward the daily cap.
+-- `.withDeleted()` on purpose: deleted groups still count toward the daily
+-- cap, or deleting would refill the quota. Not a bug.
 SELECT COUNT(*) FROM groups WHERE owner_id = $1 AND created_at > $2;
 
 -- name: GroupCountOwned :one
@@ -44,10 +45,14 @@ UPDATE groups SET last_message_at = $2 WHERE id = $1;
 -- name: GroupDiscover :many
 -- Public groups, most members first. Fluent sorts `.descending`, so groups
 -- without messages (NULL last_message_at) come first among equal counts.
+-- Groups owned by someone hidden from the viewer are filtered here, before
+-- paging, so a page is full whenever a next one exists (Vapor filtered after
+-- paging and could return short pages with a cursor).
 SELECT * FROM groups
 WHERE visibility = 'public' AND deleted_at IS NULL
   AND (cardinality(@tickers::text[]) = 0 OR ticker = ANY(@tickers::text[]))
   AND (@name_pattern::text = '' OR name ILIKE @name_pattern::text)
+  AND (cardinality(@hidden::uuid[]) = 0 OR owner_id IS NULL OR owner_id <> ALL(@hidden::uuid[]))
 ORDER BY member_count DESC, last_message_at DESC, id ASC
 LIMIT @lim::bigint OFFSET @off::bigint;
 
@@ -258,9 +263,10 @@ WHERE group_id = @group_id AND invitee_id = ANY(@user_ids::uuid[])
   AND accepted_at IS NULL AND revoked_at IS NULL;
 
 -- name: InvitationsRevokeForInvitee :exec
--- The ban's sweep: revoked_at is overwritten even on already revoked rows.
+-- The ban's sweep. Already revoked rows keep their original revoked_at
+-- (Vapor overwrote it).
 UPDATE group_invites SET revoked_at = $3
-WHERE group_id = $1 AND invitee_id = $2 AND accepted_at IS NULL;
+WHERE group_id = $1 AND invitee_id = $2 AND accepted_at IS NULL AND revoked_at IS NULL;
 
 -- ---- Bans -------------------------------------------------------------------
 

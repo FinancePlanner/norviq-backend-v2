@@ -167,8 +167,9 @@ SELECT * FROM board_comments WHERE id = $1 AND deleted_at IS NULL;
 SELECT * FROM board_comments WHERE id = ANY(@ids::uuid[]) AND deleted_at IS NULL;
 
 -- name: BoardCommentsForPost :many
--- withDeleted; no tiebreak, as Swift sorted by created_at only.
-SELECT * FROM board_comments WHERE post_id = $1 ORDER BY created_at ASC LIMIT $2;
+-- withDeleted. The id tiebreak keeps comments made in the same instant in a
+-- stable order (Vapor sorted by created_at only).
+SELECT * FROM board_comments WHERE post_id = $1 ORDER BY created_at ASC, id ASC LIMIT $2;
 
 -- name: BoardHasCommented :one
 -- withDeleted.
@@ -178,8 +179,15 @@ SELECT EXISTS (SELECT 1 FROM board_comments WHERE post_id = $1 AND author_id = $
 INSERT INTO board_comments (id, post_id, parent_id, author_id, body, depth, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
 
--- name: BoardCommentSoftDelete :exec
-UPDATE board_comments SET deleted_at = $2 WHERE id = $1;
+-- name: BoardCommentSoftDelete :many
+-- Returns the post id only when the comment was live, so a repeat delete
+-- does not decrement twice.
+UPDATE board_comments SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL
+RETURNING post_id;
+
+-- name: BoardPostCommentDrop :exec
+-- A deleted comment leaves comment_count (Vapor never decremented it).
+UPDATE board_posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = $1;
 
 -- Reports.
 

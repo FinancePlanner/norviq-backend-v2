@@ -142,13 +142,19 @@ func (s *Service) ingest(ctx context.Context, rr *roundRobin, perRun int) error 
 	}
 	sort.Strings(symbols)
 	batch := rr.next(symbols, perRun)
-	if err := s.archive.RefreshTrackedNews(ctx, batch); err != nil {
-		return err
+	refreshErr := s.archive.RefreshTrackedNews(ctx, batch)
+	if refreshErr == nil {
+		limit := 50
+		_, _ = s.archive.GeneralNews(ctx, &limit)
 	}
-	limit := 50
-	_, _ = s.archive.GeneralNews(ctx, &limit)
+	// The feed GET no longer clusters (Vapor did it there), so this job is
+	// the only place stories are formed: cluster whatever the archive holds
+	// even when the provider refresh failed.
 	if err := s.RefreshClusters(ctx); err != nil {
 		return err
+	}
+	if refreshErr != nil {
+		return refreshErr
 	}
 	s.logger.Info("thesis_watch_ingestion ok", "refreshed_symbols", len(batch), "tracked_symbols", len(symbols))
 	return nil
@@ -194,19 +200,22 @@ func (j NotificationJob) Run(ctx context.Context, d *server.Deps) {
 	})
 }
 
-// NotifyOnce is one ThesisWatchNotificationPoller tick: the first failing
-// user ends the tick, as in Vapor.
+// NotifyOnce is one ThesisWatchNotificationPoller tick. A user whose
+// delivery fails is logged and skipped; the rest still get theirs (in Vapor
+// the first failure ended the tick).
 func (s *Service) NotifyOnce(ctx context.Context, pub *inbox.Publisher) {
 	prefs, err := s.q.EnabledThesisNotificationPreferences(ctx)
-	if err == nil {
-		for _, p := range prefs {
-			if err = s.deliver(ctx, pub, p); err != nil {
-				break
-			}
-		}
-	}
 	if err != nil {
 		s.logger.Warn("thesis_watch_notifications failed", "error", err)
+		return
+	}
+	for _, p := range prefs {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := s.deliver(ctx, pub, p); err != nil {
+			s.logger.Warn("thesis_watch_notifications failed", "user_id", p.UserID, "error", err)
+		}
 	}
 }
 

@@ -310,11 +310,11 @@ func (s *Service) RefreshClusters(ctx context.Context) error {
 	return nil
 }
 
-// Feed is ThesisWatchService.feed.
+// Feed is ThesisWatchService.feed, read-only. Vapor refreshed the story
+// clusters and inserted analysis rows on every GET; here the ingestion job
+// alone clusters, and the analysis is computed for display without being
+// stored (see withAnalysis).
 func (s *Service) ThesisFeed(ctx context.Context, userID uuid.UUID, scope string, requestedSector *string, limit int, cursor *string) (FeedResponse, error) {
-	if err := s.RefreshClusters(ctx); err != nil {
-		return FeedResponse{}, err
-	}
 	isPro, err := s.pro.IsPro(ctx, userID)
 	if err != nil {
 		return FeedResponse{}, err
@@ -511,19 +511,9 @@ func (s *Service) ThesisFeed(ctx context.Context, userID uuid.UUID, scope string
 		}
 
 		state := statesByStory[storyID]
-		if isPro && state == nil && holdingSymbol != nil {
-			candidate := makeAnalysisState(userID, storyID, *holdingSymbol, rep.Headline, rep.Summary, weight, notesBySymbol[*holdingSymbol])
-			if candidate != nil {
-				if err := s.insertState(ctx, candidate); err != nil {
-					existing, qerr := s.q.GetThesisUserState(ctx, newsdb.GetThesisUserStateParams{UserID: userID, StoryID: storyID})
-					if qerr != nil {
-						return FeedResponse{}, err
-					}
-					candidate = &existing
-				}
-				state = candidate
-				statesByStory[storyID] = state
-			}
+		if isPro && holdingSymbol != nil && (state == nil || state.Summary == nil) {
+			analysis := makeAnalysisState(userID, storyID, *holdingSymbol, rep.Headline, rep.Summary, weight, notesBySymbol[*holdingSymbol])
+			state = withAnalysis(state, analysis)
 		}
 		if state != nil && (state.DismissedAt != nil || (state.Feedback != nil && *state.Feedback == signalNotRelevant)) {
 			continue
@@ -712,6 +702,25 @@ func makeAnalysisState(userID, storyID uuid.UUID, symbol, headline string, provi
 		ID: uuid.New(), UserID: userID, StoryID: storyID, Symbol: &sym, Impact: impact,
 		Confidence: &confidence, Summary: &conc, WhyItMatters: &why,
 	}
+}
+
+// withAnalysis is the state the feed shows: the stored row (read, feedback,
+// dismissal, and an impact the user chose) with the computed analysis
+// filling in what the row lacks. Nothing is saved. A nil analysis leaves the
+// state as it is.
+func withAnalysis(stored, analysis *newsdb.ThesisWatchUserState) *newsdb.ThesisWatchUserState {
+	if analysis == nil {
+		return stored
+	}
+	if stored == nil {
+		return analysis
+	}
+	merged := *stored
+	merged.Symbol, merged.Summary, merged.WhyItMatters, merged.Confidence = analysis.Symbol, analysis.Summary, analysis.WhyItMatters, analysis.Confidence
+	if merged.Impact == impactNotAssessed || !contains(validImpacts, merged.Impact) {
+		merged.Impact = analysis.Impact
+	}
+	return &merged
 }
 
 func (s *Service) insertState(ctx context.Context, st *newsdb.ThesisWatchUserState) error {

@@ -38,7 +38,13 @@ LIMIT @lim;
 SELECT id, slug FROM boards WHERE id = ANY(@ids::uuid[]) AND deleted_at IS NULL;
 
 -- name: BoardUnreadCount :one
-SELECT count(*) FROM board_notifications WHERE recipient_id = $1 AND read_at IS NULL;
+-- Counts only what the feed shows: the post and its board still exist, and
+-- the actor is not blocked either way (Vapor counted every unread row).
+SELECT count(*) FROM board_notifications n
+JOIN board_posts p ON p.id = n.post_id AND p.deleted_at IS NULL
+JOIN boards b ON b.id = p.board_id AND b.deleted_at IS NULL
+WHERE n.recipient_id = @viewer AND n.read_at IS NULL
+  AND (cardinality(@hidden::uuid[]) = 0 OR n.actor_id IS NULL OR n.actor_id <> ALL(@hidden::uuid[]));
 
 -- name: BoardMarkAllRead :exec
 UPDATE board_notifications SET read_at = $2 WHERE recipient_id = $1 AND read_at IS NULL;

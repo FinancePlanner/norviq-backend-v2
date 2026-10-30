@@ -240,8 +240,9 @@ func (q *Queries) BoardCommentInsert(ctx context.Context, arg BoardCommentInsert
 	return err
 }
 
-const boardCommentSoftDelete = `-- name: BoardCommentSoftDelete :exec
-UPDATE board_comments SET deleted_at = $2 WHERE id = $1
+const boardCommentSoftDelete = `-- name: BoardCommentSoftDelete :many
+UPDATE board_comments SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL
+RETURNING post_id
 `
 
 type BoardCommentSoftDeleteParams struct {
@@ -249,9 +250,26 @@ type BoardCommentSoftDeleteParams struct {
 	DeletedAt *time.Time
 }
 
-func (q *Queries) BoardCommentSoftDelete(ctx context.Context, arg BoardCommentSoftDeleteParams) error {
-	_, err := q.db.Exec(ctx, boardCommentSoftDelete, arg.ID, arg.DeletedAt)
-	return err
+// Returns the post id only when the comment was live, so a repeat delete
+// does not decrement twice.
+func (q *Queries) BoardCommentSoftDelete(ctx context.Context, arg BoardCommentSoftDeleteParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, boardCommentSoftDelete, arg.ID, arg.DeletedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var post_id uuid.UUID
+		if err := rows.Scan(&post_id); err != nil {
+			return nil, err
+		}
+		items = append(items, post_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const boardCommentsByIDs = `-- name: BoardCommentsByIDs :many
@@ -288,7 +306,7 @@ func (q *Queries) BoardCommentsByIDs(ctx context.Context, ids []uuid.UUID) ([]Bo
 }
 
 const boardCommentsForPost = `-- name: BoardCommentsForPost :many
-SELECT id, post_id, parent_id, author_id, body, depth, created_at, deleted_at FROM board_comments WHERE post_id = $1 ORDER BY created_at ASC LIMIT $2
+SELECT id, post_id, parent_id, author_id, body, depth, created_at, deleted_at FROM board_comments WHERE post_id = $1 ORDER BY created_at ASC, id ASC LIMIT $2
 `
 
 type BoardCommentsForPostParams struct {
@@ -296,7 +314,8 @@ type BoardCommentsForPostParams struct {
 	Limit  int32
 }
 
-// withDeleted; no tiebreak, as Swift sorted by created_at only.
+// withDeleted. The id tiebreak keeps comments made in the same instant in a
+// stable order (Vapor sorted by created_at only).
 func (q *Queries) BoardCommentsForPost(ctx context.Context, arg BoardCommentsForPostParams) ([]BoardComment, error) {
 	rows, err := q.db.Query(ctx, boardCommentsForPost, arg.PostID, arg.Limit)
 	if err != nil {
@@ -571,6 +590,16 @@ type BoardPostCommentBumpParams struct {
 
 func (q *Queries) BoardPostCommentBump(ctx context.Context, arg BoardPostCommentBumpParams) error {
 	_, err := q.db.Exec(ctx, boardPostCommentBump, arg.Participants, arg.Now, arg.ID)
+	return err
+}
+
+const boardPostCommentDrop = `-- name: BoardPostCommentDrop :exec
+UPDATE board_posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = $1
+`
+
+// A deleted comment leaves comment_count (Vapor never decremented it).
+func (q *Queries) BoardPostCommentDrop(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, boardPostCommentDrop, id)
 	return err
 }
 

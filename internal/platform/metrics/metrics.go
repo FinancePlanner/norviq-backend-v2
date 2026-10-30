@@ -4,11 +4,11 @@
 // dashboards and the NorviqScenarioRunsFailing alert (platform/infra
 // observability) query them by name.
 //
-// Two Vapor bugs are kept on purpose (see Record): the request duration is
-// measured backwards (start minus end, so negative), and the histogram is
-// not cumulative (each request lands in the first bucket it fits). The
-// dashboards already say "fix in norviq-backend PrometheusMetrics before
-// trusting latency"; the fix belongs in Go after cutover.
+// Vapor's latency histogram was broken three ways: it measured end -> start
+// (every duration negative), its buckets were not cumulative, and its sum
+// kept only the sub-second part. v2 records the real duration into
+// cumulative buckets with the full sum, as Prometheus expects. The metric
+// names and the text format are unchanged.
 package metrics
 
 import (
@@ -34,7 +34,7 @@ type Registry struct {
 	httpRequestsTotal atomic.Int64
 	httpInflight      atomic.Int64
 	latencyBuckets    [11]atomic.Int64
-	latencySum        atomic.Int64 // attoseconds, wrapping
+	latencySum        atomic.Int64 // nanoseconds
 	latencyCount      atomic.Int64
 
 	stocksCreated                 atomic.Int64
@@ -60,20 +60,16 @@ type Registry struct {
 // Shared is PrometheusMetrics.shared.
 var Shared = &Registry{}
 
-// RecordRequestDuration is recordRequestDuration(_:). Swift's
-// `Duration.components` splits toward zero, so only the sub-second part
-// (attoseconds) reaches latencySum, and the bucket is the first bound the
-// (signed) seconds fit under.
+// RecordRequestDuration is recordRequestDuration(_:), fixed: the sum is the
+// whole duration, and the observation counts in every bucket whose bound it
+// fits under (cumulative, as Prometheus histograms are).
 func (r *Registry) RecordRequestDuration(d time.Duration) {
-	seconds := int64(d / time.Second)
-	attos := int64(d%time.Second) * 1_000_000_000 // ns -> as
-	r.latencySum.Add(attos)
+	r.latencySum.Add(int64(d))
 	r.latencyCount.Add(1)
-	secs := float64(seconds) + float64(attos)/1e18
+	secs := d.Seconds()
 	for i, bound := range bucketBounds {
 		if secs <= bound {
 			r.latencyBuckets[i].Add(1)
-			break
 		}
 	}
 }
@@ -150,7 +146,7 @@ func (r *Registry) Render() string {
 	}
 	total := r.latencyCount.Load()
 	w("http_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", total)
-	w("http_request_duration_seconds_sum %.6f\n", float64(r.latencySum.Load())/1e18)
+	w("http_request_duration_seconds_sum %.6f\n", float64(r.latencySum.Load())/1e9)
 	w("http_request_duration_seconds_count %d\n\n", total)
 
 	w("# HELP stocks_created_total Number of stocks created via POST /v1/stocks.\n")
@@ -199,10 +195,9 @@ func HTTPMiddleware(r *Registry) echo.MiddlewareFunc {
 			defer r.httpInflight.Add(-1)
 			start := time.Now()
 			err := next(c)
-			end := time.Now()
 			r.httpRequestsTotal.Add(1)
-			// ContinuousClock.now.duration(to: start): end -> start, negative.
-			r.RecordRequestDuration(start.Sub(end))
+			// start -> end (Vapor measured end -> start, so negative).
+			r.RecordRequestDuration(time.Since(start))
 			return err
 		}
 	}

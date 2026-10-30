@@ -2,7 +2,10 @@ package boards_test
 
 import (
 	"context"
+	"encoding/base64"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -388,6 +391,10 @@ func TestCommentsThreadsAndNewCounts(t *testing.T) {
 	}
 	var after boards.BoardPostDetail
 	e.do(http.MethodGet, "/v1/board-posts/"+post.ID.String(), alice, nil).JSON(t, &after)
+	// The count drops with the delete, once (Vapor never decremented it).
+	if after.Post.CommentCount != 8 || len(after.Comments) != 9 {
+		t.Fatalf("after delete: count %d, slots %d", after.Post.CommentCount, len(after.Comments))
+	}
 	gone := after.Comments[0]
 	if !gone.IsDeleted || gone.Body != "" || gone.AuthorUsername != nil {
 		t.Fatalf("deleted slot: %+v", gone)
@@ -726,10 +733,22 @@ func TestMarkReadAndHiding(t *testing.T) {
 	if len(page.Items) != 1 || *page.Items[0].ActorUsername != "brd_bo" {
 		t.Fatalf("blocked hidden: %+v", page.Items)
 	}
+	// The badge counts what the feed shows: hidden actors and deleted posts
+	// drop out of it too (Vapor counted every unread row).
+	e.exec(`UPDATE board_notifications SET read_at = NULL WHERE recipient_id = $1`, ana.id)
+	e.do(http.MethodGet, "/v1/community/notifications", ana, nil).JSON(t, &page)
+	e.do(http.MethodGet, "/v1/community/notifications/unread-count", ana, nil).JSON(t, &unread)
+	if page.UnreadCount != 1 || unread.UnreadCount != 1 {
+		t.Fatalf("unread with a blocked actor: page %d, badge %d", page.UnreadCount, unread.UnreadCount)
+	}
 	e.do(http.MethodDelete, "/v1/board-posts/"+post.ID.String(), ana, nil)
 	e.do(http.MethodGet, "/v1/community/notifications", ana, nil).JSON(t, &page)
 	if len(page.Items) != 0 {
 		t.Fatalf("deleted post still in feed: %+v", page.Items)
+	}
+	e.do(http.MethodGet, "/v1/community/notifications/unread-count", ana, nil).JSON(t, &unread)
+	if page.UnreadCount != 0 || unread.UnreadCount != 0 {
+		t.Fatalf("unread for a deleted post: page %d, badge %d", page.UnreadCount, unread.UnreadCount)
 	}
 }
 
@@ -742,10 +761,18 @@ func TestBlockedCannotNotify(t *testing.T) {
 	if r := e.comment(post.ID.Std(), bo, nil, "hi"); r.Status != http.StatusNotFound {
 		t.Fatalf("comment: %d", r.Status)
 	}
-	// The vote itself goes through (Vapor checks no block there); only the
-	// notification is suppressed.
-	if r := e.do(http.MethodPost, "/v1/board-posts/"+post.ID.String()+"/vote", bo, nil); r.Status != http.StatusOK {
+	// A blocked user cannot vote either way round (Vapor let the vote in).
+	if r := e.do(http.MethodPost, "/v1/board-posts/"+post.ID.String()+"/vote", bo, nil); r.Status != http.StatusNotFound {
 		t.Fatalf("vote: %d", r.Status)
+	}
+	bosPost := e.createPost("notify", bo, boards.KindText, "Bo's post", nil, nil)
+	if r := e.do(http.MethodPost, "/v1/board-posts/"+bosPost.ID.String()+"/vote", ana, nil); r.Status != http.StatusNotFound {
+		t.Fatalf("blocker votes: %d", r.Status)
+	}
+	var score int
+	_ = e.app.Deps.DB.QueryRow(context.Background(), `SELECT score FROM board_posts WHERE id = $1`, post.ID.Std()).Scan(&score)
+	if score != 0 {
+		t.Fatalf("score moved: %d", score)
 	}
 	var page boards.BoardNotificationPage
 	e.do(http.MethodGet, "/v1/community/notifications", ana, nil).JSON(t, &page)
@@ -789,11 +816,19 @@ func TestDailyPostPinnedAndFlagged(t *testing.T) {
 	if strings.Join(daily.Tags, ",") != "stock,nvda,ai" {
 		t.Fatalf("tags: %v", daily.Tags)
 	}
-	// A cursor (even an unusable one) drops the pin.
+	// A junk cursor is ignored, so the request is the first page and keeps
+	// the pin (Vapor dropped it for any cursor value).
 	listed = boards.BoardListResponse{}
 	e.do(http.MethodGet, "/v1/boards?cursor=x", alice, nil).JSON(t, &listed)
+	if listed.DailyPost == nil || listed.DailyPost.ID != daily.ID {
+		t.Fatal("junk cursor dropped the pin")
+	}
+	// A real cursor is a later page: no pin there.
+	payload := "v1|" + strconv.FormatUint(math.Float64bits(1e9), 10) + "|" + strings.ToUpper(uuid.NewString())
+	listed = boards.BoardListResponse{}
+	e.do(http.MethodGet, "/v1/boards?cursor="+base64.RawURLEncoding.EncodeToString([]byte(payload)), alice, nil).JSON(t, &listed)
 	if listed.DailyPost != nil {
-		t.Fatal("pinned with cursor")
+		t.Fatal("pinned on a later page")
 	}
 	if top := e.list("daily/posts?sort=top", alice); top.Items[0].ID != daily.ID {
 		t.Fatal("top not pinned")
@@ -818,8 +853,10 @@ func TestDailyPostPinnedAndFlagged(t *testing.T) {
 	if asks := e.list("daily/posts?kind=ask", alice); len(asks.Items) != 0 {
 		t.Fatalf("asks: %v", ids(asks.Items))
 	}
-	if r := e.do(http.MethodPost, "/v1/community/blocks", alice, map[string]any{"username": "norviq"}); r.Status != http.StatusBadRequest {
-		t.Fatalf("block norviq: %d", r.Status)
+	for _, name := range []string{"norviq", "@Norviq "} {
+		if r := e.do(http.MethodPost, "/v1/community/blocks", alice, map[string]any{"username": name}); r.Status != http.StatusBadRequest {
+			t.Fatalf("block %q: %d", name, r.Status)
+		}
 	}
 	var d boards.BoardPostDetail
 	e.do(http.MethodGet, "/v1/board-posts/"+daily.ID.String(), alice, nil).JSON(t, &d)
@@ -846,5 +883,23 @@ func TestDailyPostPinnedAndFlagged(t *testing.T) {
 	hist, err := s.DailyHistory(ctx, "2026-10-18")
 	if err != nil || len(hist) != 2 || hist[0].Day != "2026-10-16" || *hist[1].Topic != "etf" {
 		t.Fatalf("history: %+v %v", hist, err)
+	}
+}
+
+// Comments made in the same instant come back in id order on every read
+// (Vapor sorted by created_at alone, so the order could flip).
+func TestCommentsSameInstantStableOrder(t *testing.T) {
+	e := newEnv(t)
+	alice := e.member("alice")
+	e.createBoard("ties", alice)
+	post := e.createPost("ties", alice, boards.KindText, "A post title", nil, nil)
+	ids := []uuid.UUID{uuid.MustParse("ffffffff-0000-4000-8000-000000000000"), uuid.MustParse("00000000-0000-4000-8000-000000000001")}
+	for _, id := range ids {
+		e.exec(`INSERT INTO board_comments (id, post_id, author_id, body, depth, created_at) VALUES ($1, $2, $3, 'Same time', 0, '2026-10-01T00:00:00Z')`, id, post.ID.Std(), alice.id)
+	}
+	var d boards.BoardPostDetail
+	e.do(http.MethodGet, "/v1/board-posts/"+post.ID.String(), alice, nil).JSON(t, &d)
+	if len(d.Comments) != 2 || d.Comments[0].ID.Std() != ids[1] || d.Comments[1].ID.Std() != ids[0] {
+		t.Fatalf("order: %+v", d.Comments)
 	}
 }

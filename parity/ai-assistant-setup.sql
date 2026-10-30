@@ -12,6 +12,12 @@
 
 BEGIN;
 
+-- The keep-fixture triggers below would block this cleanup on a rerun.
+DROP TRIGGER IF EXISTS parity_ai_keep_conversation ON ai_conversations;
+DROP TRIGGER IF EXISTS parity_ai_keep_memo ON position_memos;
+DROP TRIGGER IF EXISTS parity_ai_keep_pending ON ai_pending_actions;
+DROP TRIGGER IF EXISTS parity_ai_reset_audit ON ai_action_audits;
+
 DELETE FROM ai_usage_monthly WHERE user_id::text LIKE 'a2a2a2a2-0000-4000-8000-%';
 DELETE FROM users WHERE id::text LIKE 'a2a2a2a2-0000-4000-8000-%';
 
@@ -79,5 +85,19 @@ END $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS parity_ai_keep_pending ON ai_pending_actions;
 CREATE TRIGGER parity_ai_keep_pending BEFORE UPDATE ON ai_pending_actions
   FOR EACH ROW EXECUTE FUNCTION parity_ai_keep_pending();
+
+
+-- Confirming the fixture action writes an audit row keyed by the action
+-- (unique); drop the previous backend's row so the second run can insert.
+CREATE OR REPLACE FUNCTION parity_ai_reset_audit() RETURNS trigger AS $$
+BEGIN
+  IF NEW.pending_action_id::text = 'a2a2a2a2-0000-4000-8000-0000000000b1' THEN
+    DELETE FROM ai_action_audits WHERE pending_action_id = NEW.pending_action_id;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS parity_ai_reset_audit ON ai_action_audits;
+CREATE TRIGGER parity_ai_reset_audit BEFORE INSERT ON ai_action_audits
+  FOR EACH ROW EXECUTE FUNCTION parity_ai_reset_audit();
 
 COMMIT;

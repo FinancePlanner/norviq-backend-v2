@@ -45,3 +45,10 @@
 {"name": "memos-delete-missing", "method": "DELETE", "path": "/v1/ai/memos/a2a2a2a2-0000-4000-8000-0000000000ff", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
 {"name": "memos-list-empty-filter", "method": "GET", "path": "/v1/ai/memos?bookmarked=", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
 {"name": "memos-list-flag", "method": "GET", "path": "/v1/ai/memos?bookmarked", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "confirm-bad-id", "method": "POST", "path": "/v1/ai/assistant/actions/not-a-uuid/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-unknown", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000ff/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-foreign", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000002"}
+{"name": "confirm-not-pending", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b3/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-expired", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b4/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}
+{"name": "confirm-unauth", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm"}
+{"name": "confirm-exec-missing-expense", "method": "POST", "path": "/v1/ai/assistant/actions/a2a2a2a2-0000-4000-8000-0000000000b1/confirm", "as": "a2a2a2a2-0000-4000-8000-000000000001"}

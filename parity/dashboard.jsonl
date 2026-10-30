@@ -1,0 +1,13 @@
+# Dashboard: /v1/dashboard, /insights, /why-moved. Load
+# parity/crypto-dashboard-setup.sql first. Compare with -ignore requestId,asOf.
+# Neither backend has an AI key or FMP key, so aiSummary is absent and the
+# index strip is empty on both.
+{"name":"dashboard-unauth","path":"/v1/dashboard"}
+{"name":"dashboard","path":"/v1/dashboard","as":"c7d00000-0000-4000-8000-000000000004"}
+{"name":"dashboard-empty","path":"/v1/dashboard","as":"c7d00000-0000-4000-8000-000000000005"}
+{"name":"insights","path":"/v1/dashboard/insights","as":"c7d00000-0000-4000-8000-000000000004"}
+{"name":"insights-empty","path":"/v1/dashboard/insights","as":"c7d00000-0000-4000-8000-000000000005"}
+{"name":"insights-unauth","path":"/v1/dashboard/insights"}
+{"name":"why-moved","path":"/v1/dashboard/why-moved","as":"c7d00000-0000-4000-8000-000000000004"}
+{"name":"why-moved-empty","path":"/v1/dashboard/why-moved","as":"c7d00000-0000-4000-8000-000000000005"}
+{"name":"why-moved-unauth","path":"/v1/dashboard/why-moved"}

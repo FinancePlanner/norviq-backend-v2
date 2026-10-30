@@ -41,8 +41,8 @@ type Sources interface {
 	BudgetDashboard(ctx context.Context, userID, snapshotID uuid.UUID) (budgeting.BudgetDriftDashboard, error)
 }
 
-// errInflationUnavailable is what the live sources answer while the macro
-// domain (MacroService.personalInflation) is not wired into v2.
+// errInflationUnavailable is what the live sources answer without Deps
+// (MacroService.personalInflation needs the shared macro service).
 var errInflationUnavailable = errors.New("personal inflation source unavailable")
 
 // Position is DigestPosition: a symbol in one portfolio currency, shares

@@ -52,6 +52,8 @@ func (f PremiumFunc) RequirePremium(ctx context.Context, feature string, userID 
 type Feature struct {
 	// Service overrides the environment-built service (tests).
 	Service *marketdata.Service
+	// Archive overrides the environment-built news archive (tests).
+	Archive *NewsArchive
 	// Premium builds the billing gate for the Pro-only routes. While it is
 	// nil those routes are not registered, so the strangler keeps sending
 	// them to Vapor.
@@ -71,6 +73,13 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		}
 	}
 	h := &handlers{svc: svc}
+	h.archive = f.Archive
+	if h.archive == nil {
+		var err error
+		if h.archive, err = SharedNewsArchive(d); err != nil {
+			return err
+		}
+	}
 	if f.Premium != nil {
 		h.premium = f.Premium(d)
 	}
@@ -91,8 +100,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		g.GET(path, h.requirePremium(feature, fn))
 	}
 
-	// Registration order follows MarketDataController.boot. Unported routes
-	// (news, chart-builder) stay with Vapor.
+	// Registration order follows MarketDataController.boot.
 	g.GET("/overview", h.overview)
 	g.GET("/pressure/:symbol", h.pressure)
 	g.GET("/returns/batch", h.periodReturnsBatch)
@@ -101,6 +109,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g.GET("/history", h.stockHistory)
 	g.GET("/history/archive", h.archivedStockHistory)
 	g.POST("/history/archive/sync", h.syncArchivedStockHistory)
+	g.GET("/news", h.stockNews)
+	g.GET("/news/general", h.generalMarketNews)
+	g.GET("/news/archive", h.archivedStockNews)
+	g.POST("/news/archive/sync", h.syncArchivedStockNews)
 	g.GET("/quote/batch", h.quoteBatch)
 	g.GET("/quote/:symbol", h.quote)
 	g.GET("/profile/:symbol", h.profile)
@@ -130,6 +142,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g.GET("/fx", h.fx)
 	g.GET("/price-chart/compare", h.priceChartComparison)
 	g.GET("/price-chart/:symbol", h.priceChart)
+	g.GET("/chart-builder/metrics", h.chartBuilderMetrics)
+	gated("/chart-builder/:symbol/csv", PremiumMarketFundamentals, h.chartBuilderCSV)
+	gated("/chart-builder/:symbol", PremiumMarketFundamentals, h.chartBuilder)
 	return nil
 }
 
@@ -154,6 +169,7 @@ func SharedService(d *server.Deps) (*marketdata.Service, error) {
 
 type handlers struct {
 	svc     *marketdata.Service
+	archive *NewsArchive
 	premium PremiumGate
 }
 

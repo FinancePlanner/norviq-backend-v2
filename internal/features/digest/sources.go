@@ -6,6 +6,7 @@ import (
 
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
+	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/server"
 
@@ -21,8 +22,8 @@ type InflationSource func(ctx context.Context, userID uuid.UUID, country string)
 // a missing provider key fails only its own section.
 type LiveSources struct {
 	Deps *server.Deps
-	// Inflation is nil until the macro domain is ported; the inflation
-	// section then logs digest.section_failed and is left out.
+	// Inflation defaults to MacroInflation(Deps); when it fails the
+	// inflation section logs digest.section_failed and is left out.
 	Inflation InflationSource
 
 	calendarOnce sync.Once
@@ -60,12 +61,33 @@ func (s *LiveSources) Earnings(ctx context.Context, from, to string) ([]earnings
 	return s.calendar.Fetch(ctx, earnings.Query{From: &from, To: &to})
 }
 
-// PersonalInflation calls Inflation, or fails while it is not wired.
+// PersonalInflation calls Inflation, or the shared macro service when it is
+// unset.
 func (s *LiveSources) PersonalInflation(ctx context.Context, userID uuid.UUID, country string) (PersonalInflation, error) {
-	if s.Inflation == nil {
+	if s.Inflation != nil {
+		return s.Inflation(ctx, userID, country)
+	}
+	if s.Deps == nil {
 		return PersonalInflation{}, errInflationUnavailable
 	}
-	return s.Inflation(ctx, userID, country)
+	return MacroInflation(s.Deps)(ctx, userID, country)
+}
+
+// MacroInflation is LiveDigestDataSources.personalInflation:
+// MacroService.personalInflation(userID:country:periodMonths: 12) on the
+// shared macro service.
+func MacroInflation(d *server.Deps) InflationSource {
+	return func(ctx context.Context, userID uuid.UUID, country string) (PersonalInflation, error) {
+		svc, err := macro.SharedService(d)
+		if err != nil {
+			return PersonalInflation{}, err
+		}
+		r, err := svc.PersonalInflation(ctx, userID, macro.Country(country), 12)
+		if err != nil {
+			return PersonalInflation{}, err
+		}
+		return PersonalInflation{Country: r.Country, AsOf: r.AsOf, PersonalRate: r.PersonalRate, OfficialRate: r.OfficialRate}, nil
+	}
 }
 
 // BudgetDashboard is BudgetingEngineService.dashboard(userId:snapshotId:).

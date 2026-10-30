@@ -1,0 +1,25 @@
+# Chart builder (MarketDataController chart-builder routes). The shared Vapor
+# has no FMP_API_KEY, so data requests that pass validation end in the
+# statement service's 503; the catalog and every validation path compare fully.
+# Users come from parity/news-setup.sql (…01 free, …03 Pro). Compare cases
+# avoid mixing symbols whose errors differ: Vapor fetched symbols in a task
+# group, so which error wins is a race there (v2: first symbol in order).
+{"name":"metrics unauth","method":"GET","path":"/v1/market/chart-builder/metrics"}
+{"name":"metrics","method":"GET","path":"/v1/market/chart-builder/metrics","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"data unauth","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue"}
+{"name":"data free","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"csv free","method":"GET","path":"/v1/market/chart-builder/AAPL/csv?metrics=revenue","as":"ae005000-0000-4000-8000-000000000001"}
+{"name":"no metrics","method":"GET","path":"/v1/market/chart-builder/AAPL","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"blank metrics","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=%20,,","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"unknown metrics","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue,bogus,nope","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"too many metrics","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue,revenue","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"bad period","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue&period=weekly","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"empty period","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue&period=","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"ttm unsupported","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue,currentRatio,epsgrowth&period=TTM","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"too many compare","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue&compare=a,b,c,d","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"compare drops primary","method":"GET","path":"/v1/market/chart-builder/aapl?metrics=revenue&compare=AAPL,msft","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"valid annual no key","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=revenue,freeCashFlow","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"valid quarterly no key","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=grossProfitMargin&period=Quarterly&limit=abc","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"valid ttm no key","method":"GET","path":"/v1/market/chart-builder/AAPL?metrics=fcfMargin&period=ttm&limit=500","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"csv bad period","method":"GET","path":"/v1/market/chart-builder/AAPL/csv?metrics=revenue&period=x","as":"ae005000-0000-4000-8000-000000000003"}
+{"name":"csv no key","method":"GET","path":"/v1/market/chart-builder/AAPL/csv?metrics=revenue","as":"ae005000-0000-4000-8000-000000000003"}

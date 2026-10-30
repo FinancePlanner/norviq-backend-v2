@@ -23,6 +23,8 @@ import (
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/crypto"
+	"norviq-api/internal/features/dashboard"
 	"norviq-api/internal/features/dataexport"
 	"norviq-api/internal/features/digest"
 	"norviq-api/internal/features/earnings"
@@ -34,7 +36,10 @@ import (
 	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/groups"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/macro"
 	"norviq-api/internal/features/market"
+	"norviq-api/internal/features/marketbrief"
+	"norviq-api/internal/features/news"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/ops"
 	"norviq-api/internal/features/pilots"
@@ -90,7 +95,11 @@ func All() []server.Feature {
 		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
+		// MarketBriefController (/v1/market/brief, behind MARKET_BRIEF_ENABLED).
+		marketbrief.Feature{},
 		earnings.Feature{},
+		// MacroController (/v1/macro/*).
+		macro.Feature{},
 		// Watchlist, lists, CSV import, price targets, smart screens and
 		// holding risk profiles.
 		watchlist.Feature{},
@@ -151,6 +160,12 @@ func All() []server.Feature {
 		pilots.Feature{},
 		// FinancingController (/v1/financing/*).
 		financing.Feature{},
+		// NewsController (/v1/news/*) and FinnhubWebhookController.
+		news.Feature{},
+		// DashboardController (dashboard, insights, why-moved).
+		dashboard.Feature{},
+		// CryptoController (/v1/crypto/*, incl. the markets view).
+		crypto.Feature{},
 		// /v1/admin moderation (CommunityAdminController,
 		// SocialModerationController).
 		admin.Feature{},
@@ -235,6 +250,12 @@ func AllJobs() []Job {
 		tax.ReportGenerationJob{},
 		tax.ReportCleanupJob{},
 		tax.ProjectionJob{},
+		news.IngestionJob{},
+		news.NotificationJob{},
+		// MacroRefreshJob.
+		macro.RefreshJob{},
+		// Crypto markets snapshot (CoinGecko + FMP YTD bases).
+		crypto.RefreshJob{},
 		// DataExportCleanupJob.
 		dataexport.CleanupJob{},
 		// WeeklyDigestJob (lock weekly_digest_job); runs only with
@@ -249,6 +270,10 @@ func AllJobs() []Job {
 		scenarios.RetentionJob{},
 		// GoalPlanningDailyJob (Vapor: GOAL_EVALUATOR_ENABLED=false).
 		goalplanning.DailyJob{},
+		// DailyBoardPostJob (also needs DAILY_BOARD_POST_ENABLED, as in Vapor).
+		boards.DailyPostJob{},
+		// MarketBriefJob (also needs MARKET_BRIEF_ENABLED, as in Vapor).
+		marketbrief.Job{},
 	}
 }
 

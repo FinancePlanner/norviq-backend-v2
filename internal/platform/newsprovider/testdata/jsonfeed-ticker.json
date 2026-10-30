@@ -1,0 +1,15 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Merged timeline",
+  "items": [
+    {"id": "a1", "url": "https://pub.example/story", "title": "Fed holds rates", "date_published": "2026-09-17T11:00:00Z", "image": "https://pub.example/a.jpg",
+     "_feeds": {"source_name": "CNBC", "source_url": "https://www.cnbc.com", "feed_url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"}},
+    {"id": "y1", "url": "https://finance.yahoo.com/news/aapl-1", "title": "Apple beats", "date_published": "2026-09-17T10:00:00Z",
+     "_feeds": {"source_name": "Yahoo Finance", "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en-US"}},
+    {"id": "y2", "url": "https://finance.yahoo.com/news/aapl-2", "title": "Apple second", "date_published": "2026-09-17T09:00:00Z",
+     "_feeds": {"source_name": "Yahoo Finance", "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=AAPL&region=US&lang=en-US"}},
+    {"id": "m1", "url": "https://finance.yahoo.com/news/msft-1", "title": "Microsoft news", "date_published": "2026-09-17T08:30:00.500Z",
+     "_feeds": {"source_name": "Yahoo Finance", "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=MSFT&region=US&lang=en-US"}}
+  ],
+  "_feeds": {"warming": ["https://feeds.finance.yahoo.com/rss/2.0/headline?s=TSLA&region=US&lang=en-US"], "stale": [], "generated_at": "2026-09-17T12:00:00Z"}
+}

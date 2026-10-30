@@ -297,3 +297,48 @@ func TestFMPBackedRoutes(t *testing.T) {
 		t.Fatalf("technicals blank %d %s", r.Status, r.Body)
 	}
 }
+
+func TestChartBuilderRoutes(t *testing.T) {
+	up := upstream(t, map[string]string{
+		"/stable/income-statement": `[
+			{"symbol":"AAPL","date":"2024-09-28","reportedCurrency":"USD","fiscalYear":"2024","period":"FY","revenue":391},
+			{"symbol":"AAPL","date":"2023-09-30","reportedCurrency":"USD","fiscalYear":"2023","period":"FY","revenue":383}]`,
+	})
+	settings := marketdata.Settings{FMPAPIKey: "test", FMPBaseURL: up.URL}
+
+	// The catalog needs no premium gate.
+	plain := newEnv(t, settings, nil)
+	var catalog market.ChartBuilderMetricCatalogResponse
+	r := plain.app.Do("GET", "/v1/market/chart-builder/metrics", plain.token, nil)
+	r.JSON(t, &catalog)
+	if r.Status != 200 || len(catalog.Groups) != 6 || catalog.Groups[0].Metrics[0].Key != "revenue" {
+		t.Fatalf("metrics %d %s", r.Status, r.Body[:min(200, len(r.Body))])
+	}
+
+	deny := market.PremiumFunc(func(context.Context, string, uuid.UUID) error {
+		return httpx.CodedAbort(http.StatusPaymentRequired, "upgrade_required", "Upgrade")
+	})
+	denied := newEnv(t, settings, deny)
+	if r := denied.app.Do("GET", "/v1/market/chart-builder/AAPL?metrics=revenue", denied.token, nil); r.Status != 402 {
+		t.Fatalf("denied %d", r.Status)
+	}
+
+	allow := market.PremiumFunc(func(context.Context, string, uuid.UUID) error { return nil })
+	e := newEnv(t, settings, allow)
+	if r := e.app.Do("GET", "/v1/market/chart-builder/AAPL?metrics=bogus", e.token, nil); r.Status != 400 || reason(t, r) != "Unknown metric keys: bogus." {
+		t.Fatalf("bogus %d %s", r.Status, r.Body)
+	}
+	var chart market.ChartBuilderResponse
+	r = e.app.Do("GET", "/v1/market/chart-builder/aapl?metrics=revenue", e.token, nil)
+	r.JSON(t, &chart)
+	if r.Status != 200 || chart.Period != "annual" || len(chart.Periods) != 2 || chart.Periods[0].Label != "FY2023" ||
+		len(chart.Series) != 1 || *chart.Series[0].Values[1] != 391 || *chart.Series[0].Currency != "USD" {
+		t.Fatalf("chart %d %s", r.Status, r.Body)
+	}
+	r = e.app.Do("GET", "/v1/market/chart-builder/aapl/csv?metrics=revenue", e.token, nil)
+	if r.Status != 200 || r.Header.Get("Content-Type") != "text/csv; charset=utf-8" ||
+		r.Header.Get("Content-Disposition") != `attachment; filename="AAPL-chart-builder-annual.csv"` ||
+		string(r.Body[3:]) != "Period,Fiscal Year,Revenue\nFY2023,2023,383\nFY2024,2024,391\n" {
+		t.Fatalf("csv %d %v %q", r.Status, r.Header, r.Body)
+	}
+}

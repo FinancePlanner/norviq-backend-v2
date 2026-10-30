@@ -206,7 +206,7 @@ func TestGatewayCallbackConnectsAndSyncs(t *testing.T) {
 	if r.Status != http.StatusSeeOther || r.Header.Get("Location") != "norviq://brokers?broker=ibkr&status=success" {
 		t.Fatalf("callback = %d %q %s", r.Status, r.Header.Get("Location"), r.Body)
 	}
-	r = h.app.Do(http.MethodGet, "/v1/brokers/ibkr", tok, nil)
+	r = h.app.Do(http.MethodGet, "/v1/brokers/IBKR", tok, nil)
 	var conn ConnectionResponse
 	r.JSON(t, &conn)
 	if conn.Status != "connected" || conn.LastSyncedAt == nil || conn.DisplayName == nil || *conn.DisplayName != "Ledger IBKR" {

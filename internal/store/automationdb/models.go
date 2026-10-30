@@ -11,6 +11,41 @@ import (
 	"github.com/google/uuid"
 )
 
+type NetWorthForecast struct {
+	ID                      uuid.UUID
+	UserID                  uuid.UUID
+	PortfolioListID         uuid.UUID
+	Name                    string
+	BaseCurrency            string
+	HorizonMonths           int64
+	IncludeCash             bool
+	IncludeCrypto           bool
+	AnnualIncomeGrowth      float64
+	AnnualSpendingGrowth    float64
+	InflationAssumption     float64
+	MonthlyIncomeOverride   *float64
+	MonthlySpendingOverride *float64
+	TargetAmount            *float64
+	PathCount               int64
+	CreatedAt               *time.Time
+	UpdatedAt               *time.Time
+}
+
+type NetWorthForecastRun struct {
+	ID                uuid.UUID
+	UserID            uuid.UUID
+	ForecastID        uuid.UUID
+	Status            string
+	StartingValue     float64
+	Assumptions       json.RawMessage
+	Timeline          json.RawMessage
+	TargetProbability *float64
+	Seed              string
+	FailureReason     *string
+	CreatedAt         *time.Time
+	CompletedAt       *time.Time
+}
+
 type RebalanceEvent struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID

@@ -17,6 +17,7 @@ import (
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/articles"
 	"norviq-api/internal/features/assets"
+	"norviq-api/internal/features/autobuys"
 	"norviq-api/internal/features/automation"
 	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/billing"
@@ -29,15 +30,19 @@ import (
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
+	"norviq-api/internal/features/goalplanning"
+	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/groups"
 	"norviq-api/internal/features/identity"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/ops"
 	"norviq-api/internal/features/pilots"
+	"norviq-api/internal/features/planning"
 	"norviq-api/internal/features/portfolio"
 	"norviq-api/internal/features/portfoliomgmt"
 	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/features/recaps"
 	"norviq-api/internal/features/receipts"
 	"norviq-api/internal/features/reporting"
 	"norviq-api/internal/features/retirement"
@@ -123,8 +128,13 @@ func All() []server.Feature {
 		stocks.Feature{},
 		// RetirementController portfolio routes.
 		retirement.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
-		// ScenarioController portfolio snapshot routes.
+		// ScenarioController: snapshot, scenario and scenario-run routes.
 		scenarios.Feature{},
+		// GoalPlanningController (/v1/financial-goals); unregistered when
+		// GOAL_PLANNING_ENABLED is off, as in routes.swift.
+		goalplanning.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		// Dashboard GoalsController (/v1/goals).
+		goals.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
 		// WealthAutomationController rebalancing-policy routes.
 		automation.Feature{},
 		// Community boards (BoardsController).
@@ -159,6 +169,12 @@ func All() []server.Feature {
 		// DigestController: /v1/digests and /v1/digest-preferences behind
 		// DIGEST_ENABLED (read once at boot); /v1/digest/unsubscribe always.
 		digest.Feature{},
+		// RecapController (/v1/recaps); 404 unless RECAP_ENABLED=true.
+		recaps.Feature{ScheduleAchievementCheck: scheduleAchievementCheck},
+		// TerminalPositionsController's /v1/autobuys routes.
+		autobuys.Feature{},
+		// PlanningController (/v1/planning).
+		planning.Feature{},
 	}
 }
 
@@ -225,6 +241,14 @@ func AllJobs() []Job {
 		// DIGEST_ENABLED on, and Vapor's copy is off once Vapor has
 		// DIGEST_ENABLED=false.
 		digest.Job{},
+		// Planning: rebalancing drift alerts.
+		rebalancing.AlertJob{},
+		// Scenario planning: run queue (claim + lease, no JobLock) and
+		// retention; both no-ops unless SCENARIO_PLANNING_ENABLED.
+		scenarios.RunWorkerJob{},
+		scenarios.RetentionJob{},
+		// GoalPlanningDailyJob (Vapor: GOAL_EVALUATOR_ENABLED=false).
+		goalplanning.DailyJob{},
 	}
 }
 

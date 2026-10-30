@@ -1,8 +1,9 @@
-// Package scenarios ports ScenarioController's portfolio snapshot routes
-// (GET/POST /v1/portfolio/scenario-snapshots, GET …/:id) and
-// ScenarioSnapshotCaptureService. The other ScenarioController routes
-// (/v1/scenarios*, /v1/scenario-runs*, /v1/holding-risk-profiles*) belong to
-// other porters.
+// Package scenarios ports ScenarioController's portfolio snapshot,
+// scenario-definition and scenario-run routes (/v1/portfolio/scenario-snapshots*,
+// /v1/scenarios*, /v1/scenario-runs*), ScenarioSnapshotCaptureService,
+// ScenarioEngine, ScenarioRunProcessor, ScenarioRunWorker and
+// ScenarioRetentionJob. The /v1/holding-risk-profiles routes live in
+// package watchlist.
 package scenarios
 
 import (
@@ -58,6 +59,20 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.GET("/portfolio/scenario-snapshots", h.listSnapshots, read...)
 	r.V1.GET("/portfolio/scenario-snapshots/:id", h.getSnapshot, read...)
 	r.V1.POST("/portfolio/scenario-snapshots", h.createSnapshot, write...)
+
+	r.V1.GET("/scenarios/catalog", h.catalog, read...)
+	r.V1.GET("/scenarios", h.listScenarios, read...)
+	r.V1.GET("/scenarios/:id", h.getScenario, read...)
+	r.V1.POST("/scenarios", h.createScenario, write...)
+	r.V1.PUT("/scenarios/:id", h.updateScenario, write...)
+	r.V1.DELETE("/scenarios/:id", h.deleteScenario, write...)
+	r.V1.POST("/scenarios/:id/runs", h.createRun, write...)
+
+	r.V1.GET("/scenario-runs", h.listRuns, read...)
+	r.V1.GET("/scenario-runs/:id", h.getRun, read...)
+	r.V1.GET("/scenario-runs/:id/result", h.getResult, read...)
+	r.V1.POST("/scenario-runs/compare", h.compareRuns, write...)
+	r.V1.DELETE("/scenario-runs/:id", h.cancelRun, write...)
 	return nil
 }
 

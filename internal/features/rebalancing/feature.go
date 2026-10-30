@@ -1,8 +1,8 @@
-// Package rebalancing ports RebalancingController's portfolio-scoped routes
-// (/v1/portfolios/:portfolioId/rebalancing/...), RebalancingService,
-// RebalancingEngine and PortfolioSnapshotPricer. The user-level routes
-// (/v1/rebalancing/dashboard, /alerts, /alerts/:alertId/acknowledge) belong
-// to another package; Service keeps Dashboard, Alerts and Acknowledge for it.
+// Package rebalancing ports RebalancingController
+// (/v1/portfolios/:portfolioId/rebalancing/... and the user-level
+// /v1/rebalancing/dashboard, /alerts, /alerts/:alertId/acknowledge),
+// RebalancingService, RebalancingEngine, PortfolioSnapshotPricer and
+// RebalancingAlertPoller (AlertJob).
 package rebalancing
 
 import (
@@ -65,6 +65,12 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		return err
 	}
 	h := &handler{svc: NewService(d, md), enabled: config.Bool(s.Enabled, true), achievements: f.ScheduleAchievementCheck}
+
+	userRead := []echo.MiddlewareFunc{d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopePlanningRead)}
+	r.V1.GET("/rebalancing/dashboard", h.dashboard, userRead...)
+	r.V1.GET("/rebalancing/alerts", h.alerts, userRead...)
+	r.V1.POST("/rebalancing/alerts/:alertId/acknowledge", h.acknowledgeAlert,
+		d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopePlanningWrite))
 
 	read := r.V1.Group("/portfolios/:portfolioId/rebalancing", d.Auth.Scoped(), auth.Guard(), auth.RequireScope(auth.ScopePlanningRead))
 	read.GET("/models", h.models)
@@ -527,4 +533,44 @@ func (h *handler) exportPDF(c *echo.Context) error {
 	}
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="rebalance-`+p.ID+`.pdf"`)
 	return c.Blob(http.StatusOK, "application/pdf", MinimalPDF(PlanPDFLines(p)))
+}
+
+func (h *handler) dashboard(c *echo.Context) error {
+	user, err := h.begin(c)
+	if err != nil {
+		return err
+	}
+	out, err := h.svc.Dashboard(c.Request().Context(), user)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, out)
+}
+
+func (h *handler) alerts(c *echo.Context) error {
+	user, err := h.begin(c)
+	if err != nil {
+		return err
+	}
+	out, err := h.svc.Alerts(c.Request().Context(), user)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, out)
+}
+
+func (h *handler) acknowledgeAlert(c *echo.Context) error {
+	user, err := h.begin(c)
+	if err != nil {
+		return err
+	}
+	id, err := param(c, "alertId")
+	if err != nil {
+		return err
+	}
+	out, err := h.svc.Acknowledge(c.Request().Context(), id, user)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, out)
 }

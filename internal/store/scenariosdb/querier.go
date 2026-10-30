@@ -6,23 +6,66 @@ package scenariosdb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// MarketPriceBarRepository.adjustedCloses: Vapor bound Dates (timestamptz)
+	// against the date column.
+	AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) ([]AdjustedClosesRow, error)
+	BudgetPlanItemsForSpending(ctx context.Context, snapshotID uuid.UUID) ([]BudgetPlanItemsForSpendingRow, error)
+	// cancelRun's save: only the changed fields.
+	CancelScenarioRun(ctx context.Context, arg CancelScenarioRunParams) error
+	// ScenarioRunWorker.claim, verbatim.
+	ClaimScenarioRun(ctx context.Context, workerID string) (uuid.UUID, error)
+	// execute's success save: result, state, progress, completedAt and the
+	// cleared lease (Fluent sends every assigned field).
+	CompleteScenarioRun(ctx context.Context, arg CompleteScenarioRunParams) error
+	CountScenarioRunsForDefinition(ctx context.Context, scenarioID uuid.UUID) (int32, error)
+	// ScenarioRetentionJob: expired terminal runs.
+	DeleteExpiredScenarioRuns(ctx context.Context, expiresAt *time.Time) error
+	DeleteScenarioDefinition(ctx context.Context, id uuid.UUID) error
+	FailScenarioRun(ctx context.Context, arg FailScenarioRunParams) error
+	FindCompletedScenarioRunByHash(ctx context.Context, arg FindCompletedScenarioRunByHashParams) (ScenarioRun, error)
+	// FinancialGoalModel.owned(by:).filter(id).first(): the fields scenarios use.
+	GetOwnedFinancialGoal(ctx context.Context, arg GetOwnedFinancialGoalParams) (GetOwnedFinancialGoalRow, error)
+	GetScenarioDefinition(ctx context.Context, arg GetScenarioDefinitionParams) (ScenarioDefinition, error)
+	// The worker's `.with(\.$scenario)` eager load (no owner filter).
+	GetScenarioDefinitionByID(ctx context.Context, id uuid.UUID) (ScenarioDefinition, error)
+	GetScenarioRun(ctx context.Context, arg GetScenarioRunParams) (ScenarioRun, error)
+	// ScenarioRunModel.find(id)
+	GetScenarioRunByID(ctx context.Context, id uuid.UUID) (ScenarioRun, error)
 	GetScenarioSnapshot(ctx context.Context, arg GetScenarioSnapshotParams) (PortfolioScenarioSnapshot, error)
+	// The worker's `.with(\.$snapshot)` eager load (no owner filter).
+	GetScenarioSnapshotByID(ctx context.Context, id uuid.UUID) (PortfolioScenarioSnapshot, error)
+	InsertScenarioDefinition(ctx context.Context, arg InsertScenarioDefinitionParams) error
+	InsertScenarioRun(ctx context.Context, arg InsertScenarioRunParams) error
 	InsertScenarioSnapshot(ctx context.Context, arg InsertScenarioSnapshotParams) error
+	// ScenarioBudgetSpending: BudgetSnapshot.query.filter(user).sort(monthStart, .descending).first()
+	LatestBudgetSnapshotID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
+	// ScenarioController scenario-definition and scenario-run routes,
+	// ScenarioRunWorker / ScenarioRunProcessor and ScenarioRetentionJob.
+	// ScenarioDefinitionModel.owned(by:).sort(createdAt, .descending).all()
+	ListScenarioDefinitions(ctx context.Context, userID uuid.UUID) ([]ScenarioDefinition, error)
+	ListScenarioRuns(ctx context.Context, userID uuid.UUID) ([]ScenarioRun, error)
+	// owned(by:).filter(\.$id ~~ runIds).all()
+	ListScenarioRunsByIDs(ctx context.Context, arg ListScenarioRunsByIDsParams) ([]ScenarioRun, error)
 	// ScenarioController snapshot routes and ScenarioSnapshotCaptureService.
 	ListScenarioSnapshots(ctx context.Context, userID uuid.UUID) ([]PortfolioScenarioSnapshot, error)
+	ListUnsavedScenarioDefinitionIDs(ctx context.Context) ([]uuid.UUID, error)
 	// PortfolioList.query.filter(id).filter(userId).first() != nil
 	OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfolioListExistsParams) (bool, error)
+	RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) error
+	SetScenarioRunProgress(ctx context.Context, arg SetScenarioRunProgressParams) error
 	// Account.query.filter(userId) then CashBalance.query.filter(accountId ~~ ids).
 	SnapshotCashBalances(ctx context.Context, userID uuid.UUID) ([]SnapshotCashBalancesRow, error)
 	SnapshotCryptoHoldings(ctx context.Context, arg SnapshotCryptoHoldingsParams) ([]SnapshotCryptoHoldingsRow, error)
 	// Stock.query.filter(userId).filter(portfolioListId).sort(symbol).all()
 	SnapshotHoldings(ctx context.Context, arg SnapshotHoldingsParams) ([]SnapshotHoldingsRow, error)
 	SnapshotRiskProfiles(ctx context.Context, userID uuid.UUID) ([]SnapshotRiskProfilesRow, error)
+	UpdateScenarioDefinition(ctx context.Context, arg UpdateScenarioDefinitionParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -1,7 +1,8 @@
 // Package automation ports WealthAutomationController's rebalancing-policy
-// routes (/v1/portfolio/lists/:portfolioListId/rebalancing-policy*) and
-// WealthRebalancingEngine. Net-worth forecasts, watchlist screens and the
-// notifications inbox in the same Vapor controller belong to other porters.
+// routes (/v1/portfolio/lists/:portfolioListId/rebalancing-policy*),
+// WealthRebalancingEngine and the /v1/net-worth-forecasts routes
+// (forecasts.go). Watchlist screens and the notifications inbox in the same
+// Vapor controller belong to other porters.
 //
 // Vapor's rebalancing feature cannot work: WealthAutomationCoding round-trips
 // every stored value through ScenarioJSON, whose synthesized Codable wraps
@@ -65,6 +66,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.POST(base+"/preview", h.preview, write...)
 	r.V1.POST(base+"/events/:eventID/confirm", h.confirmEvent, write...)
 	r.V1.POST(base+"/events/:eventID/dismiss", h.dismissEvent, write...)
+	h.registerForecasts(r.V1, read, write)
 	return nil
 }
 

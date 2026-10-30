@@ -139,6 +139,18 @@ func utcDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// lastFixingDay is the latest weekday on or before t. The ECB publishes no
+// fixing on weekends, so a window ending on a Saturday or Sunday is fully
+// cached once it holds Friday's rate; checking t itself would send every
+// weekend-dated conversion to the provider.
+func lastFixingDay(t time.Time) time.Time {
+	d := utcDay(t)
+	for d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+		d = d.AddDate(0, 0, -1)
+	}
+	return d
+}
+
 // fxDailyRate is FXDailyRate: 1 EUR = rate units of quote on date.
 type fxDailyRate struct {
 	date  time.Time
@@ -230,7 +242,7 @@ func (r fxResolver) cachedRates(ctx context.Context, quote string, from, to time
 				last = row.date
 			}
 		}
-		if len(cached) > 0 && !last.Before(utcDay(to)) {
+		if len(cached) > 0 && !last.Before(lastFixingDay(to)) {
 			return cached, nil
 		}
 	}

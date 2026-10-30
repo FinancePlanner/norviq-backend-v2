@@ -61,3 +61,23 @@ func TestFXCacheDoesNotTrustPartialWindow(t *testing.T) {
 		t.Fatalf("fallback %+v %v", out, err)
 	}
 }
+
+func TestLastFixingDaySkipsWeekends(t *testing.T) {
+	day := func(s string) time.Time {
+		d, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	for in, want := range map[string]string{
+		"2026-10-30": "2026-10-30", // Friday
+		"2026-10-31": "2026-10-30", // Saturday
+		"2026-11-01": "2026-10-30", // Sunday
+		"2026-11-02": "2026-11-02", // Monday
+	} {
+		if got := lastFixingDay(day(in)); !got.Equal(day(want)) {
+			t.Errorf("lastFixingDay(%s) = %s, want %s", in, got.Format("2006-01-02"), want)
+		}
+	}
+}

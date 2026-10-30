@@ -402,7 +402,9 @@ func TestParseConfirmationAnswer(t *testing.T) {
 		messagingDeclinePrefix + id.String():                  {kind: answerDecline, id: id},
 		"no, please don't do that":                            {kind: answerDeclineLatest},
 		"ok go":                                               {kind: answerApproveLatest},
-		"don't":                                               nil, // "don" + "t": Swift's letter split
+		"don't":                                               {kind: answerDeclineLatest},
+		"don\u2019t do it":                                    {kind: answerDeclineLatest}, // Swift approved this through "do"
+		"'yes'":                                               {kind: answerApproveLatest},
 		"what did I spend":                                    nil,
 		"   ":                                                 nil,
 	}

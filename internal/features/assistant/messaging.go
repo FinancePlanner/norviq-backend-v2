@@ -467,8 +467,10 @@ var (
 )
 
 // parseConfirmationAnswer reads a button payload, else a typed yes/no.
-// Refusals win over approvals ("no, please don't do that"). Words are
-// letter runs, so "don't" can never match (Swift's split did the same).
+// Refusals win over approvals ("no, please don't do that"). Words are runs
+// of letters and apostrophes (a typographic one counts as '). Deliberate fix:
+// Swift split on letters only, so "don't" became "don" + "t", never matched
+// as a refusal, and "don't do it" approved through "do".
 func parseConfirmationAnswer(text string) *confirmationAnswer {
 	trimmed := strings.TrimFunc(text, unicode.IsSpace)
 	if rest, ok := strings.CutPrefix(trimmed, messagingConfirmPrefix); ok {
@@ -481,7 +483,11 @@ func parseConfirmationAnswer(text string) *confirmationAnswer {
 			return &confirmationAnswer{kind: answerDecline, id: id}
 		}
 	}
-	words := strings.FieldsFunc(strings.ToLower(trimmed), func(r rune) bool { return !unicode.IsLetter(r) })
+	lower := strings.ReplaceAll(strings.ToLower(trimmed), "\u2019", "'")
+	words := strings.FieldsFunc(lower, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+	for i, w := range words {
+		words[i] = strings.Trim(w, "'")
+	}
 	if len(words) == 0 {
 		return nil
 	}

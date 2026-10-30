@@ -484,6 +484,11 @@ func TestWorkerEnqueuesDueSchedules(t *testing.T) {
 	freeSched := uuid.New()
 	in, _ := encodeReportJSON(ScheduleInput{Name: "x", TemplateID: tmpl.ID, OutputFormats: []string{"pdf"}, Recurrence: Recurrence{Frequency: "weekly", TimeZone: "UTC", LocalTime: "09:00", Weekday: intp(2)}, RecipientUserIDs: []string{}, IsEnabled: true})
 	a.exec(`INSERT INTO advanced_report_schedules (id, owner_user_id, input_json, next_run_at, created_at, updated_at) VALUES ($1, $2, $3, now() - interval '1 minute', now(), now())`, freeSched, freeUser, in)
+	// A schedule whose next run cannot be computed is paused, and the tick
+	// still enqueues the others (Vapor failed the whole tick).
+	badSched := uuid.New()
+	bad, _ := encodeReportJSON(ScheduleInput{Name: "bad", TemplateID: tmpl.ID, OutputFormats: []string{"pdf"}, Recurrence: Recurrence{Frequency: "weekly", TimeZone: "Mars/Olympus", LocalTime: "09:00", Weekday: intp(2)}, RecipientUserIDs: []string{}, IsEnabled: true})
+	a.exec(`INSERT INTO advanced_report_schedules (id, owner_user_id, input_json, next_run_at, created_at, updated_at) VALUES ($1, $2, $3, now() - interval '1 hour', now(), now())`, badSched, owner, bad)
 
 	w := a.worker("http://127.0.0.1:1", &fakeMailer{})
 	if err := w.enqueueDueSchedules(context.Background()); err != nil {
@@ -501,5 +506,9 @@ func TestWorkerEnqueuesDueSchedules(t *testing.T) {
 	_ = a.Deps.DB.QueryRow(context.Background(), `SELECT paused_reason FROM advanced_report_schedules WHERE id = $1`, freeSched).Scan(&paused)
 	if paused != "subscription_required" {
 		t.Fatalf("free schedule paused_reason = %q", paused)
+	}
+	_ = a.Deps.DB.QueryRow(context.Background(), `SELECT paused_reason FROM advanced_report_schedules WHERE id = $1 AND next_run_at IS NULL`, badSched).Scan(&paused)
+	if paused != "invalid_recurrence" {
+		t.Fatalf("bad schedule paused_reason = %q", paused)
 	}
 }

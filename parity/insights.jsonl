@@ -1,0 +1,47 @@
+# Insights (InsightsController, /v1/insights) against the shared Vapor on
+# :8081, which has no NORVIQ_ADMIN_USER_IDS and no INSIGHTS_SYMBOLS_TOKEN:
+# the admin writes answer their 403 and tracked-symbols its fail-closed 403.
+# Admin success cases are parity/insights-admin.jsonl (flagged Vapor :18127).
+# Seed first (re-run before every run):
+#   psql "postgres://pg:pg@127.0.0.1:55499/norviq" -f parity/insights-setup.sql
+# then, with v2 started from .env.example on :18117:
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18117 -jwt-secret parity-secret \
+#     -cases parity/insights.jsonl
+# Summary, net-worth and trending read every row in their window, so a
+# Vapor job writing between the two requests of a case shows as a diff;
+# re-run that case.
+{"name": "tracked-symbols-token-unset", "method": "GET", "path": "/v1/insights/tracked-symbols"}
+{"name": "tracked-symbols-with-bearer", "method": "GET", "path": "/v1/insights/tracked-symbols", "headers": {"Authorization": "Bearer anything"}}
+{"name": "summary-unauthenticated", "method": "GET", "path": "/v1/insights/summary"}
+{"name": "summary-free", "method": "GET", "path": "/v1/insights/summary", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "summary-days-clamped", "method": "GET", "path": "/v1/insights/summary?days=500", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "summary-days-garbage", "method": "GET", "path": "/v1/insights/summary?days=abc", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "topic", "method": "GET", "path": "/v1/insights/topics/parity-insights?limit=1", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "topic-empty-result", "method": "GET", "path": "/v1/insights/topics/parity%20none", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "topic-too-long", "method": "GET", "path": "/v1/insights/topics/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "sentiment-overall", "method": "GET", "path": "/v1/insights/sentiment", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "sentiment-topic", "method": "GET", "path": "/v1/insights/sentiment?topic=parity-insights", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "sentiment-topic-missing", "method": "GET", "path": "/v1/insights/sentiment?topic=parity-nothing", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "net-worth", "method": "GET", "path": "/v1/insights/net-worth", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "ticker-free-upgrade", "method": "GET", "path": "/v1/insights/tickers/PRTYA/sentiment", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "ticker-free-bad-symbol-still-403", "method": "GET", "path": "/v1/insights/tickers/!!/sentiment", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "ticker-pro", "method": "GET", "path": "/v1/insights/tickers/prtya/sentiment?limit=2", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "ticker-pro-dollar", "method": "GET", "path": "/v1/insights/tickers/$PRTYA/sentiment?days=1", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "ticker-pro-no-posts", "method": "GET", "path": "/v1/insights/tickers/PRTYZ/sentiment", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "ticker-pro-bad-symbol", "method": "GET", "path": "/v1/insights/tickers/1ABC/sentiment", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "symbols-batch", "method": "GET", "path": "/v1/insights/sentiment/symbols?symbols=prtya,PRTYB,PRTYC,PRTYZ,!!", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "symbols-batch-empty", "method": "GET", "path": "/v1/insights/sentiment/symbols?symbols=,,", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "symbols-batch-missing", "method": "GET", "path": "/v1/insights/sentiment/symbols", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "portfolio-pro", "method": "GET", "path": "/v1/insights/sentiment/portfolio", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "portfolio-list", "method": "GET", "path": "/v1/insights/sentiment/portfolio?portfolioListId=1b5e0000-0000-4000-8000-0000000a0001", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "portfolio-empty", "method": "GET", "path": "/v1/insights/sentiment/portfolio", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "watchlist-pro", "method": "GET", "path": "/v1/insights/sentiment/watchlist", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "watchlist-bad-list-id", "method": "GET", "path": "/v1/insights/sentiment/watchlist?watchlistListId=nope", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "trending", "method": "GET", "path": "/v1/insights/sentiment/trending?limit=5", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "history-free-upgrade", "method": "GET", "path": "/v1/insights/sentiment/history/PRTYA", "as": "1b5e0000-0000-4000-8000-000000000002"}
+{"name": "history-pro", "method": "GET", "path": "/v1/insights/sentiment/history/PRTYA", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "history-pro-bad-symbol", "method": "GET", "path": "/v1/insights/sentiment/history/%20", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "sync-unauthenticated", "method": "POST", "path": "/v1/insights/sync"}
+{"name": "sync-admin-disabled", "method": "POST", "path": "/v1/insights/sync", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "sentiment-sync-admin-disabled", "method": "POST", "path": "/v1/insights/sentiment/sync", "as": "1b5e0000-0000-4000-8000-000000000001"}
+{"name": "seed-index-admin-disabled", "method": "POST", "path": "/v1/insights/sentiment/seed-index", "as": "1b5e0000-0000-4000-8000-000000000003"}

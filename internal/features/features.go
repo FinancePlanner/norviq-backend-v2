@@ -30,6 +30,7 @@ import (
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
 	"norviq-api/internal/features/identity"
+	"norviq-api/internal/features/insights"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/notifications"
 	"norviq-api/internal/features/ops"
@@ -161,6 +162,9 @@ func All() []server.Feature {
 		sharing.Feature{},
 		// /docs, /openapi.yaml, /metrics, /internal/metrics.
 		ops.Feature{},
+		// InsightsController (/v1/insights/*): Hermes insights and retail
+		// sentiment.
+		insights.Feature{},
 	}
 }
 
@@ -228,14 +232,26 @@ func AllJobs() []Job {
 		assistant.WatchJob{Sources: assistantSources},
 		// DataExportCleanupJob.
 		dataexport.CleanupJob{},
+		// Insights: Hermes pull, daily sentiment roll-up, retention.
+		insights.HermesSyncJob{},
+		insights.SentimentAggregationJob{},
+		insights.SentimentRetentionJob{},
 	}
 }
 
 // assistantSources wires the other domains' services the AI surfaces read
 // (assistant.Sources). A nil field keeps the routes that need it on Vapor
 // and the standing-task job off; fill each one in as its domain lands.
-func assistantSources(*server.Deps) (assistant.Sources, error) {
-	return assistant.Sources{}, nil
+func assistantSources(d *server.Deps) (assistant.Sources, error) {
+	var src assistant.Sources
+	ins, err := insights.SharedService(d)
+	if err != nil {
+		return assistant.Sources{}, err
+	}
+	src.InsightsSummary = func(ctx context.Context, days int) (any, error) {
+		return ins.Summary(ctx, days)
+	}
+	return src, nil
 }
 
 // Jobs tracks running jobs for shutdown.

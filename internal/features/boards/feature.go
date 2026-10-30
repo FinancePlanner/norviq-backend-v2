@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"norviq-api/internal/apijson"
@@ -196,6 +197,12 @@ func (h *handler) block(c *echo.Context) error {
 		return err
 	}
 	username := *body.str("username")
+	// The system account is refused before the lookup, so "norviq" (or
+	// "@norviq") gets the same 400 whether or not its row exists. Vapor
+	// looked it up first and answered 404 when it did not.
+	if users.IsSystemUsername(strings.Trim(trim(username), "@")) {
+		return httpx.BadRequest("That account can't be blocked.")
+	}
 	ctx := ctxOf(c)
 	target, err := h.s.userIDForUsername(ctx, username)
 	if err != nil {
@@ -203,9 +210,6 @@ func (h *handler) block(c *echo.Context) error {
 	}
 	if target == v.UserID {
 		return httpx.BadRequest("You can't block yourself.")
-	}
-	if users.IsSystemUsername(username) {
-		return httpx.BadRequest("That account can't be blocked.")
 	}
 	return h.s.inTx(ctx, func(q *boardsdb.Queries) error {
 		exists, err := q.BoardBlockExists(ctx, boardsdb.BoardBlockExistsParams{BlockerID: v.UserID, BlockedID: target})
@@ -261,7 +265,7 @@ func (h *handler) unreadCount(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	n, err := h.s.Q.BoardUnreadCount(ctxOf(c), v.UserID)
+	n, err := h.s.unreadCount(ctxOf(c), v.UserID)
 	if err != nil {
 		return err
 	}
@@ -626,6 +630,15 @@ func (h *handler) vote(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Same rule as comments: a post by someone blocked either way is not
+	// there for you, so it cannot be voted on (Vapor let the vote through).
+	blocked, err := h.s.blockedEitherWay(ctx, v.UserID, post.AuthorID)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return httpx.NotFound("Post not found")
+	}
 	var result BoardVoteResponse
 	if err := h.s.inTx(ctx, func(q *boardsdb.Queries) error {
 		inserted, err := q.BoardVoteInsert(ctx, boardsdb.BoardVoteInsertParams{
@@ -784,10 +797,14 @@ func (h *handler) deleteComment(c *echo.Context) error {
 		return httpx.Forbidden("You can only delete your own comments.")
 	}
 	now := h.s.now()
-	if err := h.s.Q.BoardCommentSoftDelete(ctx, boardsdb.BoardCommentSoftDeleteParams{ID: id, DeletedAt: &now}); err != nil {
-		return err
-	}
-	return httpx.NoContent(c)
+	return h.s.inTx(ctx, func(q *boardsdb.Queries) error {
+		deleted, err := q.BoardCommentSoftDelete(ctx, boardsdb.BoardCommentSoftDeleteParams{ID: id, DeletedAt: &now})
+		if err != nil || len(deleted) == 0 {
+			return err
+		}
+		// The post's count follows (Vapor never decremented it).
+		return q.BoardPostCommentDrop(ctx, deleted[0])
+	}, func() error { return httpx.NoContent(c) })
 }
 
 // MARK: - Reports

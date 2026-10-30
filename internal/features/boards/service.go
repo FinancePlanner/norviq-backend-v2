@@ -112,6 +112,16 @@ func (s *Service) hidden(ctx context.Context, q *boardsdb.Queries, viewer uuid.U
 	return out, nil
 }
 
+// unreadCount is the badge number: unread notifications the feed would
+// show, so deleted posts and boards, and blocked actors, are left out.
+func (s *Service) unreadCount(ctx context.Context, viewer uuid.UUID) (int64, error) {
+	hidden, err := s.hidden(ctx, s.Q, viewer)
+	if err != nil {
+		return 0, err
+	}
+	return s.Q.BoardUnreadCount(ctx, boardsdb.BoardUnreadCountParams{Viewer: viewer, Hidden: keys(hidden)})
+}
+
 // blockedEitherWay is SocialService.isBlockedEitherWay(a, b).
 func (s *Service) blockedEitherWay(ctx context.Context, a, b uuid.UUID) (bool, error) {
 	h, err := s.hidden(ctx, s.Q, a)
@@ -288,7 +298,8 @@ func (s *Service) summaries(ctx context.Context, posts []boardsdb.BoardPost, slu
 // given (nil when absent).
 func (s *Service) listBoards(ctx context.Context, raw *string, viewer uuid.UUID) (*BoardListResponse, error) {
 	params := boardsdb.BoardsListParams{Limit: pageSize + 1}
-	if c, ok := parseCursor(raw); ok {
+	c, paged := parseCursor(raw)
+	if paged {
 		params.HasCursor, params.CursorAt, params.CursorID = true, c.bound(), c.id
 	}
 	rows, err := s.Q.BoardsList(ctx, params)
@@ -302,7 +313,10 @@ func (s *Service) listBoards(ctx context.Context, raw *string, viewer uuid.UUID)
 		next := encodeCursor(last.LastActivityAt, last.ID)
 		resp.NextCursor = &next
 	}
-	if raw == nil {
+	// The pin belongs on the first page. A cursor that does not parse is
+	// ignored, so that request is the first page too (Vapor dropped the pin
+	// for any cursor value, even junk).
+	if !paged {
 		if resp.DailyPost, err = s.currentDailyPost(ctx, viewer); err != nil {
 			return nil, err
 		}

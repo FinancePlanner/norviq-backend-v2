@@ -35,7 +35,13 @@ import (
 )
 
 // BaseDir is ExportService.exportsBaseDir: <working directory>/.build/exports.
+// DATA_EXPORT_DIR (v2-only) overrides it: the v2 image runs as a non-root
+// user that cannot write under its working directory, so the cluster points
+// it at a writable path such as /tmp/norviq-exports.
 func BaseDir() string {
+	if dir := strings.TrimSpace(os.Getenv("DATA_EXPORT_DIR")); dir != "" {
+		return dir
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = "."

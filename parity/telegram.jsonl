@@ -1,0 +1,6 @@
+# POST /webhooks/telegram against backends with no TELEGRAM_BOT_TOKEN: Vapor
+# does not mount the route, v2 answers the same 404. Webhook-mode behavior
+# (secret header, 413, undecodable 200, the bridge) is covered by the Go tests
+# against a stub Bot API.
+{"name": "telegram-webhook-unconfigured", "method": "POST", "path": "/webhooks/telegram", "body": {"update_id": 1}}
+{"name": "telegram-webhook-unconfigured-secret", "method": "POST", "path": "/webhooks/telegram", "headers": {"X-Telegram-Bot-Api-Secret-Token": "x"}, "body": {"update_id": 1}}

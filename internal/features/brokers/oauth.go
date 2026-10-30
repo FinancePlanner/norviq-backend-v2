@@ -249,11 +249,11 @@ func (o *oauthClient) sendTokenRequest(ctx context.Context, payload string) (oau
 	return tok, nil
 }
 
-// decodeTokenResponse decodes IBKROAuthTokenResponse the way Vapor's
-// content decoder does: every key holding "_" is rewritten to camelCase
-// before the snake_case CodingKeys are looked up. "access_token" can
-// therefore never be found, and Vapor rejects every token response; the
-// port keeps that behavior.
+// decodeTokenResponse decodes IBKROAuthTokenResponse with its snake_case
+// keys as sent. Vapor's content decoder rewrote every key holding "_" to
+// camelCase before the snake_case CodingKeys were looked up, so
+// "access_token" was never found and every code exchange and refresh failed
+// with a 502. v2 fixes that bug.
 func decodeTokenResponse(contentType string, raw []byte) (oauthToken, bool) {
 	if !isJSONContent(contentType) {
 		return oauthToken{}, false
@@ -262,22 +262,19 @@ func decodeTokenResponse(contentType string, raw []byte) (oauthToken, bool) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return oauthToken{}, false
 	}
-	normalized := make(map[string]json.RawMessage, len(obj))
-	for k, v := range obj {
-		normalized[apijson.NormalizeSnakeCaseKey(k)] = v
-	}
+
 	var tok oauthToken
-	if err := json.Unmarshal(normalized["access_token"], &tok.accessToken); err != nil || normalized["access_token"] == nil {
+	if err := json.Unmarshal(obj["access_token"], &tok.accessToken); err != nil || obj["access_token"] == nil {
 		return oauthToken{}, false
 	}
-	if v, ok := normalized["refresh_token"]; ok && !isJSONNull(v) {
+	if v, ok := obj["refresh_token"]; ok && !isJSONNull(v) {
 		var s string
 		if json.Unmarshal(v, &s) != nil {
 			return oauthToken{}, false
 		}
 		tok.refreshToken = &s
 	}
-	if v, ok := normalized["expires_in"]; ok && !isJSONNull(v) {
+	if v, ok := obj["expires_in"]; ok && !isJSONNull(v) {
 		var n int
 		if json.Unmarshal(v, &n) != nil {
 			return oauthToken{}, false

@@ -266,8 +266,18 @@ func throwawayKeyPEM(t *testing.T) string {
 	return strings.ReplaceAll(string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der})), "\n", `\n`)
 }
 
-func TestOAuthCallbackRejectsEveryTokenResponse(t *testing.T) {
+// Vapor never decoded IBKR's token response (access_token was rewritten to
+// accessToken before lookup), so every callback ended in "IBKR token
+// response format was not recognized.". v2 decodes it and goes on to call
+// the API with the new access token.
+func TestOAuthCallbackUsesTokenResponse(t *testing.T) {
 	var form url.Values
+	var apiAuth string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer api.Close()
 	token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		form, _ = url.ParseQuery(string(body))
@@ -280,7 +290,7 @@ func TestOAuthCallbackRejectsEveryTokenResponse(t *testing.T) {
 		"IBKR_OAUTH_CLIENT_ID":         "client-1",
 		"IBKR_OAUTH_AUTHORIZATION_URL": "https://ibkr.test/authorize?old=1",
 		"IBKR_OAUTH_TOKEN_URL":         token.URL + "/token",
-		"IBKR_OAUTH_API_BASE_URL":      "http://unused.test",
+		"IBKR_OAUTH_API_BASE_URL":      api.URL,
 		"IBKR_OAUTH_SCOPE":             "read portfolio",
 		"IBKR_OAUTH_KEY_ID":            "kid-1",
 		"IBKR_OAUTH_PRIVATE_KEY_PEM":   throwawayKeyPEM(t),
@@ -298,9 +308,12 @@ func TestOAuthCallbackRejectsEveryTokenResponse(t *testing.T) {
 
 	cb := "/v1/auth/brokers/ibkr/callback?code=abc&state=" + url.QueryEscape(q.Get("state"))
 	r = h.raw(t, http.MethodGet, cb, "", "", nil, nil)
-	want := "norviq://brokers?broker=ibkr&status=error&error=IBKR%20token%20response%20format%20was%20not%20recognized."
-	if r.Status != http.StatusSeeOther || r.Header.Get("Location") != want {
-		t.Fatalf("callback = %d %q", r.Status, r.Header.Get("Location"))
+	loc := r.Header.Get("Location")
+	if r.Status != http.StatusSeeOther || !strings.HasPrefix(loc, "norviq://brokers?broker=ibkr&status=error&error=") || strings.Contains(loc, "token%20response") {
+		t.Fatalf("callback = %d %q", r.Status, loc)
+	}
+	if apiAuth != "Bearer a" {
+		t.Fatalf("API called with %q", apiAuth)
 	}
 	if form.Get("grant_type") != "authorization_code" || form.Get("code") != "abc" || form.Get("client_assertion") == "" {
 		t.Fatalf("token request = %v", form)
@@ -309,7 +322,7 @@ func TestOAuthCallbackRejectsEveryTokenResponse(t *testing.T) {
 	if err := h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail); err != nil {
 		t.Fatal(err)
 	}
-	if status != "error" || detail != "IBKR token response format was not recognized." {
+	if status != "error" || strings.Contains(detail, "token response") {
 		t.Fatalf("connection = %s %q", status, detail)
 	}
 }
@@ -476,7 +489,7 @@ func TestScreenshotImport(t *testing.T) {
 	for i := range many {
 		many[i] = map[string]any{"line": 0, "symbol": "ZZSA"}
 	}
-	expectError(t, h.app.Do(http.MethodPost, commitPath, tok, map[string]any{"provider": "robinhood", "items": many}), http.StatusBadRequest, "Too many rows in one import (max 300.")
+	expectError(t, h.app.Do(http.MethodPost, commitPath, tok, map[string]any{"provider": "robinhood", "items": many}), http.StatusBadRequest, "Too many rows in one import (max 300).")
 	r = h.app.Do(http.MethodPost, commitPath, tok, map[string]any{"provider": "Robinhood", "items": []map[string]any{
 		{"line": 7, "symbol": "ZZSA", "shares": 2, "buyPrice": 10, "buyDate": "2024-01-02"},
 		{"line": 7, "symbol": "ZZSB", "shares": -1},

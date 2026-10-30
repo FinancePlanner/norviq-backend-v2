@@ -28,6 +28,7 @@ import (
 	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/middleware"
 	"norviq-api/internal/migrate"
+	"norviq-api/internal/platform/pprof"
 	"norviq-api/internal/platform/realtime"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store"
@@ -173,6 +174,7 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 		return err
 	}
 	jobs := features.StartJobs(ctx, d)
+	pprof.Start(ctx, cfg.PprofAddr, logger)
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),

@@ -52,6 +52,9 @@ type Base struct {
 	// path prefixes; every other request goes to Vapor. It lets a release
 	// flip one domain at a time (e.g. "/v1/auth,/health").
 	NativePrefixes []string `env:"V2_NATIVE_PREFIXES" envSeparator:","`
+	// PprofAddr, when set (e.g. "127.0.0.1:6060"), serves net/http/pprof
+	// on its own listener; see docs/pprof.md.
+	PprofAddr string `env:"PPROF_ADDR"`
 }
 
 // Database mirrors ConfigureBootstrap's DATABASE_* variables and defaults.

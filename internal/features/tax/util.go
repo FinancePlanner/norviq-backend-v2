@@ -83,8 +83,19 @@ func intPtr(n int) *int { return &n }
 
 func decPtr(d dec.Decimal) *dec.Decimal { return &d }
 
-// fd is Decimal(Double).
-func fd(v float64) dec.Decimal { return dec.FromFloat64(v) }
+// fd converts a Double to a Decimal through its shortest round-trip text,
+// so 0.28 is 0.28. Deliberate fix: Vapor used Decimal(Double), whose
+// multiply-by-ten drift turned the PT 28% rate into 0.2800000000000000512
+// and read a stored 88.55 back as 88.55000000000003.
+func fd(v float64) dec.Decimal {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return dec.FromFloat64(v)
+	}
+	if d, ok := dec.Parse(strconv.FormatFloat(v, 'g', -1, 64)); ok {
+		return d
+	}
+	return dec.FromFloat64(v)
+}
 
 // di is Decimal(Int).
 func di(v int) dec.Decimal { return dec.FromInt(int64(v)) }

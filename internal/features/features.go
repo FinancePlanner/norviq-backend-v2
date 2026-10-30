@@ -302,6 +302,9 @@ func AllJobs() []Job {
 		digest.Job{},
 		// Planning: rebalancing drift alerts.
 		rebalancing.AlertJob{},
+		// WealthAutomationDailyJob (lease 'wealth-automation-daily'; Vapor has no
+		// flag to turn its copy off, see automation/dailyjob.go).
+		automation.DailyJob{},
 		// Scenario planning: run queue (claim + lease, no JobLock) and
 		// retention; both no-ops unless SCENARIO_PLANNING_ENABLED.
 		scenarios.RunWorkerJob{},

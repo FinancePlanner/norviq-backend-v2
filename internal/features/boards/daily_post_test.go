@@ -860,12 +860,14 @@ func TestDailyPostJobRunsOnlyWhenEnabled(t *testing.T) {
 	if job.Name() != "daily_board_post" {
 		t.Fatal(job.Name())
 	}
-	run := func(d *server.Deps) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// wait bounds the poll: the disabled run waits it out, the enabled run
+	// stops as soon as the row appears (slow under -race in CI).
+	run := func(d *server.Deps, wait time.Duration) {
+		ctx, cancel := context.WithTimeout(context.Background(), wait)
 		defer cancel()
 		done := make(chan struct{})
 		go func() { job.Run(ctx, d); close(done) }()
-		deadline := time.Now().Add(2 * time.Second)
+		deadline := time.Now().Add(wait)
 		for time.Now().Before(deadline) {
 			if status, _ := runRow(t, e, "2026-10-22"); status != "" {
 				break
@@ -876,12 +878,12 @@ func TestDailyPostJobRunsOnlyWhenEnabled(t *testing.T) {
 		<-done
 	}
 	t.Setenv("DAILY_BOARD_POST_ENABLED", "false")
-	run(e.app.Deps)
+	run(e.app.Deps, 2*time.Second)
 	if status, _ := runRow(t, e, "2026-10-22"); status != "" || w.calls() != 0 {
 		t.Fatal("ran with DAILY_BOARD_POST_ENABLED off")
 	}
 	t.Setenv("DAILY_BOARD_POST_ENABLED", "yes")
-	run(e.app.Deps)
+	run(e.app.Deps, 15*time.Second)
 	if status, _ := runRow(t, e, "2026-10-22"); status != "published" || w.calls() != 1 {
 		t.Fatalf("%s %d", status, w.calls())
 	}

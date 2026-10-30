@@ -393,21 +393,28 @@ func TestReallocationClonesNextMonth(t *testing.T) {
 }
 
 // A snapshot dated on the 31st sits inside the next month's one-day lookup
-// window, so Vapor reallocates into the source snapshot itself (ported as is).
-func TestReallocationMonthEndQuirk(t *testing.T) {
+// window. Vapor reallocated into the source snapshot itself; v2 excludes the
+// source and targets the first of the next month.
+func TestReallocationFromMonthEndSnapshot(t *testing.T) {
 	e := newEnv(t)
 	source := e.snapshot("2026-01-31", 1000, "EUR")
 	item := e.item(source, "Fun", 100, itemOpts{eligible: true})
-	commit := map[string]any{"requestId": uuid.NewString(), "preview": map[string]any{
+	preview := map[string]any{
 		"snapshotId": source.String(), "expectedRevision": 0,
 		"adjustments": []map[string]any{{"planItemId": item.String(), "amount": 40}},
-	}}
-	r := e.do(http.MethodPost, "/v1/budget/reallocations", commit)
+	}
+	r := e.do(http.MethodPost, "/v1/budget/reallocations/preview", preview)
+	expectStatus(t, r, http.StatusOK)
+	var pv map[string]any
+	r.JSON(t, &pv)
+	if pv["effectiveMonth"] != "2026-02-01" {
+		t.Fatalf("preview %s", r.Body)
+	}
+	r = e.do(http.MethodPost, "/v1/budget/reallocations", map[string]any{"requestId": uuid.NewString(), "preview": preview})
 	expectStatus(t, r, http.StatusOK)
 	var ev map[string]any
 	r.JSON(t, &ev)
-	// Calendar clamps Jan 31 + 1 month to Feb 28.
-	if ev["effectiveMonth"] != "2026-02-28" || ev["targetSnapshotId"] != ev["sourceSnapshotId"] {
+	if ev["effectiveMonth"] != "2026-02-01" || ev["targetSnapshotId"] == ev["sourceSnapshotId"] {
 		t.Fatalf("event %s", r.Body)
 	}
 	var rev int
@@ -415,7 +422,17 @@ func TestReallocationMonthEndQuirk(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rev != 1 {
-		t.Fatalf("revision %d", rev)
+		t.Fatalf("source revision %d", rev)
+	}
+	var day string
+	var planned float64
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT to_char(s.month_start AT TIME ZONE 'UTC', 'YYYY-MM-DD'), i.planned_amount
+		FROM budget_snapshots s JOIN budget_plan_items i ON i.snapshot_id = s.id
+		WHERE s.id = $1 AND i.title = 'Fun'`, ev["targetSnapshotId"]).Scan(&day, &planned); err != nil {
+		t.Fatal(err)
+	}
+	if day != "2026-02-01" || planned != 60 {
+		t.Fatalf("target month %s planned %v", day, planned)
 	}
 }
 
@@ -764,3 +781,109 @@ func TestAlertsDisabledBySnapshot(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Two plan items on one category share its spend in proportion to their
+// targets. Vapor gave each the full amount, counting the spend twice.
+func TestDriftSharedCategoryCountedOnce(t *testing.T) {
+	e := newEnv(t)
+	snap := e.snapshot("2026-07-01", 4000, "USD")
+	cat := uuid.New()
+	e.exec(`INSERT INTO expense_categories (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Food', false, now())`, cat, e.user)
+	e.item(snap, "Groceries", 100, itemOpts{category: &cat})
+	e.item(snap, "Restaurants", 300, itemOpts{category: &cat})
+	e.item(snap, "Gifts", 0, itemOpts{})
+	e.item(snap, "gifts", 0, itemOpts{})
+	e.expense("Market", 200, "2026-07-02", &cat)
+	e.expense("Gifts", 40, "2026-07-03", nil)
+
+	var d dashboard
+	r := e.do(http.MethodGet, "/v1/budget/snapshots/"+snap.String()+"/drift", nil)
+	expectStatus(t, r, http.StatusOK)
+	r.JSON(t, &d)
+	actual := map[string]float64{}
+	sum := 0.0
+	for _, c := range d.Categories {
+		actual[c.Title] = c.ActualAmount
+		sum += c.ActualAmount
+	}
+	if actual["Groceries"] != 50 || actual["Restaurants"] != 150 || actual["Gifts"] != 20 || actual["gifts"] != 20 {
+		t.Fatalf("actuals %v: %s", actual, r.Body)
+	}
+	if sum != d.TotalActual || d.TotalActual != 240 {
+		t.Fatalf("rows sum %v, total %v", sum, d.TotalActual)
+	}
+}
+
+func TestInvestmentContributionTargetRounded(t *testing.T) {
+	e := newEnv(t)
+	snap := e.snapshot("2026-07-01", 4000, "EUR")
+	e.item(snap, "Invest", 100.0/3, itemOpts{kind: "investmentContribution"})
+	var d dashboard
+	r := e.do(http.MethodGet, "/v1/budget/snapshots/"+snap.String()+"/drift", nil)
+	expectStatus(t, r, http.StatusOK)
+	r.JSON(t, &d)
+	if d.InvestmentContributionTarget != 33.33 {
+		t.Fatalf("investmentContributionTarget %v", d.InvestmentContributionTarget)
+	}
+}
+
+func TestDriftDeepLinkEscapesScope(t *testing.T) {
+	e := newEnv(t)
+	snap := e.snapshot("2026-07-01", 4000, "EUR")
+	rent := e.item(snap, "Rent", 1000, itemOpts{})
+	e.expense("Car & Fuel", 90, "2026-07-15", nil)
+	body := map[string]any{"expectedRevision": 0, "items": []map[string]any{{
+		"id": rent.String(), "plannedAmount": 1000, "targetType": "fixed", "reallocationEligible": false,
+	}}}
+	expectStatus(t, e.do(http.MethodPatch, "/v1/budget/snapshots/"+snap.String()+"/items", body), http.StatusOK)
+	want := "norviq://expenses?month=2026-07-01&scope=unbudgeted-title%3Acar+%26+fuel"
+	for _, m := range e.pub.messages() {
+		if m.DeepLink != nil && *m.DeepLink == want {
+			return
+		}
+	}
+	t.Fatalf("no message with deep link %q: %+v", want, e.pub.messages())
+}
+
+type failingPublisher struct{}
+
+func (failingPublisher) PublishAndPush(context.Context, inbox.Message) (inbox.Event, error) {
+	return inbox.Event{}, errors.New("push down")
+}
+
+// The targets are committed before drift is evaluated, so a failing
+// evaluation no longer turns the route into a 500.
+func TestBulkUpdateSurvivesEvaluationFailure(t *testing.T) {
+	e := newEnv(t, func(f *budgeting.Feature) { f.Publisher = failingPublisher{} })
+	snap := e.snapshot("2026-07-01", 4000, "EUR")
+	dining := e.item(snap, "Dining Out", 300, itemOpts{})
+	e.expense("Dining Out", 500, "2026-07-15", nil)
+	body := map[string]any{"expectedRevision": 0, "items": []map[string]any{{
+		"id": dining.String(), "plannedAmount": 100, "targetType": "fixed", "reallocationEligible": true,
+	}}}
+	r := e.do(http.MethodPatch, "/v1/budget/snapshots/"+snap.String()+"/items", body)
+	expectStatus(t, r, http.StatusOK)
+	var d dashboard
+	r.JSON(t, &d)
+	if d.Revision != 1 || d.Categories[0].TargetAmount != 100 {
+		t.Fatalf("bulk %s", r.Body)
+	}
+}
+
+func TestDuplicateTemplateNameConflicts(t *testing.T) {
+	e := newEnv(t)
+	items := []map[string]any{{"title": "Rent", "pillar": "fundamentals", "plannedAmount": 900, "targetType": "fixed", "allocationKind": "expense", "reallocationEligible": false}}
+	expectStatus(t, e.do(http.MethodPost, "/v1/budget/templates", map[string]any{"name": "Base", "items": items}), http.StatusOK)
+	r := e.do(http.MethodPost, "/v1/budget/templates", map[string]any{"name": "Base", "items": items})
+	expectStatus(t, r, http.StatusConflict)
+	if reason(t, r) != "A template with this name already exists." {
+		t.Fatalf("reason %s", r.Body)
+	}
+	r = e.do(http.MethodPost, "/v1/budget/templates", map[string]any{"name": "Other", "items": items})
+	expectStatus(t, r, http.StatusOK)
+	var other struct {
+		ID string `json:"id"`
+	}
+	r.JSON(t, &other)
+	expectStatus(t, e.do(http.MethodPut, "/v1/budget/templates/"+other.ID, map[string]any{"name": "Base", "items": items}), http.StatusConflict)
+}

@@ -935,46 +935,17 @@ func trimmedNotes(n *string) *string {
 // drift evaluation, badge reconciliation). The daily XP award lives in the
 // controller, as in Vapor.
 func (s *Service) CreateExpense(ctx context.Context, db expensesdb.DBTX, userID uuid.UUID, req ExpenseRequest) (ExpenseResponse, error) {
-	if !(isFinite(req.Amount) && req.Amount >= 0) {
-		return ExpenseResponse{}, httpx.BadRequest("amount must be finite and non-negative.")
-	}
-	occurredOn, ok := ParseDay(req.OccurredOn)
-	if !ok {
-		return ExpenseResponse{}, httpx.BadRequest("Invalid occurredOn format. Expected YYYY-MM-DD.")
-	}
-	monthStart := MonthStart(occurredOn)
-	if err := s.EnsureSnapshotExists(ctx, db, userID, monthStart); err != nil {
-		return ExpenseResponse{}, err
-	}
-	var linked *uuid.UUID
-	if req.LinkedPlanItemID != nil {
-		id, err := s.planItemOwned(ctx, db, *req.LinkedPlanItemID, userID)
-		if err != nil {
-			return ExpenseResponse{}, err
-		}
-		linked = &id
-	}
-	mode, share, err := normalizeSplit(req.SplitMode, req.UserSharePercent)
+	e, err := s.newExpense(ctx, db, userID, req)
 	if err != nil {
 		return ExpenseResponse{}, err
 	}
-	e := expensesdb.Expense{
-		ID: uuid.New(), UserID: userID, Title: req.Title, Amount: req.Amount, Pillar: string(req.Pillar),
-		OccurredOn: occurredOn, LinkedItemID: linked, SplitMode: expensesdb.ExpenseSplitMode(mode), UserSharePercent: share,
+	// The month's snapshot is created only once the request is valid. (Vapor
+	// created it before validating the plan item and category, so a rejected
+	// request still left a snapshot behind.)
+	monthStart := MonthStart(e.OccurredOn)
+	if err := s.EnsureSnapshotExists(ctx, db, userID, monthStart); err != nil {
+		return ExpenseResponse{}, err
 	}
-	if req.CategoryID != nil {
-		if e.CategoryID, err = s.categoryFor(ctx, db, *req.CategoryID, userID); err != nil {
-			return ExpenseResponse{}, err
-		}
-	}
-	if req.ForeignAmount != nil {
-		if req.ExchangeRate == nil || !(*req.ExchangeRate > 0) {
-			return ExpenseResponse{}, httpx.BadRequest("exchangeRate must be > 0 when foreignAmount is provided.")
-		}
-		e.ForeignAmount, e.ForeignCurrency, e.ExchangeRate = req.ForeignAmount, req.ForeignCurrency, req.ExchangeRate
-	}
-	e.Notes = trimmedNotes(req.Notes)
-	e.ReceiptMetadata = encodeMeta(req.ReceiptMetadata)
 	if err := s.insertExpense(ctx, db, &e); err != nil {
 		return ExpenseResponse{}, err
 	}
@@ -982,6 +953,50 @@ func (s *Service) CreateExpense(ctx context.Context, db expensesdb.DBTX, userID 
 	s.evaluateDriftBestEffort(ctx, userID, monthStart)
 	s.ReconcileBadges(ctx, db, userID)
 	return MapExpense(e), nil
+}
+
+// newExpense validates an ExpenseRequest and builds its row: the amount,
+// day, linked plan item and category (both owned by the user), split, and
+// foreign amount. CreateExpense and BulkImporter share it, so imported rows
+// get the same checks and keep every field.
+func (s *Service) newExpense(ctx context.Context, db expensesdb.DBTX, userID uuid.UUID, req ExpenseRequest) (expensesdb.Expense, error) {
+	if !(isFinite(req.Amount) && req.Amount >= 0) {
+		return expensesdb.Expense{}, httpx.BadRequest("amount must be finite and non-negative.")
+	}
+	occurredOn, ok := ParseDay(req.OccurredOn)
+	if !ok {
+		return expensesdb.Expense{}, httpx.BadRequest("Invalid occurredOn format. Expected YYYY-MM-DD.")
+	}
+	var linked *uuid.UUID
+	if req.LinkedPlanItemID != nil {
+		id, err := s.planItemOwned(ctx, db, *req.LinkedPlanItemID, userID)
+		if err != nil {
+			return expensesdb.Expense{}, err
+		}
+		linked = &id
+	}
+	mode, share, err := normalizeSplit(req.SplitMode, req.UserSharePercent)
+	if err != nil {
+		return expensesdb.Expense{}, err
+	}
+	e := expensesdb.Expense{
+		ID: uuid.New(), UserID: userID, Title: req.Title, Amount: req.Amount, Pillar: string(req.Pillar),
+		OccurredOn: occurredOn, LinkedItemID: linked, SplitMode: expensesdb.ExpenseSplitMode(mode), UserSharePercent: share,
+	}
+	if req.CategoryID != nil {
+		if e.CategoryID, err = s.categoryFor(ctx, db, *req.CategoryID, userID); err != nil {
+			return expensesdb.Expense{}, err
+		}
+	}
+	if req.ForeignAmount != nil {
+		if req.ExchangeRate == nil || !(*req.ExchangeRate > 0) {
+			return expensesdb.Expense{}, httpx.BadRequest("exchangeRate must be > 0 when foreignAmount is provided.")
+		}
+		e.ForeignAmount, e.ForeignCurrency, e.ExchangeRate = req.ForeignAmount, req.ForeignCurrency, req.ExchangeRate
+	}
+	e.Notes = trimmedNotes(req.Notes)
+	e.ReceiptMetadata = encodeMeta(req.ReceiptMetadata)
+	return e, nil
 }
 
 func (s *Service) insertExpense(ctx context.Context, db expensesdb.DBTX, e *expensesdb.Expense) error {
@@ -1291,7 +1306,8 @@ func MapCategory(m expensesdb.ExpenseCategory) ExpenseCategoryResponse {
 }
 
 // GetCategories is getCategories: seeds the default categories on first
-// access (returned in seed order), otherwise sorted by name.
+// access, and always answers sorted by name. (Vapor returned the first,
+// seeding call in seed order.)
 func (s *Service) GetCategories(ctx context.Context, db expensesdb.DBTX, userID uuid.UUID) ([]ExpenseCategoryResponse, error) {
 	rows, err := q(db).ListCategories(ctx, userID)
 	if err != nil {
@@ -1310,6 +1326,7 @@ func (s *Service) GetCategories(ctx context.Context, db expensesdb.DBTX, userID 
 			}
 			out = append(out, MapCategory(m))
 		}
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out, nil
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
@@ -1384,17 +1401,32 @@ func (s *Service) GetRecurringTemplates(ctx context.Context, db expensesdb.DBTX,
 	return out, nil
 }
 
-// CreateRecurringTemplate is createRecurringTemplate. categoryId is not
-// validated (an unknown id fails the insert on its foreign key), as in Vapor.
+// templateCategory validates a recurring template's categoryId: a
+// well-formed id must name one of the user's categories (400 otherwise).
+// Vapor did not check it, so an unknown id failed the insert on its foreign
+// key with a 500. A malformed id is still treated as no category.
+func (s *Service) templateCategory(ctx context.Context, db expensesdb.DBTX, raw *string, userID uuid.UUID) (*uuid.UUID, error) {
+	id := uuidPtrFromString(raw)
+	if id == nil {
+		return nil, nil
+	}
+	return s.categoryFor(ctx, db, *raw, userID)
+}
+
+// CreateRecurringTemplate is createRecurringTemplate.
 func (s *Service) CreateRecurringTemplate(ctx context.Context, db expensesdb.DBTX, userID uuid.UUID, req RecurringTemplateRequest) (RecurringTemplateResponse, error) {
 	mode, share, err := normalizeSplit(req.SplitMode, req.UserSharePercent)
+	if err != nil {
+		return RecurringTemplateResponse{}, err
+	}
+	categoryID, err := s.templateCategory(ctx, db, req.CategoryID, userID)
 	if err != nil {
 		return RecurringTemplateResponse{}, err
 	}
 	now := s.now()
 	m := expensesdb.RecurringTemplate{
 		ID: uuid.New(), UserID: userID, Title: req.Title, Amount: req.Amount, Pillar: string(req.Pillar),
-		CategoryID: uuidPtrFromString(req.CategoryID), Frequency: req.Frequency,
+		CategoryID: categoryID, Frequency: req.Frequency,
 		SplitMode: expensesdb.ExpenseSplitMode(mode), UserSharePercent: share, CreatedAt: &now,
 	}
 	if err := q(db).InsertRecurringTemplate(ctx, expensesdb.InsertRecurringTemplateParams{
@@ -1422,8 +1454,12 @@ func (s *Service) UpdateRecurringTemplate(ctx context.Context, db expensesdb.DBT
 	if err != nil {
 		return RecurringTemplateResponse{}, err
 	}
+	categoryID, err := s.templateCategory(ctx, db, req.CategoryID, userID)
+	if err != nil {
+		return RecurringTemplateResponse{}, err
+	}
 	m.Title, m.Amount, m.Pillar = req.Title, req.Amount, string(req.Pillar)
-	m.CategoryID, m.Frequency = uuidPtrFromString(req.CategoryID), req.Frequency
+	m.CategoryID, m.Frequency = categoryID, req.Frequency
 	m.SplitMode, m.UserSharePercent = expensesdb.ExpenseSplitMode(mode), share
 	if err := q(db).UpdateRecurringTemplate(ctx, expensesdb.UpdateRecurringTemplateParams{
 		ID: m.ID, Title: m.Title, Amount: m.Amount, Pillar: m.Pillar, CategoryID: m.CategoryID,

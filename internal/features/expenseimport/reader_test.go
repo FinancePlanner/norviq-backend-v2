@@ -1,7 +1,10 @@
 package expenseimport
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -153,5 +156,51 @@ func TestColumnLetterRoundTrip(t *testing.T) {
 		if got := ColumnLetters(index); got != letters {
 			t.Errorf("ColumnLetters(%d) = %s", index, got)
 		}
+	}
+}
+
+// A pretty-printed styles.xml (newlines inside cellXfs and after tag names)
+// keeps its date styles. Vapor's `.` did not cross newlines, so every date
+// cell read as a number.
+func TestPrettyPrintedStylesKeepDates(t *testing.T) {
+	src := fixture(t, "messy.xlsx")
+	zr, err := zip.NewReader(bytes.NewReader(src), int64(len(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Name == "xl/styles.xml" {
+			pretty := strings.ReplaceAll(string(data), "><", ">\n  <")
+			pretty = strings.ReplaceAll(pretty, "<xf ", "<xf\n    ")
+			data = []byte(pretty)
+		}
+		w, err := zw.Create(f.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wb, err := XLSXReader{}.Read(buf.Bytes(), DefaultLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := wb.Sheets[0].Cell(5, 6); c.Kind != CellDate || isoString(c.Date) != "2026-01-03" {
+		t.Fatalf("G6 = %v, want date 2026-01-03", c)
 	}
 }

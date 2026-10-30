@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -622,15 +623,153 @@ func TestUnitHelpers(t *testing.T) {
 func TestCSVDryRunFlag(t *testing.T) {
 	e := newEnv(t)
 	token, _ := e.user()
-	// Vapor reads an absent dry_run as false, an unparsable one as the
-	// `?? true` fallback.
+	// Only an explicit dry_run=false writes. Vapor read an absent flag as
+	// false and imported for real, against the documented default.
 	if res := e.importCSV(token, "dry_run=maybe", sampleCSV); !res.DryRun {
 		t.Fatalf("garbage flag %+v", res)
 	}
 	if res := e.importCSV(token, "dry_run", sampleCSV); !res.DryRun {
 		t.Fatalf("bare flag %+v", res)
 	}
-	if res := e.importCSV(token, "", sampleCSV); res.DryRun || res.Imported != 2 {
+	if res := e.importCSV(token, "", sampleCSV); !res.DryRun || res.Imported != 2 {
 		t.Fatalf("absent flag %+v", res)
+	}
+	var list []ExpenseResponse
+	e.do(http.MethodGet, "/v1/expenses", token, nil, http.StatusOK).JSON(t, &list)
+	if len(list) != 0 {
+		t.Fatalf("an import without dry_run persisted %d rows", len(list))
+	}
+	if res := e.importCSV(token, "dry_run=false", sampleCSV); res.DryRun || res.Imported != 2 {
+		t.Fatalf("explicit false %+v", res)
+	}
+}
+
+func TestFirstCategoryListIsSortedByName(t *testing.T) {
+	e := newEnv(t)
+	token, _ := e.user()
+	var first, second []ExpenseCategoryResponse
+	e.do(http.MethodGet, "/v1/expenses/categories", token, nil, http.StatusOK).JSON(t, &first)
+	e.do(http.MethodGet, "/v1/expenses/categories", token, nil, http.StatusOK).JSON(t, &second)
+	if len(first) != len(second) {
+		t.Fatalf("lengths %d vs %d", len(first), len(second))
+	}
+	for i := range first {
+		if first[i].Name != second[i].Name {
+			t.Fatalf("first list order differs at %d: %q vs %q", i, first[i].Name, second[i].Name)
+		}
+		if i > 0 && first[i-1].Name > first[i].Name {
+			t.Fatalf("not sorted: %q before %q", first[i-1].Name, first[i].Name)
+		}
+	}
+}
+
+func TestRecurringTemplateRejectsUnknownCategory(t *testing.T) {
+	e := newEnv(t)
+	token, _ := e.user()
+	otherToken, _ := e.user()
+	var foreign ExpenseCategoryResponse
+	e.do(http.MethodPost, "/v1/expenses/categories", otherToken, map[string]any{"name": "Theirs"}, http.StatusCreated).JSON(t, &foreign)
+	body := map[string]any{
+		"title": "Gym", "amount": 40, "pillar": "fun", "frequency": "monthly",
+		"splitMode": "personal", "userSharePercent": 100, "categoryId": uuid.NewString(),
+	}
+	e.do(http.MethodPost, "/v1/expenses/recurring", token, body, http.StatusBadRequest)
+	body["categoryId"] = foreign.ID
+	e.do(http.MethodPost, "/v1/expenses/recurring", token, body, http.StatusBadRequest)
+	var own ExpenseCategoryResponse
+	e.do(http.MethodPost, "/v1/expenses/categories", token, map[string]any{"name": "Mine"}, http.StatusCreated).JSON(t, &own)
+	body["categoryId"] = own.ID
+	var tpl RecurringTemplateResponse
+	e.do(http.MethodPost, "/v1/expenses/recurring", token, body, http.StatusCreated).JSON(t, &tpl)
+	body["categoryId"] = uuid.NewString()
+	e.do(http.MethodPatch, "/v1/expenses/recurring/"+tpl.ID, token, body, http.StatusBadRequest)
+}
+
+func TestRejectedExpenseCreatesNoSnapshot(t *testing.T) {
+	e := newEnv(t)
+	token, userID := e.user()
+	body := expense("Coffee", 3, "fun", "2026-03-10")
+	body["categoryId"] = uuid.NewString()
+	e.do(http.MethodPost, "/v1/expenses", token, body, http.StatusBadRequest)
+	delete(body, "categoryId")
+	body["linkedPlanItemId"] = uuid.NewString()
+	e.do(http.MethodPost, "/v1/expenses", token, body, http.StatusBadRequest)
+	if n := countRows(t, e, "budget_snapshots", userID); n != 0 {
+		t.Fatalf("rejected expenses left %d snapshots", n)
+	}
+}
+
+func TestExpenseCursorWithoutFractionalSeconds(t *testing.T) {
+	e := newEnv(t)
+	token, _ := e.user()
+	for d := 1; d <= 3; d++ {
+		e.createExpense(token, expense(fmt.Sprintf("E%d", d), float64(d), "fun", fmt.Sprintf("2026-02-0%d", d)))
+	}
+	var page []ExpenseResponse
+	e.do(http.MethodGet, "/v1/expenses?limit=5&cursor=2026-02-03T00:00:00Z", token, nil, http.StatusOK).JSON(t, &page)
+	if len(page) != 2 || page[0].Title != "E2" {
+		t.Fatalf("cursor without fraction ignored: %+v", page)
+	}
+}
+
+func TestConcurrentDismissesSucceed(t *testing.T) {
+	e := newEnv(t)
+	token, userID := e.user()
+	var wg sync.WaitGroup
+	statuses := make([]int, 8)
+	for i := range statuses {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			statuses[i] = e.app.Do(http.MethodPost, "/v1/reports/suggestions/race-1/dismiss", token, nil).Status
+		}(i)
+	}
+	wg.Wait()
+	for i, st := range statuses {
+		if st != http.StatusOK {
+			t.Fatalf("dismiss %d: status %d", i, st)
+		}
+	}
+	if n := countRows(t, e, "report_suggestion_dismissals", userID); n != 1 {
+		t.Fatalf("dismissals %d", n)
+	}
+}
+
+func TestBulkImportValidatesAndKeepsFields(t *testing.T) {
+	e := newEnv(t)
+	token, userID := e.user()
+	svc := NewService(e.app.Deps.DB, e.app.Deps.Logger, nil)
+	ctx := context.Background()
+	fa, rate, cur, notes := 10.0, 1.1, "USD", "  dinner  "
+	good := NewExpenseRequest("Dinner", 11, PillarFun, "2026-05-02", nil)
+	good.ForeignAmount, good.ExchangeRate, good.ForeignCurrency, good.Notes = &fa, &rate, &cur, &notes
+	good.ReceiptMetadata = &ExpenseReceiptMetadata{Source: "manual"}
+	negative := NewExpenseRequest("Refund", -5, PillarFun, "2026-05-03", nil)
+	badShare := NewExpenseRequest("Shared", 5, PillarFun, "2026-05-04", nil)
+	badShare.SplitMode, badShare.UserSharePercent = SplitShared, 150
+	badItem := NewExpenseRequest("Linked", 5, PillarFun, "2026-05-05", nil)
+	other := uuid.NewString()
+	badItem.LinkedPlanItemID = &other
+	out, err := NewBulkImporter(svc).Insert(ctx, svc.Pool(), userID, []Candidate{
+		{Reference: 1, Request: good},
+		{Reference: 2, Request: negative},
+		{Reference: 3, Request: badShare},
+		{Reference: 4, Request: badItem},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Imported != 1 || len(out.Failures) != 3 {
+		t.Fatalf("outcome %+v", out)
+	}
+	var list []ExpenseResponse
+	e.do(http.MethodGet, "/v1/expenses", token, nil, http.StatusOK).JSON(t, &list)
+	if len(list) != 1 {
+		t.Fatalf("list %+v", list)
+	}
+	got := list[0]
+	if got.ForeignAmount == nil || *got.ForeignAmount != 10 || got.ExchangeRate == nil || got.ForeignCurrency == nil ||
+		got.Notes == nil || *got.Notes != "dinner" || got.ReceiptMetadata == nil {
+		t.Fatalf("bulk insert dropped fields: %+v", got)
 	}
 }

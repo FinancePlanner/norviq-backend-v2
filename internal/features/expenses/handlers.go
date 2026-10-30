@@ -170,15 +170,13 @@ func (h *handlers) importCSV(c *echo.Context) error {
 	if utf8.Valid(raw) {
 		csv = string(raw)
 	}
-	// req.query[Bool.self, at: "dry_run"] ?? true: Vapor's URL-form decoder
-	// reads an absent Bool key as an unset flag (false), so a request
-	// without dry_run imports for real; only an unparsable value falls back
-	// to the dry run.
+	// The documented default is a dry run: only an explicit dry_run=false
+	// writes. (Vapor's URL-form decoder read an absent key as false, so a
+	// request without dry_run imported for real; norviq-mcp relies on the
+	// documented default for its preview call.)
 	dryRun := true
 	if v := httpx.QueryOptionalBool(c, "dry_run"); v != nil {
 		dryRun = *v
-	} else if _, present := c.Request().URL.Query()["dry_run"]; !present {
-		dryRun = false
 	}
 	ctx := c.Request().Context()
 	cats, err := h.svc.GetCategories(ctx, h.d.DB, s.UserID)
@@ -693,9 +691,11 @@ func (h *handlers) dismissSuggestion(c *echo.Context) error {
 		return err
 	}
 	if !exists {
+		// A concurrent dismiss of the same suggestion may win the unique
+		// (user, suggestion) race; the suggestion is dismissed either way.
 		if err := q(h.d.DB).InsertSuggestionDismissal(ctx, expensesdb.InsertSuggestionDismissalParams{
 			ID: uuid.New(), UserID: s.UserID, SuggestionID: id, DismissedAt: h.now(),
-		}); err != nil {
+		}); err != nil && !isUniqueViolation(err) {
 			return err
 		}
 	}

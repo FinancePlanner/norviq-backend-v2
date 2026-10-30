@@ -140,19 +140,15 @@ func (b BulkImporter) Insert(ctx context.Context, db expensesdb.DBTX, userID uui
 	return out, nil
 }
 
+// insertExpense validates and inserts one row with the same checks as a
+// single create (amount >= 0, split normalisation, owned plan item and
+// category) and keeps every field: foreign amount and currency, exchange
+// rate, notes, receipt metadata and the linked plan item. Vapor's bulk path
+// skipped the checks and dropped those fields.
 func (b BulkImporter) insertExpense(ctx context.Context, db expensesdb.DBTX, userID uuid.UUID, req ExpenseRequest) error {
-	occurredOn, ok := ParseDay(req.OccurredOn)
-	if !ok {
-		return httpx.BadRequest("Invalid occurredOn format. Expected YYYY-MM-DD.")
-	}
-	split := req.SplitMode
-	if split == "" {
-		split = SplitPersonal
-	}
-	e := expensesdb.Expense{
-		ID: uuid.New(), UserID: userID, Title: req.Title, Amount: req.Amount, Pillar: string(req.Pillar),
-		OccurredOn: occurredOn, SplitMode: expensesdb.ExpenseSplitMode(split), UserSharePercent: req.UserSharePercent,
-		CategoryID: uuidPtrFromString(req.CategoryID),
+	e, err := b.Service.newExpense(ctx, db, userID, req)
+	if err != nil {
+		return err
 	}
 	return b.Service.insertExpense(ctx, db, &e)
 }

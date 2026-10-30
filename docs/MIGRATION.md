@@ -144,3 +144,6 @@ Each item below is still load-bearing until Vapor scales to zero:
 - `ingress.serviceName: api-v2` on the Vapor values: the ingress moves to the
   api-v2 release itself, and the PVCs get owned by it.
 - The `api` option in `promote-norviq.yml`.
+- `prometheus.io/scrape: "false"` on api-v2 (it was there so Vapor's series,
+  proxied through v2's `/metrics` while `/metrics` was not native, were not
+  counted twice): scrape api-v2 instead of Vapor.

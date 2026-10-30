@@ -53,6 +53,7 @@ const findAccountByHashes = `-- name: FindAccountByHashes :one
 SELECT id, connection_id, provider_account_id, name, mask, currency, type, balance, balance_as_of, created_at, updated_at, identification_hash FROM bank_accounts
 WHERE connection_id = ANY($1::uuid[])
   AND identification_hash = ANY($2::text[])
+ORDER BY created_at, id
 LIMIT 1
 `
 
@@ -313,6 +314,7 @@ func (q *Queries) GetUserTransaction(ctx context.Context, arg GetUserTransaction
 const getUserTransactionByProviderTx = `-- name: GetUserTransactionByProviderTx :one
 SELECT id, account_id, user_id, provider_tx_id, dedupe_hash, amount, currency, occurred_on, merchant, description_text, pending, status, provider_category, expense_id, created_at, updated_at FROM bank_transactions
 WHERE provider_tx_id = $1 AND user_id = $2
+ORDER BY created_at, id
 LIMIT 1
 `
 
@@ -414,7 +416,8 @@ type InsertConnectionParams struct {
 
 // BankController, BankCallbackController, PlaidWebhookController, the bank
 // providers (Plaid, GoCardless, Enable Banking) and BankSyncJob.
-// Fluent's `first()` is LIMIT 1 with no ORDER BY; `all()` has no ORDER BY.
+// Vapor's Fluent `first()`/`all()` had no ORDER BY; where more than one row can
+// match, v2 orders by created_at, id so lists and picks are stable.
 func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionParams) error {
 	_, err := q.db.Exec(ctx, insertConnection,
 		arg.ID,
@@ -556,7 +559,7 @@ func (q *Queries) ListActiveConnections(ctx context.Context) ([]BankConnection, 
 }
 
 const listConnectionAccounts = `-- name: ListConnectionAccounts :many
-SELECT id, connection_id, provider_account_id, name, mask, currency, type, balance, balance_as_of, created_at, updated_at, identification_hash FROM bank_accounts WHERE connection_id = $1
+SELECT id, connection_id, provider_account_id, name, mask, currency, type, balance, balance_as_of, created_at, updated_at, identification_hash FROM bank_accounts WHERE connection_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListConnectionAccounts(ctx context.Context, connectionID uuid.UUID) ([]BankAccount, error) {
@@ -680,7 +683,7 @@ func (q *Queries) ListPendingByHash(ctx context.Context, arg ListPendingByHashPa
 }
 
 const listUserConnections = `-- name: ListUserConnections :many
-SELECT id, user_id, provider, institution_id, institution_name, provider_item_id, access_token_enc, sync_cursor, status, consent_expires_at, last_synced_at, last_sync_status, last_sync_error, created_at, updated_at FROM bank_connections WHERE user_id = $1
+SELECT id, user_id, provider, institution_id, institution_name, provider_item_id, access_token_enc, sync_cursor, status, consent_expires_at, last_synced_at, last_sync_status, last_sync_error, created_at, updated_at FROM bank_connections WHERE user_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListUserConnections(ctx context.Context, userID uuid.UUID) ([]BankConnection, error) {

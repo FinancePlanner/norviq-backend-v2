@@ -47,9 +47,7 @@ func plaidConfigFromEnv(s Settings) *PlaidConfig {
 	return &PlaidConfig{ClientID: *id, Secret: *secret, BaseURL: host, WebhookURL: trimmedNonEmpty(&s.PlaidWebhookURL)}
 }
 
-// Wire models. Vapor decoded every Plaid response with the app-wide
-// JSONDecoder.backendAPI, which rewrites snake_case keys before the
-// CodingKeys below are looked up (see plaidClient.post).
+// Wire models, decoded with plain JSONDecoder rules (see plaidClient.post).
 
 type plaidJWK struct {
 	Alg string `json:"alg"`
@@ -172,12 +170,13 @@ func (c *plaidClient) webhookVerificationKey(ctx context.Context, keyID string) 
 	return out.Key, err
 }
 
-// post sends body plus the credentials. A non-200 is a 502; the body is
-// then decoded as Vapor's `response.content.decode` did, through
-// JSONDecoder.backendAPI. That decoder rewrites snake_case keys before the
-// explicit snake_case CodingKeys are looked up, so every Plaid response with
-// a required snake_case field fails to decode (a 400 DecodingError) — a
-// Vapor bug ported as is; swiftjson.Decode reproduces the rewrite.
+// post sends body plus the credentials. A non-200 is a 502. The body is
+// decoded with the keys exactly as Plaid spells them. Vapor decoded it
+// through JSONDecoder.backendAPI, which rewrote snake_case keys before the
+// snake_case CodingKeys were looked up, so every Plaid response with a
+// required snake_case field failed (400 "No such key 'link_token'"): link,
+// exchange and sync never worked. v2 fixes that bug. A body that still does
+// not decode is Plaid's fault, so it is a 502 rather than the client's 400.
 func (c *plaidClient) post(ctx context.Context, path string, body map[string]any, out any) error {
 	body["client_id"] = c.config.ClientID
 	body["secret"] = c.config.Secret
@@ -204,7 +203,11 @@ func (c *plaidClient) post(ctx context.Context, path string, body map[string]any
 		c.b.logger.Warn(fmt.Sprintf("Plaid %s failed status=%d body_bytes=%d", path, resp.StatusCode, len(data)))
 		return httpx.Abort(http.StatusBadGateway, "Plaid request failed.")
 	}
-	return swiftjson.Decode(data, out)
+	if err := swiftjson.DecodeExternal(data, out); err != nil {
+		c.b.logger.Warn(fmt.Sprintf("Plaid %s response did not decode: %v", path, err))
+		return httpx.Abort(http.StatusBadGateway, "Plaid response could not be decoded.")
+	}
+	return nil
 }
 
 // PlaidProvider is the Plaid driver.
@@ -297,9 +300,10 @@ func (p *PlaidProvider) Sync(ctx context.Context, _ Call, conn *bankingdb.BankCo
 		for _, tx := range append(page.Added, page.Modified...) {
 			account, ok := byID[tx.AccountID]
 			if !ok {
-				// A new account appeared mid-sync: fetch and cache it. Swift
-				// then skips this transaction either way (both branches
-				// `continue`), so it is only picked up by a later change.
+				// A new account appeared mid-sync: fetch and cache it, then
+				// import the transaction against it. Swift skipped it either
+				// way (both branches `continue`), and since the cursor moves
+				// on it only came back if Plaid later modified it.
 				refreshed, err := p.client.accounts(ctx, accessToken)
 				if err != nil {
 					return SyncResult{}, err
@@ -312,7 +316,9 @@ func (p *PlaidProvider) Sync(ctx context.Context, _ Call, conn *bankingdb.BankCo
 				if byID, err = p.accountsByProviderID(ctx, conn.ID); err != nil {
 					return SyncResult{}, err
 				}
-				continue
+				if account, ok = byID[tx.AccountID]; !ok {
+					continue
+				}
 			}
 			added, err := p.upsertTransaction(ctx, tx, account, conn.UserID)
 			if err != nil {

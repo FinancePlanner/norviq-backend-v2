@@ -1,0 +1,58 @@
+# Brokers parity (13 routes). Both backends share the scratch DB, seeded by
+# parity/brokers-setup.sql (re-run it before every pass). Cases are reads,
+# validation errors and writes that fail the same way twice; no case reaches
+# IBKR or a vision model.
+#   psql postgres://pg:pg@127.0.0.1:55499/norviq -f parity/brokers-setup.sql
+#   set -a; . ./.env.example; set +a; PORT=18126 LEGACY_UPSTREAM_URL=http://127.0.0.1:8081 go run ./cmd/api serve
+#   go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:18126 -jwt-secret parity-secret -cases parity/brokers.jsonl
+{"name": "brokers-list-unauth", "method": "GET", "path": "/v1/brokers"}
+{"name": "brokers-list-pro", "method": "GET", "path": "/v1/brokers", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-list-free", "method": "GET", "path": "/v1/brokers", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-list-error", "method": "GET", "path": "/v1/brokers", "as": "b7e0c000-0000-4000-8000-000000000003"}
+{"name": "brokers-get-ibkr", "method": "GET", "path": "/v1/brokers/ibkr", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-get-ibkr-alias", "method": "GET", "path": "/v1/brokers/Interactive%20Brokers", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-get-ibkr-none", "method": "GET", "path": "/v1/brokers/ibkr", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-get-ibkr-error", "method": "GET", "path": "/v1/brokers/ibkr", "as": "b7e0c000-0000-4000-8000-000000000003"}
+{"name": "brokers-get-unknown", "method": "GET", "path": "/v1/brokers/robinhood", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-get-reserved", "method": "GET", "path": "/v1/brokers/manual", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-holdings-pro", "method": "GET", "path": "/v1/brokers/holdings", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-holdings-free", "method": "GET", "path": "/v1/brokers/holdings", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-holdings-unauth", "method": "GET", "path": "/v1/brokers/holdings"}
+{"name": "brokers-sync-status-pro", "method": "GET", "path": "/v1/brokers/ibkr/sync/status", "as": "b7e0c000-0000-4000-8000-000000000001"}
+{"name": "brokers-sync-status-none", "method": "GET", "path": "/v1/brokers/ibkr/sync/status", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-sync-status-error", "method": "GET", "path": "/v1/brokers/ibkr/sync/status", "as": "b7e0c000-0000-4000-8000-000000000003"}
+{"name": "brokers-sync-free", "method": "POST", "path": "/v1/brokers/ibkr/sync", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-sync-unauth", "method": "POST", "path": "/v1/brokers/ibkr/sync"}
+{"name": "brokers-connect-start-empty", "method": "POST", "path": "/v1/brokers/ibkr/connect/start", "as": "b7e0c000-0000-4000-8000-000000000002", "body": {}}
+{"name": "brokers-connect-start-bad-redirect", "method": "POST", "path": "/v1/brokers/ibkr/connect/start", "as": "b7e0c000-0000-4000-8000-000000000002", "body": {"redirectURI": "https://evil.example.com/cb"}}
+{"name": "brokers-connect-start-bad-list", "method": "POST", "path": "/v1/brokers/ibkr/connect/start", "as": "b7e0c000-0000-4000-8000-000000000002", "body": {"redirectURI": "norviq://brokers/ibkr", "portfolioListId": "not-a-uuid"}}
+{"name": "brokers-connect-start-malformed", "method": "POST", "path": "/v1/brokers/ibkr/connect/start", "as": "b7e0c000-0000-4000-8000-000000000002", "headers": {"Content-Type": "application/json"}, "raw": "{"}
+{"name": "brokers-connect-credentials-empty", "method": "POST", "path": "/v1/brokers/ibkr/connect/credentials", "as": "b7e0c000-0000-4000-8000-000000000002", "body": {}}
+{"name": "brokers-connect-credentials-malformed", "method": "POST", "path": "/v1/brokers/ibkr/connect/credentials", "as": "b7e0c000-0000-4000-8000-000000000002", "headers": {"Content-Type": "application/json"}, "raw": "[1]"}
+{"name": "brokers-disconnect-none", "method": "DELETE", "path": "/v1/brokers/ibkr/connection", "as": "b7e0c000-0000-4000-8000-000000000002"}
+{"name": "brokers-disconnect-unauth", "method": "DELETE", "path": "/v1/brokers/ibkr/connection"}
+{"name": "brokers-callback-empty", "method": "GET", "path": "/v1/auth/brokers/ibkr/callback"}
+{"name": "brokers-callback-error", "method": "GET", "path": "/v1/auth/brokers/ibkr/callback?error=access_denied&state=abc"}
+{"name": "brokers-callback-bad-state", "method": "GET", "path": "/v1/auth/brokers/ibkr/callback?code=x&state=unknown-state"}
+{"name": "brokers-csv-preview", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c1", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-default-list", "method": "POST", "path": "/v1/brokers/import/csv?provider=Charles%20Schwab", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-semicolon", "method": "POST", "path": "/v1/brokers/import/csv?provider=degiro&portfolioListId=b7e0c000-0000-4000-8000-0000000000c1", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Ticker;Qty;Avg Cost\nVOO;1,5;400\n"}
+{"name": "brokers-csv-preview-hypothetical", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c2", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-foreign-list", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c3", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-bad-list", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity&portfolioListId=nope", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-no-provider", "method": "POST", "path": "/v1/brokers/import/csv", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-ibkr", "method": "POST", "path": "/v1/brokers/import/csv?provider=ibkr", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n"}
+{"name": "brokers-csv-preview-empty", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "  \n "}
+{"name": "brokers-csv-preview-no-symbol-col", "method": "POST", "path": "/v1/brokers/import/csv?provider=fidelity", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Name,Qty\nCoke,1\n"}
+{"name": "brokers-csv-preview-multipart", "method": "POST", "path": "/v1/brokers/import/csv?portfolioListId=b7e0c000-0000-4000-8000-0000000000c1", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "multipart/form-data; boundary=parityboundary"}, "raw": "--parityboundary\r\nContent-Disposition: form-data; name=\"provider\"\r\n\r\nFidelity\r\n--parityboundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"h.csv\"\r\nContent-Type: text/csv\r\n\r\nSymbol,Quantity,Cost Basis,Purchase Date,Notes\nKO,10,60.5,2026-09-01,dup\nmsft,2.5,300,09/15/2026,\n,3,1,,orphan\nAAPL,abc,1,,\nNVDA,1,,2026-13-45,\n\r\n--parityboundary--\r\n"}
+{"name": "brokers-csv-preview-multipart-nofile", "method": "POST", "path": "/v1/brokers/import/csv", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "multipart/form-data; boundary=parityboundary"}, "raw": "--parityboundary\r\nContent-Disposition: form-data; name=\"provider\"\r\n\r\nFidelity\r\n--parityboundary--\r\n"}
+{"name": "brokers-csv-commit-existing-409", "method": "POST", "path": "/v1/brokers/import/csv/commit?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c1", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity,Cost Basis\nKO,1,61\n"}
+{"name": "brokers-csv-commit-all-errors", "method": "POST", "path": "/v1/brokers/import/csv/commit?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c1", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity\n,1\nKO,abc\n"}
+{"name": "brokers-csv-commit-hypothetical", "method": "POST", "path": "/v1/brokers/import/csv/commit?provider=fidelity&portfolioListId=b7e0c000-0000-4000-8000-0000000000c2", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity\nKO,1\n"}
+{"name": "brokers-csv-commit-unauth", "method": "POST", "path": "/v1/brokers/import/csv/commit?provider=fidelity", "headers": {"Content-Type": "text/csv"}, "raw": "Symbol,Quantity\nKO,1\n"}
+{"name": "brokers-screenshot-preview-no-images", "method": "POST", "path": "/v1/brokers/import/screenshot?provider=fidelity", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "multipart/form-data; boundary=parityboundary"}, "raw": "--parityboundary\r\nContent-Disposition: form-data; name=\"provider\"\r\n\r\nFidelity\r\n--parityboundary--\r\n"}
+{"name": "brokers-screenshot-preview-not-multipart", "method": "POST", "path": "/v1/brokers/import/screenshot?provider=fidelity", "as": "b7e0c000-0000-4000-8000-000000000001", "headers": {"Content-Type": "application/json"}, "raw": "{}"}
+{"name": "brokers-screenshot-commit-empty", "method": "POST", "path": "/v1/brokers/import/screenshot/commit", "as": "b7e0c000-0000-4000-8000-000000000001", "body": {}}
+{"name": "brokers-screenshot-commit-no-items", "method": "POST", "path": "/v1/brokers/import/screenshot/commit", "as": "b7e0c000-0000-4000-8000-000000000001", "body": {"provider": "fidelity", "portfolioListId": "b7e0c000-0000-4000-8000-0000000000c1", "items": []}}
+{"name": "brokers-screenshot-commit-existing-409", "method": "POST", "path": "/v1/brokers/import/screenshot/commit", "as": "b7e0c000-0000-4000-8000-000000000001", "body": {"provider": "fidelity", "portfolioListId": "b7e0c000-0000-4000-8000-0000000000c1", "items": [{"line": 1, "symbol": "KO", "shares": 1}]}}
+{"name": "brokers-screenshot-commit-free", "method": "POST", "path": "/v1/brokers/import/screenshot/commit", "as": "b7e0c000-0000-4000-8000-000000000002", "body": {"provider": "fidelity", "items": [{"line": 1, "symbol": "KO", "shares": 1}]}}

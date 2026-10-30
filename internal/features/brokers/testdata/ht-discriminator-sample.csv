@@ -1,0 +1,7 @@
+H,Positions,POS,20240511,120000,20240511,1.0
+BOS,Open Positions
+HEADER,Symbol,Quantity,Currency
+DATA,ASTS,100,USD
+DATA,NVDA,3,USD
+EOS,Open Positions
+T,Positions,POS,4

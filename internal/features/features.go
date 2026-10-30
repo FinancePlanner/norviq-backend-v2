@@ -20,6 +20,7 @@ import (
 	"norviq-api/internal/features/banking"
 	"norviq-api/internal/features/billing"
 	"norviq-api/internal/features/boards"
+	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/expenseimport"
@@ -140,6 +141,8 @@ func All() []server.Feature {
 		banking.Feature{},
 		// MessagingController (/v1/integrations/telegram).
 		integrations.Feature{},
+		// BrokerController and the IBKR OAuth callback.
+		brokers.Feature{},
 	}
 }
 
@@ -202,6 +205,8 @@ func AllJobs() []Job {
 		tax.ProjectionJob{},
 		// Bank reconcile sync (bank_sync_job).
 		banking.SyncJob{},
+		// IBKR daily sync (ibkr_sync_job).
+		brokers.IBKRSyncJob{},
 	}
 }
 

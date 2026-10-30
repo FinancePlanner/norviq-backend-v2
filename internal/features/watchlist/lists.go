@@ -191,7 +191,7 @@ func (h *handlers) createWatchlistList(c *echo.Context) error {
 		ID: uuid.New(), UserID: s.UserID, Name: name, IsDefault: false, Now: h.now(),
 	})
 	if err != nil {
-		return err
+		return listNameConflict(err)
 	}
 	return httpx.Created(c, makeListResponse(list))
 }
@@ -222,7 +222,7 @@ func (h *handlers) updateWatchlistList(c *echo.Context) error {
 	}
 	list, err := h.q.RenameWatchlistList(ctx, watchlistdb.RenameWatchlistListParams{Name: name, Now: new(h.now()), ID: id})
 	if err != nil {
-		return err
+		return listNameConflict(err)
 	}
 	return httpx.OK(c, makeListResponse(list))
 }

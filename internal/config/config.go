@@ -48,6 +48,10 @@ type Base struct {
 	PrometheusEnabled   bool     `env:"PROMETHEUS_ENABLED"`
 	MetricsSecret       string   `env:"METRICS_SECRET"`
 	ExtraDisabledRoutes []string `env:"V2_DISABLED_ROUTES" envSeparator:","`
+	// NativePrefixes, when set, limits v2 to the ported routes under these
+	// path prefixes; every other request goes to Vapor. It lets a release
+	// flip one domain at a time (e.g. "/v1/auth,/health").
+	NativePrefixes []string `env:"V2_NATIVE_PREFIXES" envSeparator:","`
 }
 
 // Database mirrors ConfigureBootstrap's DATABASE_* variables and defaults.

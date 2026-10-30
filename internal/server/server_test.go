@@ -124,3 +124,38 @@ func TestStranglerProxiesUnportedRoutes(t *testing.T) {
 		t.Errorf("POST on GET-only route not proxied: %d", r.Status)
 	}
 }
+
+func TestStranglerNativePrefixesNarrowV2(t *testing.T) {
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Legacy", "1")
+	}))
+	defer legacy.Close()
+
+	app := testutil.NewApp(t, []server.Feature{probeFeature{}}, func(d *server.Deps) {
+		d.Config.LegacyUpstreamURL = legacy.URL
+		d.Config.NativePrefixes = []string{" /health/ ", "/v1/pro"}
+	})
+	cases := map[string]bool{ // path -> served by legacy
+		"/health":       false,
+		"/health/live":  false,
+		"/v1/probe/me":  true, // ported, but "/v1/pro" is not a segment prefix of it
+		"/v1/portfolio": true,
+	}
+	for path, wantLegacy := range cases {
+		r := app.Do("GET", path, "", nil)
+		if got := r.Header.Get("X-Legacy") == "1"; got != wantLegacy {
+			t.Errorf("%s: legacy=%v want %v (status %d)", path, got, wantLegacy, r.Status)
+		}
+	}
+
+	app = testutil.NewApp(t, []server.Feature{probeFeature{}}, func(d *server.Deps) {
+		d.Config.LegacyUpstreamURL = legacy.URL
+		d.Config.NativePrefixes = []string{"/v1/probe"}
+	})
+	if r := app.Do("GET", "/v1/probe/me", "", nil); r.Header.Get("X-Legacy") == "1" {
+		t.Errorf("/v1/probe/me under native prefix went to legacy")
+	}
+	if r := app.Do("GET", "/health", "", nil); r.Header.Get("X-Legacy") != "1" {
+		t.Errorf("/health outside native prefixes stayed in v2")
+	}
+}

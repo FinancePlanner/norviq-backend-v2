@@ -1,0 +1,19 @@
+# Generated export files: each case creates one export per backend. After a
+# run, compare the two files each case wrote, byte for byte (list them with
+#   SELECT type, format, file_path FROM data_exports WHERE user_id = 'ad000000-0000-4000-8000-000000000007' ORDER BY created_at;
+# consecutive rows pair up). Load parity/admin-setup.sql first; run with
+#   -ignore requestId,exportId
+{"name":"create-portfolio-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"portfolio","format":"csv"}}
+{"name":"create-portfolio-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"portfolio","format":"json"}}
+{"name":"create-transactions-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"transactions","format":"csv"}}
+{"name":"create-transactions-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"transactions","format":"json"}}
+{"name":"create-watchlist-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"watchlist","format":"csv"}}
+{"name":"create-watchlist-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"watchlist","format":"json"}}
+{"name":"create-insights-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"insights","format":"csv"}}
+{"name":"create-insights-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"insights","format":"json"}}
+{"name":"create-all-csv","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"all","format":"csv"}}
+{"name":"create-all-json","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"all","format":"json"}}
+{"name":"create-transactions-window","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"transactions","format":"json","filters":{"dateFrom":"2026-01-01T00:00:00Z","dateTo":"2026-12-31T00:00:00Z"}}}
+{"name":"create-transactions-fractional-filter","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"transactions","format":"csv","filters":{"dateFrom":"2026-01-01T00:00:00.000Z"}}}
+{"name":"create-portfolio-list","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"portfolio","format":"csv","filters":{"portfolioListId":"ad000000-0000-4000-8000-000000000601"}}}
+{"name":"create-portfolio-other-list","method":"POST","path":"/v1/api/v3/export","as":"ad000000-0000-4000-8000-000000000007","body":{"type":"portfolio","format":"json","filters":{"portfolioListId":"AD000000-0000-4000-8000-000000000401"}}}

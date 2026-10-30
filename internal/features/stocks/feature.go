@@ -107,8 +107,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.PATCH("/transactions/:transactionId", t.update, txWrite...)
 	r.V1.DELETE("/transactions/:transactionId", t.delete, txWrite...)
 
-	// SharingController: public, at the root. /share/app is not ported here.
+	// SharingController: public, at the root.
 	r.Root.GET("/share/stock/:symbol", h.shareStock)
+	r.Root.GET("/share/app", h.shareApp)
 	return nil
 }
 

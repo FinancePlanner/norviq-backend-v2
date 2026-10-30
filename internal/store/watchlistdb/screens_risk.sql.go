@@ -22,6 +22,15 @@ func (q *Queries) DeleteHoldingRiskProfile(ctx context.Context, id uuid.UUID) er
 	return err
 }
 
+const deleteScreenEvaluations = `-- name: DeleteScreenEvaluations :exec
+DELETE FROM watchlist_screen_evaluations WHERE screen_id = $1
+`
+
+func (q *Queries) DeleteScreenEvaluations(ctx context.Context, screenID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteScreenEvaluations, screenID)
+	return err
+}
+
 const deleteWatchlistScreen = `-- name: DeleteWatchlistScreen :exec
 DELETE FROM watchlist_screens WHERE id = $1
 `
@@ -182,6 +191,109 @@ func (q *Queries) InsertHoldingRiskProfile(ctx context.Context, arg InsertHoldin
 	return i, err
 }
 
+const insertScreenEvaluation = `-- name: InsertScreenEvaluation :exec
+INSERT INTO watchlist_screen_evaluations (
+    id, user_id, screen_id, symbol_count, match_symbols, result, is_alert_baseline, evaluated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertScreenEvaluationParams struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	ScreenID        uuid.UUID
+	SymbolCount     int64
+	MatchSymbols    []string
+	Result          json.RawMessage
+	IsAlertBaseline bool
+	EvaluatedAt     *time.Time
+}
+
+func (q *Queries) InsertScreenEvaluation(ctx context.Context, arg InsertScreenEvaluationParams) error {
+	_, err := q.db.Exec(ctx, insertScreenEvaluation,
+		arg.ID,
+		arg.UserID,
+		arg.ScreenID,
+		arg.SymbolCount,
+		arg.MatchSymbols,
+		arg.Result,
+		arg.IsAlertBaseline,
+		arg.EvaluatedAt,
+	)
+	return err
+}
+
+const insertWatchlistScreen = `-- name: InsertWatchlistScreen :exec
+INSERT INTO watchlist_screens (
+    id, user_id, name, watchlist_list_ids, logical_operator, groups, alerts_enabled, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+`
+
+type InsertWatchlistScreenParams struct {
+	ID               uuid.UUID
+	UserID           uuid.UUID
+	Name             string
+	WatchlistListIds []uuid.UUID
+	LogicalOperator  string
+	Groups           json.RawMessage
+	AlertsEnabled    bool
+	Now              *time.Time
+}
+
+func (q *Queries) InsertWatchlistScreen(ctx context.Context, arg InsertWatchlistScreenParams) error {
+	_, err := q.db.Exec(ctx, insertWatchlistScreen,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.WatchlistListIds,
+		arg.LogicalOperator,
+		arg.Groups,
+		arg.AlertsEnabled,
+		arg.Now,
+	)
+	return err
+}
+
+const latestScreenEvaluation = `-- name: LatestScreenEvaluation :many
+SELECT id, user_id, screen_id, symbol_count, match_symbols, result, is_alert_baseline, evaluated_at FROM watchlist_screen_evaluations
+WHERE user_id = $1 AND screen_id = $2
+ORDER BY evaluated_at DESC
+LIMIT 1
+`
+
+type LatestScreenEvaluationParams struct {
+	UserID   uuid.UUID
+	ScreenID uuid.UUID
+}
+
+func (q *Queries) LatestScreenEvaluation(ctx context.Context, arg LatestScreenEvaluationParams) ([]WatchlistScreenEvaluation, error) {
+	rows, err := q.db.Query(ctx, latestScreenEvaluation, arg.UserID, arg.ScreenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WatchlistScreenEvaluation{}
+	for rows.Next() {
+		var i WatchlistScreenEvaluation
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ScreenID,
+			&i.SymbolCount,
+			&i.MatchSymbols,
+			&i.Result,
+			&i.IsAlertBaseline,
+			&i.EvaluatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHoldingRiskProfiles = `-- name: ListHoldingRiskProfiles :many
 SELECT id, user_id, holding_id, asset_category, sector, region, benchmark_proxy, manual_value, duration, convexity, factor_overrides, created_at, updated_at FROM holding_risk_profiles WHERE user_id = $1 ORDER BY updated_at DESC
 `
@@ -256,6 +368,20 @@ func (q *Queries) ListWatchlistScreens(ctx context.Context, userID uuid.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const markScreenEvaluated = `-- name: MarkScreenEvaluated :exec
+UPDATE watchlist_screens SET last_evaluated_at = $2, updated_at = $2 WHERE id = $1
+`
+
+type MarkScreenEvaluatedParams struct {
+	ID  uuid.UUID
+	Now *time.Time
+}
+
+func (q *Queries) MarkScreenEvaluated(ctx context.Context, arg MarkScreenEvaluatedParams) error {
+	_, err := q.db.Exec(ctx, markScreenEvaluated, arg.ID, arg.Now)
+	return err
 }
 
 const ownedHolding = `-- name: OwnedHolding :one
@@ -377,6 +503,35 @@ func (q *Queries) ScreenEvaluationHistory(ctx context.Context, arg ScreenEvaluat
 	return items, nil
 }
 
+const screenWatchlistSymbols = `-- name: ScreenWatchlistSymbols :many
+SELECT symbol FROM watchlist_items WHERE user_id = $1 AND watchlist_list_id = ANY($2::uuid[])
+`
+
+type ScreenWatchlistSymbolsParams struct {
+	UserID  uuid.UUID
+	ListIds []uuid.UUID
+}
+
+func (q *Queries) ScreenWatchlistSymbols(ctx context.Context, arg ScreenWatchlistSymbolsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, screenWatchlistSymbols, arg.UserID, arg.ListIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			return nil, err
+		}
+		items = append(items, symbol)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateHoldingRiskProfile = `-- name: UpdateHoldingRiskProfile :one
 UPDATE holding_risk_profiles SET
     asset_category = $1,
@@ -435,4 +590,34 @@ func (q *Queries) UpdateHoldingRiskProfile(ctx context.Context, arg UpdateHoldin
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateWatchlistScreen = `-- name: UpdateWatchlistScreen :exec
+UPDATE watchlist_screens SET
+    name = $2, watchlist_list_ids = $3, logical_operator = $4, groups = $5, alerts_enabled = $6,
+    last_evaluated_at = NULL, updated_at = $7
+WHERE id = $1
+`
+
+type UpdateWatchlistScreenParams struct {
+	ID               uuid.UUID
+	Name             string
+	WatchlistListIds []uuid.UUID
+	LogicalOperator  string
+	Groups           json.RawMessage
+	AlertsEnabled    bool
+	Now              *time.Time
+}
+
+func (q *Queries) UpdateWatchlistScreen(ctx context.Context, arg UpdateWatchlistScreenParams) error {
+	_, err := q.db.Exec(ctx, updateWatchlistScreen,
+		arg.ID,
+		arg.Name,
+		arg.WatchlistListIds,
+		arg.LogicalOperator,
+		arg.Groups,
+		arg.AlertsEnabled,
+		arg.Now,
+	)
+	return err
 }

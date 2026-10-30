@@ -9,22 +9,19 @@ package automation
 // INSERT ... ON CONFLICT for 30 minutes and never released. Vapor and v2 race
 // for the same row, so the two processes never run the job at the same time.
 //
-// What the job can actually do in Vapor 37128c4 (ported faithfully, see the
-// ScenarioJSON coding bug in feature.go and watchlist/screens.go):
-//   - screens: evaluate() decodes the screen definition first and that always
-//     fails, so each screen only costs a premium check and logs a warning;
-//   - rebalancing: makeRebalancePreview decodes the stored policy first and
-//     that always fails; even a decodable one would fail storing the event
-//     (WealthAutomationCoding.json(preview)). No event is created and nothing
-//     is pushed;
-//   - budgets: BudgetDriftEvaluator works and notifies, as in Vapor.
-// Loading the screens or the policies decodes every row's jsonb as
-// ScenarioJSON (Fluent's .all()); one row that does not decode aborts the
-// whole run, including the budget pass, as in Vapor.
+// v2 fixes over Vapor 37128c4, where the ScenarioJSON coding bug (see
+// codingJSON) made screens and rebalancing dead code:
+//   - screens: each alerting screen is evaluated and new matches get an inbox
+//     alert (watchlist.ScreenJob), as Vapor's code intended;
+//   - rebalancing: a due policy now gets its preview, a pending event and a
+//     push, as Vapor's code intended;
+//   - one row whose stored jsonb does not decode is logged and skipped. In
+//     Vapor, loading every row up front (Fluent's .all()) let one bad row
+//     abort the whole run, the budget pass included.
+// Budgets (BudgetDriftEvaluator) work and notify, as in Vapor.
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +32,7 @@ import (
 	"norviq-api/internal/features/budgeting"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/scenarios"
+	"norviq-api/internal/features/watchlist"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/inbox"
 	"norviq-api/internal/platform/portfolios"
@@ -55,6 +53,8 @@ const dailyJobName = "wealth_automation_daily_job"
 type DailyJob struct {
 	// Market overrides the snapshot capture's market data (tests).
 	Market scenarios.MarketData
+	// ScreenMarket overrides the smart-screen evaluation's market data (tests).
+	ScreenMarket watchlist.ScreenMarket
 	// Now overrides the clock (tests).
 	Now func() time.Time
 }
@@ -104,6 +104,7 @@ func (j DailyJob) Run(ctx context.Context, d *server.Deps) {
 // DailyRunner is one configured WealthAutomationDailyJob.
 type DailyRunner struct {
 	h        *handler
+	screens  *watchlist.ScreenJob
 	budgets  *budgeting.Evaluator
 	pub      *inbox.Publisher
 	cooldown time.Duration
@@ -135,8 +136,12 @@ func (j DailyJob) Runner(d *server.Deps) (*DailyRunner, error) {
 	if j.Now != nil {
 		pub.Now = j.Now
 	}
+	screens, err := watchlist.NewScreenJob(d, j.ScreenMarket, j.Now)
+	if err != nil {
+		return nil, err
+	}
 	_, cooldown := DailyIntervals()
-	return &DailyRunner{h: h, budgets: engine.Evaluator, pub: pub, cooldown: cooldown}, nil
+	return &DailyRunner{h: h, screens: screens, budgets: engine.Evaluator, pub: pub, cooldown: cooldown}, nil
 }
 
 // RunOnce is runOnce(_:): take the lease, then screens, rebalancing and
@@ -179,24 +184,10 @@ func (r *DailyRunner) evaluateScreens(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	groups := make([]scenarios.ScenarioJSON, len(screens))
-	for i := range screens {
-		if groups[i], err = scenarios.ParseScenarioJSON(screens[i].Groups); err != nil {
-			return err
-		}
-	}
 	// Task.isCancelled: stop quietly between items.
 	for i := 0; i < len(screens) && ctx.Err() == nil; i++ {
 		s := &screens[i]
-		err := r.h.premium.RequirePremium(ctx, entitlements.FeatureSmartScreening, s.UserID)
-		if err == nil {
-			// controller.evaluate(screen:...) starts with screenResponse,
-			// whose codingDecode of the groups always fails.
-			err = codingDecode(groups[i], &struct {
-				Groups []any `json:"groups"`
-			}{})
-		}
-		if err != nil {
+		if err := r.screens.Evaluate(ctx, s.ID, s.UserID); err != nil {
 			r.h.d.Logger.Warn("smart-screen daily evaluation failed", "screen", apijson.FormatUUID(s.ID), "error", err)
 		}
 	}
@@ -207,11 +198,6 @@ func (r *DailyRunner) evaluateRebalancing(ctx context.Context) error {
 	policies, err := r.h.q.EnabledRebalancingPolicies(ctx)
 	if err != nil {
 		return err
-	}
-	for i := range policies {
-		if _, err := scenarios.ParseScenarioJSON(policies[i].Targets); err != nil {
-			return err
-		}
 	}
 	// Task.isCancelled: stop quietly between items.
 	for i := 0; i < len(policies) && ctx.Err() == nil; i++ {
@@ -236,10 +222,6 @@ func (r *DailyRunner) evaluatePolicy(ctx context.Context, p *automationdb.Rebala
 		return err
 	}
 	if len(pending) > 0 {
-		// Fluent's .first() decoded the row, preview included.
-		if _, err := scenarios.ParseScenarioJSON(pending[0]); err != nil {
-			return err
-		}
 		return nil
 	}
 	preview, err := r.h.makePreview(ctx, *p, p.UserID)
@@ -253,11 +235,10 @@ func (r *DailyRunner) evaluatePolicy(ctx context.Context, p *automationdb.Rebala
 		r.h.d.Logger.Warn("rebalancing daily evaluation skipped stale valuation", "policy", apijson.FormatUUID(p.ID))
 		return nil
 	}
-	stored, err := codingJSONStruct(preview)
+	stored, err := codingJSON(preview)
 	if err != nil {
 		return err
 	}
-	// Unreachable while codingJSONStruct fails (see the file comment).
 	raw, err := apijson.Marshal(stored)
 	if err != nil {
 		return err
@@ -301,28 +282,6 @@ func (r *DailyRunner) evaluateBudgets(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-// codingJSONStruct is WealthAutomationCoding.json(_:) for a Codable value:
-// JSONEncoder with .convertToSnakeCase, then decoding ScenarioJSON from it.
-func codingJSONStruct(v any) (scenarios.ScenarioJSON, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return scenarios.ScenarioJSON{}, err
-	}
-	var generic any
-	if err := json.Unmarshal(data, &generic); err != nil {
-		return scenarios.ScenarioJSON{}, err
-	}
-	data, err = json.Marshal(snakeKeys(generic))
-	if err != nil {
-		return scenarios.ScenarioJSON{}, err
-	}
-	var out scenarios.ScenarioJSON
-	if err := portfolios.DecodeSwift(data, &out, portfolios.KeysConvertFromSnakeCase); err != nil {
-		return scenarios.ScenarioJSON{}, err
-	}
-	return out, nil
 }
 
 func snakeKeys(v any) any {

@@ -243,7 +243,7 @@ func (e *env) policy(owner, list uuid.UUID) uuid.UUID {
 func (e *env) event(owner, policy uuid.UUID, status string) uuid.UUID {
 	id := uuid.New()
 	e.exec(`INSERT INTO rebalance_events (id, user_id, policy_id, status, preview, created_at)
-		VALUES ($1, $2, $3, $4, '{"values":{"portfolio_value":1}}', '2026-02-01')`, id, owner, policy, status)
+		VALUES ($1, $2, $3, $4, $5::jsonb, '2026-02-01')`, id, owner, policy, status, storedPreview)
 	return id
 }
 
@@ -295,7 +295,7 @@ func TestRebalancingRoutesWithoutPolicy(t *testing.T) {
 	expect(t, e.Do("POST", base+"/events/nope/dismiss", tok, nil), 404, "")
 }
 
-func TestRebalancingUpsertValidationAndCodingBug(t *testing.T) {
+func TestRebalancingUpsertValidationAndPersist(t *testing.T) {
 	e := newEnv(t)
 	owner := e.proUser("owner@example.com")
 	list := e.portfolio(owner)
@@ -303,8 +303,11 @@ func TestRebalancingUpsertValidationAndCodingBug(t *testing.T) {
 	tok := e.Token(owner)
 	body := func(mutate func(map[string]any)) map[string]any {
 		b := map[string]any{
-			"baseCurrency": "eur", "cadence": "monthly", "enabled": true,
-			"targets": []any{map[string]any{"id": "t", "kind": "symbol", "symbol": "ACME", "targetWeight": 1}},
+			"baseCurrency": "eur", "cadence": "monthly", "enabled": true, "driftThreshold": 0.05,
+			"targets": []any{
+				map[string]any{"id": "t", "kind": "symbol", "symbol": "ACME", "targetWeight": 0.75},
+				map[string]any{"id": "c", "kind": "cash", "targetWeight": 0.25},
+			},
 		}
 		if mutate != nil {
 			mutate(b)
@@ -312,21 +315,70 @@ func TestRebalancingUpsertValidationAndCodingBug(t *testing.T) {
 		return b
 	}
 	expect(t, e.Do("PUT", base, tok, body(func(b map[string]any) { b["baseCurrency"] = "EURO" })), 400, "Invalid rebalancing policy: invalidCurrency")
-	expect(t, e.Do("PUT", base, tok, body(func(b map[string]any) { b["cadence"] = "disabled" })), 400, "Invalid rebalancing policy: missingTrigger")
+	expect(t, e.Do("PUT", base, tok, body(func(b map[string]any) {
+		b["cadence"] = "disabled"
+		delete(b, "driftThreshold")
+	})), 400, "Invalid rebalancing policy: missingTrigger")
 	expect(t, e.Do("PUT", base, tok, body(func(b map[string]any) { b["cadence"] = "weekly" })), 400, "Cannot initialize RebalanceCadence from invalid String value weekly")
 	expect(t, e.Do("PUT", base, tok, body(func(b map[string]any) { delete(b, "targets") })), 400, "No such key 'targets'")
 	expect(t, e.Do("PUT", base, tok, nil), 415, "Can't decode data without a content type")
 	expect(t, e.Do("PUT", base, tok, []byte(`{}`)), 400, "No such key 'baseCurrency'")
-	// Vapor bug, ported: WealthAutomationCoding.json round-trips through
-	// ScenarioJSON and always fails, so a valid PUT never saves.
-	expect(t, e.Do("PUT", base, tok, body(nil)), 400, "No such key 'values'")
-	var n int
-	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM rebalancing_policies WHERE portfolio_list_id = $1`, list).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("saved %d %v", n, err)
+
+	// Regression (Vapor answered 400 "No such key 'values'" and saved
+	// nothing): a valid PUT saves, and GET reads the stored targets back.
+	var put struct {
+		ID             string   `json:"id"`
+		BaseCurrency   string   `json:"baseCurrency"`
+		Cadence        string   `json:"cadence"`
+		DriftThreshold *float64 `json:"driftThreshold"`
+		Enabled        bool     `json:"enabled"`
+		Targets        []struct {
+			ID           string  `json:"id"`
+			Kind         string  `json:"kind"`
+			Symbol       *string `json:"symbol"`
+			TargetWeight float64 `json:"targetWeight"`
+		} `json:"targets"`
+		CreatedAt *string `json:"createdAt"`
+		UpdatedAt *string `json:"updatedAt"`
 	}
-	e.policy(owner, list)
-	expect(t, e.Do("PUT", base, tok, body(nil)), 400, "No such key 'values'")
+	r := e.Do("PUT", base, tok, body(nil))
+	if r.Status != 200 {
+		t.Fatalf("put: %d %s", r.Status, r.Body)
+	}
+	r.JSON(t, &put)
+	if put.BaseCurrency != "EUR" || put.Cadence != "monthly" || put.DriftThreshold == nil || *put.DriftThreshold != 0.05 ||
+		len(put.Targets) != 2 || put.Targets[0].Symbol == nil || *put.Targets[0].Symbol != "ACME" ||
+		put.Targets[0].TargetWeight != 0.75 || put.Targets[1].Kind != "cash" || put.Targets[1].Symbol != nil ||
+		put.CreatedAt == nil || *put.CreatedAt != "2026-10-28T12:00:00Z" {
+		t.Fatalf("put body: %s", r.Body)
+	}
+	var stored string
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT targets::text FROM rebalancing_policies WHERE portfolio_list_id = $1`, list).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, `"values"`) || !strings.Contains(stored, `"target_weight": 0.75`) {
+		t.Fatalf("stored targets: %s", stored)
+	}
+	g := e.Do("GET", base, tok, nil)
+	if g.Status != 200 || string(g.Body) != string(r.Body) {
+		t.Fatalf("get after put:\n%s\nwant\n%s", g.Body, r.Body)
+	}
+	// A second PUT updates the same row.
+	r = e.Do("PUT", base, tok, body(func(b map[string]any) { b["enabled"] = false }))
+	r.JSON(t, &put)
+	if r.Status != 200 || put.Enabled {
+		t.Fatalf("update: %d %s", r.Status, r.Body)
+	}
+	var n int
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM rebalancing_policies WHERE portfolio_list_id = $1`, list).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("rows %d %v", n, err)
+	}
+	// The snapshot capture's own errors come first.
+	expect(t, e.Do("POST", base+"/preview", tok, nil), 422, "Portfolio has no holdings or cash")
 }
+
+const storedPreview = `{"values":{"portfolio_value":1000,"currency":"USD","maximum_drift":0.2,"trigger_reasons":["drift"],` +
+	`"trades":[{"id":"t1","kind":"symbol","symbol":"AAPL","action":"buy","current_weight":0.8,"target_weight":1,"amount":200}],"warnings":[]}}`
 
 func TestRebalancingStoredPolicyRoutes(t *testing.T) {
 	e := newEnv(t)
@@ -335,20 +387,27 @@ func TestRebalancingStoredPolicyRoutes(t *testing.T) {
 	policy := e.policy(owner, list)
 	base := "/v1/portfolio/lists/" + list.String() + "/rebalancing-policy"
 	tok := e.Token(owner)
-	// Vapor bug, ported: the stored targets never decode back.
-	expect(t, e.Do("GET", base, tok, nil), 400, "No such key 'targets'")
-	expect(t, e.Do("POST", base+"/preview", tok, nil), 400, "No such key 'targets'")
-	r := e.Do("GET", base+"/events", tok, nil)
+	r := e.Do("GET", base, tok, nil)
+	if r.Status != 200 || !strings.Contains(string(r.Body), `"targets":[{"id":"t1","kind":"symbol","symbol":"AAPL","targetWeight":1}]`) {
+		t.Fatalf("get: %d %s", r.Status, r.Body)
+	}
+	r = e.Do("GET", base+"/events", tok, nil)
 	if r.Status != 200 || strings.TrimSpace(string(r.Body)) != "[]" {
 		t.Fatalf("no events: %d %s", r.Status, r.Body)
 	}
 	pending := e.event(owner, policy, "pending")
 	done := e.event(owner, policy, "confirmed")
-	expect(t, e.Do("GET", base+"/events", tok, nil), 400, "No such key 'portfolioValue'")
+	r = e.Do("GET", base+"/events", tok, nil)
+	if r.Status != 200 || strings.Count(string(r.Body), `"portfolioValue":1000`) != 2 ||
+		!strings.Contains(string(r.Body), `"trades":[{"id":"t1","kind":"symbol","symbol":"AAPL","action":"buy","currentWeight":0.8,"targetWeight":1,"amount":200}]`) {
+		t.Fatalf("events: %d %s", r.Status, r.Body)
+	}
 	expect(t, e.Do("POST", base+"/events/"+done.String()+"/confirm", tok, nil), 409, "Conflict")
 	expect(t, e.Do("POST", base+"/events/"+uuid.NewString()+"/confirm", tok, nil), 404, "")
-	// Confirm writes the event and the policy, then fails to render.
-	expect(t, e.Do("POST", base+"/events/"+pending.String()+"/confirm", tok, nil), 400, "No such key 'portfolioValue'")
+	r = e.Do("POST", base+"/events/"+pending.String()+"/confirm", tok, nil)
+	if r.Status != 200 || !strings.Contains(string(r.Body), `"status":"confirmed"`) || !strings.Contains(string(r.Body), `"confirmedAt":"2026-10-28T12:00:00Z"`) {
+		t.Fatalf("confirm: %d %s", r.Status, r.Body)
+	}
 	var status string
 	var confirmed, lastConfirmed, updated *time.Time
 	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT e.status, e.confirmed_at, p.last_confirmed_at, p.updated_at
@@ -361,11 +420,18 @@ func TestRebalancingStoredPolicyRoutes(t *testing.T) {
 	}
 	expect(t, e.Do("POST", base+"/events/"+pending.String()+"/dismiss", tok, nil), 409, "")
 	other := e.event(owner, policy, "pending")
-	expect(t, e.Do("POST", base+"/events/"+other.String()+"/dismiss", tok, nil), 400, "No such key 'portfolioValue'")
-	var dismissed *time.Time
-	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT status, dismissed_at FROM rebalance_events WHERE id = $1`, other).
-		Scan(&status, &dismissed); err != nil || status != "dismissed" || dismissed == nil {
-		t.Fatalf("dismiss wrote %s %v %v", status, dismissed, err)
+	r = e.Do("POST", base+"/events/"+other.String()+"/dismiss", tok, nil)
+	if r.Status != 200 || !strings.Contains(string(r.Body), `"status":"dismissed"`) {
+		t.Fatalf("dismiss: %d %s", r.Status, r.Body)
+	}
+	// An event whose stored preview does not decode is refused before any
+	// write (Vapor wrote the status first, then answered 400).
+	broken := uuid.New()
+	e.exec(`INSERT INTO rebalance_events (id, user_id, policy_id, status, preview, created_at)
+		VALUES ($1, $2, $3, 'pending', '{"values":{"portfolio_value":1}}', '2026-02-01')`, broken, owner, policy)
+	expect(t, e.Do("POST", base+"/events/"+broken.String()+"/confirm", tok, nil), 400, "No such key 'currency'")
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT status FROM rebalance_events WHERE id = $1`, broken).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("broken event status %s %v", status, err)
 	}
 	r = e.Do("DELETE", base, tok, nil)
 	if r.Status != 204 {

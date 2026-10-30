@@ -94,15 +94,46 @@ func TestForecastCRUD(t *testing.T) {
 	expect(t, e.Do("POST", one+"/runs", tok, nil), 422, "Portfolio has no holdings or cash")
 	e.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
 		VALUES ($1, $2, 'ACME', 10, 40, '2024-01-01', now(), $3)`, uuid.New(), owner, list)
-	// Vapor bug, ported: storing the run's assumptions always fails.
-	expect(t, e.Do("POST", one+"/runs", tok, nil), 400, "No such key 'values'")
-	var n int
-	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM net_worth_forecast_runs`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("runs saved: %d %v", n, err)
+	// Regression (Vapor answered 400 "No such key 'values'" and saved
+	// nothing): the run is simulated, stored and read back.
+	r = e.Do("POST", one+"/runs?seed=42", tok, nil)
+	if r.Status != 200 {
+		t.Fatalf("run: %d %s", r.Status, r.Body)
 	}
-	// A run row written some other way cannot be read back either.
+	var run automation.NetWorthForecastRun
+	if err := json.Unmarshal(r.Body, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "completed" || run.Seed == nil || *run.Seed != 42 || run.StartingValue != 400 ||
+		len(run.Timeline) != 361 || run.Timeline[0].Month != 0 || len(run.Timeline[0].Bands) != 5 ||
+		run.Timeline[0].Bands[2].Value != 400 || run.Timeline[0].Date != "2026-10-28T12:00:00Z" ||
+		run.Timeline[3].Date != "2027-01-28T12:00:00Z" || run.TargetProbability != nil ||
+		run.Assumptions.CashFlowSource != "trailing_actuals" || run.Assumptions.Warnings == nil || run.CompletedAt == nil {
+		t.Fatalf("run body: %s", r.Body)
+	}
+	var stored string
+	if err := e.Deps.DB.QueryRow(context.Background(), `SELECT assumptions::text FROM net_worth_forecast_runs WHERE id = $1`, run.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, `"values"`) || !strings.Contains(stored, `"cash_flow_source"`) {
+		t.Fatalf("stored assumptions: %s", stored)
+	}
+	latest := e.Do("GET", one+"/runs/latest", tok, nil)
+	if latest.Status != 200 || string(trim(latest.Body)) != string(trim(r.Body)) {
+		t.Fatalf("latest:\n%s\nwant\n%s", latest.Body, r.Body)
+	}
+	// The same seed reproduces the same bands.
+	again := e.Do("POST", one+"/runs?seed=42", tok, nil)
+	var second automation.NetWorthForecastRun
+	if err := json.Unmarshal(again.Body, &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Timeline[60].Bands[2].Value != run.Timeline[60].Bands[2].Value {
+		t.Fatalf("seeded runs differ")
+	}
+	// A row whose stored JSON does not decode still answers 400.
 	e.exec(`INSERT INTO net_worth_forecast_runs (id, user_id, forecast_id, status, starting_value, assumptions, timeline, seed, created_at)
-		VALUES ($1, $2, $3, 'completed', 1, '{"values":{"base_currency":"EUR"}}', '{"values":{"timeline":[]}}', '42', now())`,
+		VALUES ($1, $2, $3, 'completed', 1, '{"values":{"base_currency":"EUR"}}', '{"values":{"timeline":[]}}', '42', now() + interval '1 day')`,
 		uuid.New(), owner, created.ID)
 	expect(t, e.Do("GET", one+"/runs/latest", tok, nil), 400, "No such key")
 

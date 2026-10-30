@@ -31,6 +31,7 @@ type Querier interface {
 	// RebalancingPolicyModel.owned(by:).filter(portfolioListId).first()
 	GetRebalancingPolicy(ctx context.Context, arg GetRebalancingPolicyParams) (RebalancingPolicy, error)
 	InsertNetWorthForecast(ctx context.Context, arg InsertNetWorthForecastParams) error
+	InsertNetWorthForecastRun(ctx context.Context, arg InsertNetWorthForecastRunParams) error
 	InsertRebalanceEvent(ctx context.Context, arg InsertRebalanceEventParams) error
 	InsertRebalancingPolicy(ctx context.Context, arg InsertRebalancingPolicyParams) error
 	LatestNetWorthForecastRun(ctx context.Context, arg LatestNetWorthForecastRunParams) ([]NetWorthForecastRun, error)

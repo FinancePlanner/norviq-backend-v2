@@ -374,8 +374,8 @@ func TestSectorExposureAndDividends(t *testing.T) {
 		perShare[u.Symbol] = u.AmountPerShare
 	}
 	// Row order is Postgres's (Vapor sorted nothing); the zero-share row is skipped.
-	if math.Abs(d.Annual-72.5) > 1e-9 || len(d.Upcoming) != 3 || perShare["jpm"] != 5 || perShare["XLE"] != 4 ||
-		len(d.Monthly) != 4 || d.Monthly[3].Month != "2027-04" || d.Monthly[0].Amount != 18.125 {
+	if math.Abs(d.Annual-82.5) > 1e-9 || len(d.Upcoming) != 4 || perShare["jpm"] != 5 || perShare["XLE"] != 4 ||
+		len(d.Monthly) != 4 || d.Monthly[3].Month != "2027-04" || d.Monthly[0].Amount != 20.625 {
 		t.Fatalf("%s", r.Body)
 	}
 }

@@ -27,6 +27,7 @@ type sentPush struct {
 type fakeSender struct {
 	mu   sync.Mutex
 	sent []sentPush
+	fail bool // every device fails, as APNS rejecting them would
 }
 
 func (f *fakeSender) Send(_ context.Context, n push.Notification, devices []push.Device) push.Summary {
@@ -37,6 +38,9 @@ func (f *fakeSender) Send(_ context.Context, n push.Notification, devices []push
 		tokens[i] = devices[i].DeviceToken
 	}
 	f.sent = append(f.sent, sentPush{n, tokens})
+	if f.fail {
+		return push.Summary{Failed: len(devices)}
+	}
 	return push.Summary{Delivered: len(devices)}
 }
 

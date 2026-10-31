@@ -166,10 +166,16 @@ func TestCreateValidatesSymbolAndBuyDate(t *testing.T) {
 	if r.Status != 400 || reason(t, r) != "Invalid buyDate. Expected YYYY-MM-DD." {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	// Vapor bug kept: a lenient formatter rolls an impossible day over.
-	s := e.createStock(t, token, stockBody("ROLL", 1, 1, "2025-02-30"))
-	if s.BuyDate != "2025-03-02" {
-		t.Fatalf("rollover %s", s.BuyDate)
+	// Vapor rolled an impossible day over (2025-02-30 became 03-02); v2
+	// rejects it and writes nothing.
+	for _, d := range []string{"2025-02-30", "2025-13-01", "0000-01-01"} {
+		r = e.app.Do("POST", "/v1/stocks", token, stockBody("ROLL", 1, 1, d))
+		if r.Status != 400 || reason(t, r) != "Invalid buyDate. Expected YYYY-MM-DD." {
+			t.Fatalf("%s: %d %s", d, r.Status, r.Body)
+		}
+	}
+	if s := e.createStock(t, token, stockBody("LEAP", 1, 1, "2024-02-29")); s.BuyDate != "2024-02-29" {
+		t.Fatalf("leap day %s", s.BuyDate)
 	}
 	r = e.app.Do("POST", "/v1/stocks", token, map[string]any{"symbol": "X", "shares": 1, "buyPrice": 1, "buyDate": "2024-01-01", "category": "nope"})
 	if r.Status != 400 || reason(t, r) != "Data corrupted at path 'category'. Cannot initialize AssetCategory from invalid String value nope." {
@@ -353,8 +359,9 @@ func TestValuationIsUserScopedAndPremium(t *testing.T) {
 	if r := e.app.Do("POST", "/v1/stocks/symbol/ZETA/valuation", owner, valuationBody("ZETA", &rationale, 22, 30)); r.Status != 201 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	// A missing stock or valuation on GET is a bare 404.
-	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || len(r.Body) != 0 {
+	// A missing stock or valuation on GET is a 404 with a reason (Vapor's
+	// had no body).
+	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || reason(t, r) != "Stock not found." {
 		t.Fatalf("%d %q", r.Status, r.Body)
 	}
 	r := e.app.Do("POST", "/v1/stocks/symbol/ZETA/valuation", other, valuationBody("ZETA", nil, 22, 30))
@@ -363,6 +370,10 @@ func TestValuationIsUserScopedAndPremium(t *testing.T) {
 	}
 	if r := e.app.Do("PUT", "/v1/stocks/symbol/ZETA/valuation", other, valuationBody("ZETA", nil, 22, 30)); r.Status != 404 {
 		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	e.createStock(t, other, stockBody("ZETA", 1, 15, "2024-01-01"))
+	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || reason(t, r) != "Stock valuation not found." {
+		t.Fatalf("%d %q", r.Status, r.Body)
 	}
 	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", free, nil); r.Status < 400 || r.Status == 404 {
 		t.Fatalf("free user %d %s", r.Status, r.Body)
@@ -673,9 +684,16 @@ func TestStocksListCustomLimit(t *testing.T) {
 	r := e.app.Do("GET", "/v1/stocks?limit=200", token, nil)
 	var list []stocks.StockResponse
 	r.JSON(t, &list)
-	// Vapor bug kept: the maximum limit never returns a cursor.
-	if len(list) != 200 || r.Header.Get("X-Next-Cursor") != "" {
-		t.Fatalf("%d %q", len(list), r.Header.Get("X-Next-Cursor"))
+	// Vapor never returned a cursor at the maximum limit; v2 does.
+	cursor := r.Header.Get("X-Next-Cursor")
+	if len(list) != 200 || cursor == "" {
+		t.Fatalf("%d %q", len(list), cursor)
+	}
+	r = e.app.Do("GET", "/v1/stocks?limit=200&cursor="+cursor, token, nil)
+	var rest []stocks.StockResponse
+	r.JSON(t, &rest)
+	if len(rest) != 50 || r.Header.Get("X-Next-Cursor") != "" {
+		t.Fatalf("%d %q", len(rest), r.Header.Get("X-Next-Cursor"))
 	}
 	r = e.app.Do("GET", "/v1/stocks?limit=150", token, nil)
 	list = nil
@@ -841,5 +859,119 @@ func TestStockSharePage(t *testing.T) {
 	}
 	if r := e.app.Do("GET", "/share/stock/%3Cx%3E", "", nil); r.Status != 400 || reason(t, r) != "Symbol is required." {
 		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+}
+
+// ---- Vapor bugs fixed in v2 ------------------------------------------------------------
+
+func (e *env) holdingCount(t *testing.T, userID uuid.UUID) int {
+	t.Helper()
+	return e.count(t, `SELECT holding_count FROM usage_counters WHERE user_id = $1`, userID)
+}
+
+// Vapor's bulk create skipped the single create's symbol check (a blank
+// symbol was stored) and the free plan's holdings limit, and never synced the
+// holdings count.
+func TestBulkCreateValidatesSymbolAndHoldingsLimit(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("bulk-limit"))
+	for _, s := range []string{"AAA", "BBB", "CCC", "DDD"} {
+		e.createStock(t, token, stockBody(s, 1, 10, "2024-01-01"))
+	}
+	r := e.app.Do("POST", "/v1/stocks/bulk", token, map[string]any{"stocks": []any{
+		stockBody("   ", 1, 10, "2024-01-01"),
+		stockBody("EEE", 1, 10, "2024-01-01"), // fifth holding: the free limit
+		stockBody("FFF", 1, 10, "2024-01-01"), // sixth: over it
+		stockBody("aaa", 1, 30, "2024-01-01"), // merges, adds no holding
+	}})
+	var b bulkResponse
+	r.JSON(t, &b)
+	if r.Status != 200 || b.Created != 2 || b.Failed != 2 || len(b.Results) != 4 {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	if b.Results[0].Error == nil || *b.Results[0].Error != "Abort.400: Invalid stock symbol." {
+		t.Fatalf("blank symbol %s", r.Body)
+	}
+	if b.Results[1].Stock == nil || b.Results[1].Stock.Symbol != "EEE" {
+		t.Fatalf("within limit %s", r.Body)
+	}
+	if b.Results[2].Error == nil || *b.Results[2].Error != "Abort.403: Upgrade required. feature=holdings plan=free limit=5 current=5" {
+		t.Fatalf("over limit %s", r.Body)
+	}
+	if b.Results[3].Stock == nil || b.Results[3].Stock.Shares != 2 || b.Results[3].Stock.BuyPrice != 20 {
+		t.Fatalf("merge %s", r.Body)
+	}
+	if n := e.count(t, `SELECT count(*) FROM stocks WHERE user_id = $1`, userID); n != 5 {
+		t.Fatalf("rows %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM stocks WHERE user_id = $1 AND symbol = ''`, userID); n != 0 {
+		t.Fatalf("blank rows %d", n)
+	}
+	if n := e.holdingCount(t, userID); n != 5 {
+		t.Fatalf("holding_count %d", n)
+	}
+}
+
+// Vapor's update merged a holding moved onto the same symbol in another list
+// but left the holdings count at the old number.
+func TestUpdateMergeSyncsHoldingsCount(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("merge-count"))
+	first := e.createStock(t, token, stockBody("AAPL", 1, 100, "2024-01-01"))
+	other := uuid.New()
+	if _, err := e.app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO portfolio_lists (id, user_id, name, mode, created_at) VALUES ($1, $2, 'Second', 'actual', now())`, other, userID); err != nil {
+		t.Fatal(err)
+	}
+	otherID := strings.ToUpper(other.String())
+	body := stockBody("AAPL", 3, 200, "2024-02-01")
+	body["portfolioListId"] = otherID
+	e.createStock(t, token, body)
+	if n := e.holdingCount(t, userID); n != 2 {
+		t.Fatalf("before %d", n)
+	}
+	body = stockBody("AAPL", 1, 100, "2024-01-01")
+	body["portfolioListId"] = otherID
+	r := e.app.Do("PUT", "/v1/stocks/id/"+first.ID, token, body)
+	var merged stocks.StockResponse
+	r.JSON(t, &merged)
+	if r.Status != 200 || merged.Shares != 4 || merged.BuyPrice != 175 {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	if n := e.holdingCount(t, userID); n != 1 {
+		t.Fatalf("after %d", n)
+	}
+}
+
+// An account can hold several cash rows per currency (one per as_of); the
+// ledger books against the latest. Vapor's `first()` had no ORDER BY.
+func TestLedgerBooksAgainstLatestCashRow(t *testing.T) {
+	f := newLedgerFixture(t, nil)
+	ctx := context.Background()
+	var currency string
+	if err := f.e.app.Deps.DB.QueryRow(ctx, `SELECT base_currency FROM accounts WHERE id = $1`, f.account).Scan(&currency); err != nil {
+		t.Fatal(err)
+	}
+	oldRow, latestRow := uuid.New(), uuid.New()
+	// The stale row is inserted first, so an unordered scan finds it first.
+	for _, row := range []struct {
+		id      uuid.UUID
+		balance float64
+		daysAgo int
+	}{{oldRow, 5, 30}, {latestRow, 1000, 1}} {
+		if _, err := f.e.app.Deps.DB.Exec(ctx, `INSERT INTO cash_balances (id, account_id, currency, balance, as_of, created_at)
+			VALUES ($1, $2, $3, $4, current_date - $5::int, now())`, row.id, f.account, currency, row.balance, row.daysAgo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aapl := f.instrument(t, "AAPL")
+	if _, err := f.record(stocks.LedgerTrade{Symbol: "AAPL", Side: stocks.LedgerBuy, Quantity: 2, Price: 100, TradeDate: time.Now(), InstrumentID: &aapl, ExternalID: "x:latest"}); err != nil {
+		t.Fatalf("buy against the latest row: %v", err)
+	}
+	if c := f.e.float(t, `SELECT balance FROM cash_balances WHERE id = $1`, latestRow); c != 800 {
+		t.Fatalf("latest %v", c)
+	}
+	if c := f.e.float(t, `SELECT balance FROM cash_balances WHERE id = $1`, oldRow); c != 5 {
+		t.Fatalf("stale %v", c)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"time"
 
@@ -194,9 +193,9 @@ func (h *handlers) listStocks(c *echo.Context) error {
 	for i := range page {
 		items = append(items, stockResponse(page[i]))
 	}
-	// The cursor is only handed out below the 200 cap: a full 200-row page
-	// reports no next page even when more rows exist (Vapor's behavior).
-	if len(rows) > limit && limit < 200 && len(page) > 0 {
+	// Vapor only handed the cursor out below the 200 cap, so a full 200-row
+	// page hid the next one; v2 sends it whenever more rows exist.
+	if len(rows) > limit && len(page) > 0 {
 		last := page[len(page)-1]
 		c.Response().Header().Set("X-Next-Cursor", EncodeStockListCursor(last.CreatedAt, last.ID))
 	}
@@ -371,7 +370,9 @@ func (h *handlers) bulkCreateStocks(c *echo.Context) error {
 	res := bulkStockResponse{Results: make([]bulkStockResultItem, 0, len(p.Stocks))}
 	countsTowardHolding := false
 	for i, item := range p.Stocks {
-		stock, err := h.repoCreate(ctx, item, userID)
+		// Vapor skipped the single create's symbol check and holdings limit
+		// here; v2 applies both per item.
+		stock, err := h.bulkCreateOne(ctx, item, userID)
 		if err != nil {
 			msg := localizedDescription(err)
 			res.Results = append(res.Results, bulkStockResultItem{Index: i, Error: &msg})
@@ -386,6 +387,9 @@ func (h *handlers) bulkCreateStocks(c *echo.Context) error {
 		}
 	}
 	if res.Created > 0 {
+		if err := h.syncHoldings(ctx, userID); err != nil {
+			return err
+		}
 		h.recordActivity(ctx, h.db, activity.Record{
 			UserID: userID, Type: activity.TypeStockAdded, Title: fmt.Sprintf("%d Stocks", res.Created),
 			Subtitle: "Bulk imported", IsGrowth: true, Symbol: "arrow.down.doc.fill",
@@ -398,15 +402,48 @@ func (h *handlers) bulkCreateStocks(c *echo.Context) error {
 	return httpx.OK(c, res)
 }
 
+// bulkCreateOne is one bulk item: create's symbol check and holdings limit
+// (a symbol already in the target list merges and adds no holding), then the
+// repository create.
+func (h *handlers) bulkCreateOne(ctx context.Context, item StockRequest, userID uuid.UUID) (stocksdb.Stock, error) {
+	symbol, err := validateSymbol(item.Symbol)
+	if err != nil {
+		return stocksdb.Stock{}, err
+	}
+	listID, err := h.resolveRequestedList(ctx, item.PortfolioListID, userID)
+	if err != nil {
+		return stocksdb.Stock{}, err
+	}
+	existing, err := stocksdb.New(h.db).StockInList(ctx, stocksdb.StockInListParams{UserID: userID, PortfolioListID: listID, Symbol: symbol})
+	if err != nil {
+		return stocksdb.Stock{}, err
+	}
+	if len(existing) == 0 {
+		n, err := h.countStocks(ctx, userID)
+		if err != nil {
+			return stocksdb.Stock{}, err
+		}
+		if err := h.ent.EnforceResourceLimit(ctx, entitlements.FeatureHoldings, userID, n, 1); err != nil {
+			return stocksdb.Stock{}, err
+		}
+	}
+	return h.repoCreate(ctx, item, userID)
+}
+
 // localizedDescription is `error.localizedDescription` for the errors a
 // per-item create throws: Vapor's Abort describes itself as
-// "Abort.<code>: <reason>". Anything else (a database error) is Foundation's
-// generic text, which names the Swift error type; v2 cannot reproduce that
-// name, so it uses the same shape with a generic type.
+// "Abort.<code>: <reason>" (the holdings limit's upgrade error uses the same
+// shape). Anything else (a database error) is Foundation's generic text,
+// which names the Swift error type; v2 cannot reproduce that name, so it
+// uses the same shape with a generic type.
 func localizedDescription(err error) string {
 	var he *httpx.Error
 	if errors.As(err, &he) {
 		return fmt.Sprintf("Abort.%d: %s", he.Status, he.Reason)
+	}
+	var ue *entitlements.UpgradeRequiredError
+	if errors.As(err, &ue) {
+		return fmt.Sprintf("Abort.%d: %s", ue.StatusCode(), ue.Reason())
 	}
 	return "The operation couldn’t be completed. (PostgresNIO.PSQLError error 1.)"
 }
@@ -471,6 +508,11 @@ func (h *handlers) updateStock(c *echo.Context) error {
 	}
 	if stock == nil {
 		return errStockNotFound()
+	}
+	// A move onto the same symbol in another list merges two rows into one;
+	// Vapor never re-synced the holdings count after it.
+	if err := h.syncHoldings(ctx, userID); err != nil {
+		return err
 	}
 	h.recordActivity(ctx, h.db, activity.Record{
 		UserID: userID, Type: activity.TypeStockUpdated, Title: stock.Symbol, Subtitle: "Updated holding",
@@ -652,10 +694,7 @@ func (h *handlers) sell(ctx context.Context, id uuid.UUID, p sellStockRequest, u
 		return nil
 	})
 	if err != nil {
-		return StockResponse{}, err
+		return StockResponse{}, ledgerHTTPError(err)
 	}
 	return stockResponse(*stock), nil
 }
-
-// emptyNotFound is `Response(status: .notFound)`: a 404 with no body.
-func emptyNotFound(c *echo.Context) error { return c.NoContent(http.StatusNotFound) }

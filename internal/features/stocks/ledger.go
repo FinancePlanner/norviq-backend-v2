@@ -2,9 +2,11 @@ package stocks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/store/portfoliocoredb"
 	"norviq-api/internal/store/stocksdb"
@@ -47,14 +49,33 @@ type LedgerTradeResult struct {
 	RemainingShares float64
 }
 
-// LedgerTradeError is LedgerTradeRecorderError. It is not an Abort, so it
-// answers 500 when it escapes a handler, as it did in Vapor.
+// LedgerTradeError is LedgerTradeRecorderError. It is not an Abort: a
+// handler maps it with ledgerHTTPError (Vapor let it escape as a 500).
 type LedgerTradeError struct {
 	Kind   string // holdingNotFound, insufficientShares, insufficientCash
 	Symbol string
 }
 
 func (e *LedgerTradeError) Error() string { return fmt.Sprintf("%s(%q)", e.Kind, e.Symbol) }
+
+// ledgerHTTPError turns a LedgerTradeError into the 4xx the request
+// deserves (a concurrent sell can empty or shrink the holding after the
+// handler's own checks); any other error passes through.
+func ledgerHTTPError(err error) error {
+	var le *LedgerTradeError
+	if !errors.As(err, &le) {
+		return err
+	}
+	switch le.Kind {
+	case "holdingNotFound":
+		return errStockNotFound()
+	case "insufficientShares":
+		return httpx.BadRequest("Cannot sell more shares than owned.")
+	case "insufficientCash":
+		return httpx.Unprocessable("Not enough cash to buy " + le.Symbol + ".")
+	}
+	return err
+}
 
 // AccountResolver picks the account a trade books against.
 type AccountResolver func(ctx context.Context, db portfoliocoredb.DBTX, userID, portfolioID uuid.UUID) (portfoliocoredb.Account, error)

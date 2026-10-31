@@ -2,9 +2,12 @@ package stocks
 
 import (
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"norviq-api/internal/httpx"
 
 	"github.com/google/uuid"
 )
@@ -48,10 +51,11 @@ func TestDateParsers(t *testing.T) {
 			t.Fatalf("%q accepted", in)
 		}
 	}
-	if d, err := parseBuyDate("2025-02-30"); err != nil || d.Format("2006-01-02") != "2025-03-02" {
-		t.Fatalf("rollover %v %v", d, err)
+	if d, err := parseBuyDate(" 2024-02-29\n"); err != nil || d.Format("2006-01-02") != "2024-02-29" {
+		t.Fatalf("leap day %v %v", d, err)
 	}
-	for _, in := range []string{"2025-2-3", "2024/01/01", "not-a-date"} {
+	// Vapor rolled these over (2025-02-30 was 2025-03-02); v2 rejects them.
+	for _, in := range []string{"2025-02-30", "2025-02-29", "2025-13-01", "2025-00-10", "2025-01-00", "0000-01-01", "2025-2-3", "2024/01/01", "not-a-date"} {
 		if _, err := parseBuyDate(in); err == nil {
 			t.Fatalf("%q accepted", in)
 		}
@@ -92,5 +96,26 @@ func TestRenderSharePageEscapes(t *testing.T) {
 		!strings.Contains(html, "Hello &quot;World&quot; &amp; &lt;evil&gt;") ||
 		!strings.Contains(html, "?a=1&amp;b=2") {
 		t.Fatal(html)
+	}
+}
+
+func TestLedgerHTTPError(t *testing.T) {
+	cases := map[string]struct {
+		status int
+		reason string
+	}{
+		"holdingNotFound":    {404, "Stock not found."},
+		"insufficientShares": {400, "Cannot sell more shares than owned."},
+		"insufficientCash":   {422, "Not enough cash to buy AAPL."},
+	}
+	for kind, want := range cases {
+		var he *httpx.Error
+		if err := ledgerHTTPError(&LedgerTradeError{Kind: kind, Symbol: "AAPL"}); !errors.As(err, &he) || he.Status != want.status || he.Reason != want.reason {
+			t.Fatalf("%s: %v", kind, err)
+		}
+	}
+	other := errors.New("db down")
+	if err := ledgerHTTPError(other); !errors.Is(err, other) {
+		t.Fatalf("passthrough %v", err)
 	}
 }

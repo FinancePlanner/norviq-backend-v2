@@ -69,7 +69,7 @@ func (h *handlers) premiumThenSymbol(c *echo.Context, feature entitlements.Featu
 }
 
 // GET /v1/stocks/symbol/:symbol/valuation. A missing stock or valuation is a
-// bare 404 with no body.
+// 404 with the usual error body (Vapor sent it with no body).
 func (h *handlers) getStockValuation(c *echo.Context) error {
 	userID, symbol, err := h.premiumThenSymbol(c, entitlements.FeatureValuationCases)
 	if err != nil {
@@ -85,14 +85,14 @@ func (h *handlers) getStockValuation(c *echo.Context) error {
 		return err
 	}
 	if stock == nil {
-		return emptyNotFound(c)
+		return errStockNotFound()
 	}
 	v, err := h.findValuation(ctx, normalized, userID)
 	if err != nil {
 		return err
 	}
 	if v == nil {
-		return emptyNotFound(c)
+		return errValuationNotFound()
 	}
 	return httpx.OK(c, valuationResponse(*v))
 }

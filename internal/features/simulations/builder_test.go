@@ -5,8 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"norviq-api/internal/features/rebalancing"
+	"norviq-api/internal/store/simulationsdb"
+
+	"github.com/google/uuid"
 )
 
 // Ported from PortfolioSimulationEngineTests.swift.
@@ -219,6 +223,23 @@ func TestCursorRoundTrip(t *testing.T) {
 	for _, bad := range []string{"%%%", "OjE=", "YWJjOmRlZg=="} {
 		if _, _, ok := decodeCursor(bad); ok {
 			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
+// The cursor carries created_at as float seconds. Vapor truncated the
+// decoded microseconds, so an anchor could land a microsecond early and the
+// next page skipped rows sharing its created_at; v2 rounds back to the exact
+// microsecond.
+func TestCursorAnchorIsExactMicrosecond(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	base := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	for i := range 200000 {
+		at := base.Add(time.Duration(i*7919) * time.Microsecond)
+		raw := encodeCursor(&simulationsdb.PortfolioSimulation{ID: id, CreatedAt: &at})
+		got, gotID, ok := decodeCursor(*raw)
+		if !ok || gotID != id || !got.Equal(at) {
+			t.Fatalf("%s: decoded %s", at.Format(time.RFC3339Nano), got.Format(time.RFC3339Nano))
 		}
 	}
 }

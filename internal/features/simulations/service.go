@@ -18,6 +18,7 @@ import (
 	"norviq-api/internal/store/simulationsdb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,6 +34,22 @@ type Service struct {
 }
 
 func (s *Service) q() *simulationsdb.Queries { return simulationsdb.New(s.DB) }
+
+// checkSource is requireSourcePortfolio for clone mode. For fromScratch a
+// source is optional, but one that parses is stored (FK to portfolio_lists),
+// so it must name a portfolio the caller can read: Swift saved it unchecked
+// and an unknown id was a 500.
+func (s *Service) checkSource(ctx context.Context, p UpsertRequest, userID uuid.UUID) error {
+	if p.Mode == ModeCloneCurrentPortfolio {
+		return s.requireSourcePortfolio(ctx, p, userID)
+	}
+	id := sourceID(p)
+	if id == nil {
+		return nil
+	}
+	_, err := s.Access.Require(ctx, s.DB, *id, userID, portfolios.RequireOptions{})
+	return err
+}
 
 func unprocessable(reason string) error { return httpx.Unprocessable(reason) }
 
@@ -108,17 +125,16 @@ func sourceID(p UpsertRequest) *uuid.UUID {
 	return nil
 }
 
-// Create is POST /v1/portfolio/simulations. Not transactional, as Swift's
-// was (the record is saved before its legs).
+// Create is POST /v1/portfolio/simulations. The record and its legs are
+// written in one transaction (Swift saved the record first, so a failed leg
+// left a simulation without positions).
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, p UpsertRequest) (Simulation, error) {
 	legs, err := validate(p)
 	if err != nil {
 		return Simulation{}, err
 	}
-	if p.Mode == ModeCloneCurrentPortfolio {
-		if err := s.requireSourcePortfolio(ctx, p, userID); err != nil {
-			return Simulation{}, err
-		}
+	if err := s.checkSource(ctx, p, userID); err != nil {
+		return Simulation{}, err
 	}
 	now := portfolios.Now()
 	rec := simulationsdb.PortfolioSimulation{
@@ -131,16 +147,20 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, p UpsertRequest)
 		VariableFeeBps:          int64(orDefault(p.VariableFeeBasisPoints, 0)),
 		Revision:                1, ShareShowCapital: true, CreatedAt: &now, UpdatedAt: &now,
 	}
-	if err := s.q().InsertSimulation(ctx, simulationsdb.InsertSimulationParams{
-		ID: rec.ID, UserID: userID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
-		BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
-		FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
-		MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
-		Now: &now,
-	}); err != nil {
-		return Simulation{}, err
-	}
-	if err := s.replaceLegs(ctx, rec.ID, legs); err != nil {
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := simulationsdb.New(tx)
+		if err := q.InsertSimulation(ctx, simulationsdb.InsertSimulationParams{
+			ID: rec.ID, UserID: userID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
+			BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
+			FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
+			MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
+			Now: &now,
+		}); err != nil {
+			return err
+		}
+		return replaceLegs(ctx, q, rec.ID, legs)
+	})
+	if err != nil {
 		return Simulation{}, err
 	}
 	// Swift rendered the in-memory record (not a re-read) with fresh legs.
@@ -155,7 +175,8 @@ func (s *Service) render(ctx context.Context, rec *simulationsdb.PortfolioSimula
 	return dto(rec, legs), nil
 }
 
-// Update is PUT /v1/portfolio/simulations/:simulationId.
+// Update is PUT /v1/portfolio/simulations/:simulationId. The record and its
+// legs are written in one transaction (Swift's were not).
 func (s *Service) Update(ctx context.Context, simulationID, userID uuid.UUID, p UpsertRequest) (Simulation, error) {
 	legs, err := validate(p)
 	if err != nil {
@@ -168,10 +189,8 @@ func (s *Service) Update(ctx context.Context, simulationID, userID uuid.UUID, p 
 	if p.ExpectedRevision != nil && int64(*p.ExpectedRevision) != rec.Revision {
 		return Simulation{}, httpx.Conflict("This simulation was changed elsewhere. Reload and try again.")
 	}
-	if p.Mode == ModeCloneCurrentPortfolio {
-		if err := s.requireSourcePortfolio(ctx, p, userID); err != nil {
-			return Simulation{}, err
-		}
+	if err := s.checkSource(ctx, p, userID); err != nil {
+		return Simulation{}, err
 	}
 	now := portfolios.Now()
 	rec.Mode = p.Mode
@@ -186,16 +205,20 @@ func (s *Service) Update(ctx context.Context, simulationID, userID uuid.UUID, p 
 	rec.VariableFeeBps = int64(orDefault(p.VariableFeeBasisPoints, int(rec.VariableFeeBps)))
 	rec.Revision++
 	rec.UpdatedAt = &now
-	if err := s.q().UpdateSimulation(ctx, simulationsdb.UpdateSimulationParams{
-		ID: simulationID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
-		BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
-		FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
-		MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
-		Revision: rec.Revision, Now: &now,
-	}); err != nil {
-		return Simulation{}, err
-	}
-	if err := s.replaceLegs(ctx, simulationID, legs); err != nil {
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := simulationsdb.New(tx)
+		if err := q.UpdateSimulation(ctx, simulationsdb.UpdateSimulationParams{
+			ID: simulationID, Mode: rec.Mode, SourcePortfolioID: rec.SourcePortfolioID, Name: rec.Name,
+			BaseCurrency: rec.BaseCurrency, TargetCapital: rec.TargetCapital,
+			FractionalSharesEnabled: rec.FractionalSharesEnabled, QuantityIncrement: rec.QuantityIncrement,
+			MinimumTradeAmount: rec.MinimumTradeAmount, FlatFee: rec.FlatFee, VariableFeeBps: rec.VariableFeeBps,
+			Revision: rec.Revision, Now: &now,
+		}); err != nil {
+			return err
+		}
+		return replaceLegs(ctx, q, simulationID, legs)
+	})
+	if err != nil {
 		return Simulation{}, err
 	}
 	return s.render(ctx, rec)
@@ -275,10 +298,11 @@ func (s *Service) run(ctx context.Context, sim Simulation, userID uuid.UUID) (Re
 	if sim.SourcePortfolioID != nil {
 		portfolioID = *sim.SourcePortfolioID
 	}
-	// Engine errors are not mapped: Swift let them surface as 500s.
+	// Swift let engine errors surface as 500s; v2 maps them as the
+	// rebalancing simulate does.
 	result, err := s.Engine.Simulate(portfolioID, model, MakeRequest(model, sim.TargetCapital), snap)
 	if err != nil {
-		return Result{}, err
+		return Result{}, rebalancing.MapEngineError(err)
 	}
 	spent := 0.0
 	for i := range result.Trades {
@@ -358,8 +382,7 @@ func (s *Service) requireSourcePortfolio(ctx context.Context, p UpsertRequest, u
 	return err
 }
 
-func (s *Service) replaceLegs(ctx context.Context, simulationID uuid.UUID, legs []LegInput) error {
-	q := s.q()
+func replaceLegs(ctx context.Context, q *simulationsdb.Queries, simulationID uuid.UUID, legs []LegInput) error {
 	if err := q.DeleteLegs(ctx, simulationID); err != nil {
 		return err
 	}
@@ -530,8 +553,11 @@ func encodeCursor(r *simulationsdb.PortfolioSimulation) *string {
 	return &out
 }
 
-// decodeCursor parses a cursor and returns the anchor as PostgresNIO would
-// bind it (truncated to whole microseconds).
+// decodeCursor parses a cursor and returns the anchor at the exact
+// microsecond it was encoded from. The float seconds are a few tenths of a
+// microsecond off; PostgresNIO (and the first port) truncated them, so an
+// anchor could fall a microsecond early and the next page skipped the rows
+// sharing its created_at.
 func decodeCursor(raw string) (createdAt time.Time, id uuid.UUID, ok bool) {
 	data, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil || strings.ContainsAny(raw, "\r\n") {
@@ -553,6 +579,6 @@ func decodeCursor(raw string) (createdAt time.Time, id uuid.UUID, ok bool) {
 		return time.Time{}, uuid.Nil, false
 	}
 	reference := seconds - 978307200.0
-	micros := int64((reference - -31622400.0) * 1e6)
+	micros := int64(math.Round((reference - -31622400.0) * 1e6))
 	return time.UnixMicro(micros + 946684800000000).UTC(), id, true
 }

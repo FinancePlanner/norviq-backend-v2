@@ -430,10 +430,7 @@ func (h *handlers) facebookExchange(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	code := strings.TrimSpace(in.code)
-	if code == "" {
-		return httpx.BadRequest("OAuth authorization code is required")
-	}
+	code := strings.TrimSpace(in.code) // non-empty: consumeFlow checked it
 	g := facebookGraph{h: h, appID: cfg.webAppID(), secret: secret}
 	token, err := g.exchangeCode(ctx, code, redirect)
 	if err != nil {

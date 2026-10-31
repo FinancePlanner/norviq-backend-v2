@@ -246,7 +246,14 @@ func TestFacebookWebFlow(t *testing.T) {
 		r.reason(t) != "Facebook import flow is invalid or expired" {
 		t.Fatalf("replay = %d %s", r.Status, r.Body)
 	}
+	// An empty code is a 400 that leaves the flow usable (Vapor spent the
+	// flow first, so the retry was a 401).
 	flow, state = start()
+	if r := e.call(http.MethodPost, "/v1/social/discovery/facebook/exchange", a,
+		map[string]any{"flowId": flow, "redirectURI": "https://norviq.test/cb", "code": "  ", "state": state}); r.Status != 400 ||
+		r.reason(t) != "OAuth authorization code is required" {
+		t.Fatalf("empty code = %d %s", r.Status, r.Body)
+	}
 	if r := e.call(http.MethodPost, "/v1/social/discovery/facebook/exchange", a,
 		map[string]any{"flowId": flow, "redirectURI": "https://norviq.test/cb", "code": "bad-code", "state": state}); r.Status != 401 ||
 		r.reason(t) != "Facebook didn't accept the sign-in. Please try again." {
@@ -310,6 +317,12 @@ func TestXImport(t *testing.T) {
 	u, _ := url.Parse(st.AuthorizationURL)
 	if u.Query().Get("client_id") != "x-client" || u.Query().Get("code_challenge_method") != "S256" || u.Query().Get("scope") != "tweet.read users.read follows.read" {
 		t.Fatalf("start = %s", st.AuthorizationURL)
+	}
+	// An empty code is a 400 that leaves the flow usable.
+	if r := e.call(http.MethodPost, "/v1/social/discovery/x/exchange", a,
+		map[string]any{"flowId": st.FlowID, "redirectURI": "https://norviq.test/x", "code": "", "state": u.Query().Get("state")}); r.Status != 400 ||
+		r.reason(t) != "OAuth authorization code is required" {
+		t.Fatalf("empty code = %d %s", r.Status, r.Body)
 	}
 	var res social.XImportMatches
 	r := e.call(http.MethodPost, "/v1/social/discovery/x/exchange", a,

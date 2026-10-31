@@ -1,6 +1,5 @@
 // Package features is the registry of ported Vapor controllers and
-// background jobs. A route listed here is served by v2; every other route is
-// proxied to the Vapor backend until it is ported.
+// background jobs. A route listed here is served; every other route is a 404.
 package features
 
 import (
@@ -418,10 +417,10 @@ func (j *Jobs) Wait() {
 
 // StartJobs starts the jobs named in V2_JOBS (comma-separated, or "all").
 //
-// During the migration Vapor still runs its own copies of these loops, and a
-// job running in both processes would send every push and email twice. So a
-// job runs in v2 only once it is listed here AND disabled on the Vapor side;
-// the default is none.
+// The default is none, so a process started without V2_JOBS (a local run, a
+// one-off command) sends no pushes or emails. Production and staging set
+// "all". The opt-in dates from the migration, when Vapor ran its own copies
+// of these loops and a job in both processes would have sent everything twice.
 func StartJobs(ctx context.Context, d *server.Deps) *Jobs {
 	enabled := map[string]bool{}
 	for _, n := range strings.Split(os.Getenv("V2_JOBS"), ",") {

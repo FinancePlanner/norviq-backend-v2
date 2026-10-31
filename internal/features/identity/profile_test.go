@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Ports UserProfileTests (deletion stays on Vapor) and OnboardingTests.
+// Ports UserProfileTests (deletion is in accountdeletion) and OnboardingTests.
 
 func TestProfileReadAndUpdate(t *testing.T) {
 	h := newHarness(t)

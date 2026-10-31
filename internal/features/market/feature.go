@@ -55,8 +55,7 @@ type Feature struct {
 	// Archive overrides the environment-built news archive (tests).
 	Archive *NewsArchive
 	// Premium builds the billing gate for the Pro-only routes. While it is
-	// nil those routes are not registered, so the strangler keeps sending
-	// them to Vapor.
+	// nil those routes are not registered and answer 404.
 	Premium func(d *server.Deps) PremiumGate
 }
 

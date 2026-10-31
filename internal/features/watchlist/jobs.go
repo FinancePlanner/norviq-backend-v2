@@ -28,9 +28,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Vapor runs both pollers unconditionally (configure.swift has no switch for
-// either). Their ticks take the same JobLock names as Vapor's, so a v2 tick
-// and a Vapor tick never overlap, and both are idempotent per event:
+// Vapor ran both pollers unconditionally (configure.swift had no switch for
+// either). Their ticks take Vapor's JobLock names, so two replicas' ticks
+// never overlap, and both are idempotent per event:
 // alert_triggered_at and the inbox deduplication key for targets, the
 // earnings_notification_deliveries row for earnings reminders.
 

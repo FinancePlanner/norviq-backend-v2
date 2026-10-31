@@ -23,9 +23,8 @@ import (
 // JWTSecret is the secret test apps sign sessions with.
 const JWTSecret = "test-secret"
 
-// App is a running v2 server over a fresh database, with no legacy upstream:
-// an unported route answers 404, so a test can never pass by accident
-// against Vapor.
+// App is a running v2 server over a fresh database. A route no feature
+// registered answers 404.
 type App struct {
 	T      testing.TB
 	Deps   *server.Deps

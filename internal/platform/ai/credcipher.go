@@ -10,7 +10,7 @@ import (
 // for string columns as `nvq-enc:<base64(envelope JSON)>`, bound to a
 // context. Values without the prefix are legacy plaintext and Decrypt passes
 // them through. The implementation is internal/platform/crypto's Vault,
-// byte-compatible with Vapor's so stored keys stay readable by both backends.
+// byte-compatible with Vapor's, so keys Vapor stored stay readable.
 type CredentialCipher interface {
 	Encrypt(plaintext, context string) (string, error)
 	Decrypt(stored, context string) (string, error)

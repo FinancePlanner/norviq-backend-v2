@@ -15,8 +15,8 @@ import (
 // encodes to the same JSON; callers that need a figure from it (the highlight
 // builders) re-decode that JSON, so any adapter that marshals correctly fits.
 //
-// A nil field means the source is not ported (or not merged) yet, and the
-// routes that need it are not registered, so they stay on Vapor.
+// A nil field means the source is not wired, and the routes that need it are
+// not registered, so they answer 404.
 type Sources struct {
 	// Dashboard is dashboardService.dashboard(userId:req:on:).
 	Dashboard func(ctx context.Context, userID uuid.UUID) (any, error)

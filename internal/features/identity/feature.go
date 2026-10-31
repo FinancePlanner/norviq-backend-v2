@@ -152,9 +152,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	a.POST("/webauthn/register/verify", s.webAuthnRegisterVerify, append(session[:2:2], webAuthnRegister)...)
 
 	// PersonalAccessTokenController: never scopeable.
-	// Middleware goes on each route, not the group: echo answers 404 for
-	// any unmatched path under a group that carries middleware, which would
-	// stop the strangler from proxying sibling routes to Vapor.
+	// Middleware goes on each route, not the group: echo runs a group's
+	// middleware on any unmatched path under it, so an unknown /v1/tokens/...
+	// path would answer 401 instead of the plain 404 it gets today.
 	t := r.V1.Group("/tokens")
 	t.POST("", s.createPAT, firstParty...)
 	t.GET("", s.listPATs, firstParty...)

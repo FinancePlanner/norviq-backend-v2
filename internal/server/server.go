@@ -1,6 +1,7 @@
 // Package server assembles the echo application: global middleware in the
-// order Vapor's configure.swift installed it, health endpoints, every feature's
-// routes, and the strangler fallback to the Vapor backend.
+// order Vapor's configure.swift installed it, health endpoints and every
+// feature's routes. A request no route serves gets echo's 404 or 405 in the
+// JSON error envelope.
 package server
 
 import (
@@ -72,17 +73,11 @@ type Server struct {
 
 // New builds the server and mounts features.
 func New(d *Deps, features []Feature) (*Server, error) {
-	st, err := newStrangler(d.Config.LegacyUpstreamURL, d.Config.ExtraDisabledRoutes, d.Config.NativePrefixes, d.Logger)
-	if err != nil {
-		return nil, err
-	}
-
 	e := echo.NewWithConfig(echo.Config{
 		Logger:           d.Logger,
 		HTTPErrorHandler: httpx.ErrorHandler(d.Logger, d.Config.IsProduction()),
 		JSONSerializer:   httpx.Serializer{},
 		IPExtractor:      d.Limiter.ClientIP.Resolve,
-		OnAddRoute:       st.mirror,
 	})
 
 	// HTTPMetricsMiddleware, `at: .beginning` (PROMETHEUS_ENABLED only).
@@ -117,8 +112,7 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		}
 	}
 
-	st.app = e
-	return &Server{Echo: e, Handler: st}, nil
+	return &Server{Echo: e, Handler: e}, nil
 }
 
 // allowedOrigins is ProductionConfiguration.allowedOrigins: the

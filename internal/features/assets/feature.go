@@ -33,7 +33,7 @@ type SymbolSearch interface {
 }
 
 // Feature mounts /v1/assets/search once Search is wired; until then the
-// route stays on Vapor.
+// route is not registered (404).
 type Feature struct {
 	Search func(d *server.Deps) (SymbolSearch, error)
 }

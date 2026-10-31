@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Route coverage: which Vapor routes v2 serves itself, and which still proxy.
+# Route coverage: which of Vapor's routes v2 serves (Vapor is gone; an
+# unported route is a 404).
 #
 #   scripts/coverage.sh            # summary per top-level prefix
 #   scripts/coverage.sh --missing  # every unported route
@@ -13,8 +14,8 @@ cd "$(dirname "$0")/.."
 norm() { sed -E 's#:[A-Za-z0-9_]+#:p#g; s#\*\*#*#g' | sort -u; }
 
 vapor="$(norm < docs/vapor-routes.txt)"
-# echo adds RouteNotFound catch-alls for group middleware; the strangler
-# ignores them, so they are not v2 routes.
+# echo adds RouteNotFound catch-alls for group middleware; they are not v2
+# routes.
 v2="$(go run ./cmd/api routes 2>/dev/null | grep -v "^echo_route_not_found " | norm)"
 
 ported="$(comm -12 <(echo "$vapor") <(echo "$v2"))"

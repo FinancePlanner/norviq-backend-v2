@@ -1,43 +1,33 @@
-# Porting a Vapor controller to v2
+# Writing and changing routes in v2
 
-v2 replaces `norviq-backend` (Swift/Vapor) route by route. Clients (iOS, the Go
-web app, web-v2 on Cloudflare, norviq-mcp) do not change, so **every ported
-route must answer exactly as Vapor does**: same method and path, status codes,
-JSON keys, value formats, error envelope, auth rules, rate limits, and side
-effects in the database. When in doubt, Vapor's behavior wins over what looks
-cleaner. Port bugs faithfully, but write each one down in your report.
+v2 is the Norviq API. It replaced `norviq-backend` (Swift/Vapor), which is
+archived for good; see `docs/MIGRATION.md`. Clients (iOS, web-v2 on Cloudflare,
+norviq-mcp) were built against Vapor's wire contract, so **every route answers
+exactly as Vapor did**: same method and path, status codes, JSON keys, value
+formats, error envelope, auth rules, rate limits, and side effects in the
+database. A change to any of those is a client contract change and needs the
+clients to change with it. Vapor bugs were ported faithfully; whether each is
+fixed or kept is recorded in `docs/vapor-bugs/`.
 
-## How the strangler works
+## Ground rules
 
-v2 serves the routes registered in `internal/features`. Any other request is
-reverse-proxied to Vapor untouched (`internal/server/strangler.go`). Both
-processes share one Postgres and one Redis. So:
+- v2 serves the routes registered in `internal/features`. Any other request
+  gets a 404 (or a 405 with `Allow`) in the JSON error envelope.
+- **v2 owns the schema.** A schema change is a new goose migration; follow
+  "Schema changes after cutover" in `docs/MIGRATION.md`.
+- **Background jobs** start only when they are named in `V2_JOBS` (production
+  and staging set `all`). Wrap each tick in `joblock.RunAsLeader` with a
+  stable lock name, so replicas never run a tick at the same time.
+- Fixes go here. Never write code in the Swift repo.
 
-- Port a route completely or not at all. Partial behavior is worse than
-  proxying.
-- `V2_DISABLED_ROUTES="GET /v1/foo/:id,..."` sends a ported route back to
-  Vapor without a deploy. It is the rollback switch.
-- **v2 owns the schema** since the cutover (Vapor is archived). A schema
-  change is a new goose migration; follow "Schema changes after cutover" in
-  `docs/MIGRATION.md`.
-- **Background jobs run in exactly one process.** v2 jobs start only when
-  named in `V2_JOBS`, and each flips there at the same time as Vapor's copy is
-  switched off. Port the job, and say in your report which Vapor env/flag turns
-  Vapor's copy off.
-
-## Source of truth
+## Reference
 
 | What | Where |
 |---|---|
-| Every route, as Vapor mounts it | `docs/vapor-routes.txt` (693 routes, every feature flag on) |
-| Vapor sources (snapshot this port targets) | `/Users/fernandocorreiachill/Work/production/apps/norviq/.norviq-backend-snapshot/Sources/StockPlanBackend` |
-| Vapor tests | `.../.norviq-backend-snapshot/Tests/StockPlanBackendTests` |
-| Route registration and middleware per group | `.../StockPlanBackend/routes.swift` and each controller's `boot(routes:)` |
+| Every route, as Vapor mounted it | `docs/vapor-routes.txt` (693 routes, every feature flag on) |
+| Vapor sources, for how a route behaved | GitHub `FinancePlanner/norviq-backend` (archived, read-only): `Sources/StockPlanBackend`, its tests in `Tests/StockPlanBackendTests` |
 | Request/response DTOs (shared with iOS) | `/Users/fernandocorreiachill/Work/production/apps/norviq/norviq-shared/Sources/StockPlanShared` (backend pins v5.25.0) |
-| DB schema | `db/migrations/00001_baseline.sql` (exactly what Vapor's migrations produce) |
-
-Read the controller, its service/repository, its models, and its tests before
-writing Go. Port the tests too.
+| DB schema | `db/migrations` (`00001_baseline.sql` is exactly what Vapor's migrations produced) |
 
 ## Layout
 
@@ -48,7 +38,6 @@ internal/features/<domain>/      handlers, services, DTOs. One package per domai
 db/queries/<domain>/*.sql        sqlc queries -> internal/store/<domain>db
 internal/platform/<name>/        services shared across domains (market data,
                                  entitlements, push, mailer, AI providers, crypto)
-parity/<domain>.jsonl            parity cases (see below)
 ```
 
 Register the feature in `internal/features/features.go` (`All()`), and its
@@ -121,7 +110,7 @@ Mirror the group exactly as the Swift `boot(routes:)` builds it:
 | `ScopeRequirementMiddleware.require(.x, on: req)` | `auth.CheckScope(c, auth.ScopeX)` |
 | `FirstPartyOnlyMiddleware()` | `auth.FirstPartyOnly()` |
 | `AdminGuard.requireAdmin(req)` / `AdminOnlyMiddleware()` | `d.Admin.Require(c)` / `d.Admin.Middleware()` |
-| `RateLimitMiddleware(limit:interval:keyPrefix:)` | `d.Limiter.Limit(limit, interval, "same:prefix")`. Same key prefix: buckets are shared with Vapor through Redis |
+| `RateLimitMiddleware(limit:interval:keyPrefix:)` | `d.Limiter.Limit(limit, interval, "same:prefix")`. Keep Vapor's key prefix: existing buckets in Redis use it |
 | `IdempotencyMiddleware(keyPrefix:)` | `d.Limiter.Idempotency("same:prefix")` |
 | `req.auth.require(SessionToken.self).userId` | `s, err := auth.Require(c)`; `s.UserID` |
 
@@ -134,65 +123,25 @@ pages, `.well-known`). Echo path params use `:name`, the same as Vapor.
 
 ## Tests
 
-- Port the Swift tests for your domain into Go tests with
+- Test a feature with
   `testutil.NewApp(t, []server.Feature{yourdomain.Feature{}})`. It gives you a
   fresh migrated database per test (`TEST_DATABASE_URL` must point at a
   disposable Postgres admin URL), `app.CreateUser`, `app.Token`, `app.Do`.
-- `testutil.NewApp` has **no legacy upstream**: an unported route returns 404,
-  so a test cannot pass by silently reaching Vapor.
+- A route the features under test do not register returns 404.
 - Never call a real external API in tests. Use `httptest` stub servers and
   point the provider base URL at them.
 - Run `go test ./... -count=1 -race` and `golangci-lint run` before you report.
 
-## Parity check against live Vapor
+## Parity tool (history)
 
-A Vapor build of the snapshot and a scratch Postgres are already running for
-the whole migration:
-
-- Vapor: `http://127.0.0.1:8081` (`JWT_SECRET=parity-secret`, DB below)
-- Postgres: `postgres://pg:pg@127.0.0.1:55499/norviq` (scratch, safe to mutate)
-- Test admin URL: `TEST_DATABASE_URL=postgres://pg:pg@127.0.0.1:55499/postgres?sslmode=disable`
-
-Start your v2 build on your assigned port, against the same database:
-
-```
-set -a; . ./.env.example; set +a
-PORT=<your port> LEGACY_UPSTREAM_URL=http://127.0.0.1:8081 go run ./cmd/api serve
-```
-
-Write cases to `parity/<domain>.jsonl` and run:
-
-```
-go run ./cmd/parity -a http://127.0.0.1:8081 -b http://127.0.0.1:<port> \
-  -jwt-secret parity-secret -cases parity/<domain>.jsonl -ignore requestId,<volatile keys>
-```
-
-`"as":"<user uuid>"` signs a session for that user. Create parity users and
-data with SQL against the scratch DB, or through Vapor's own endpoints.
-Mutating cases run twice (Vapor first, then v2), so design them to be
-repeatable, or compare only shape and status. Every read route you port needs
-at least one passing parity case. Every write route needs one for its success
-status/shape and one for its main error path. The `curl` command is blocked
-in this environment; use the parity tool or Go tests.
-
-To see Vapor's behavior for an env-gated feature, start another Vapor
-instance with your flags on a free port:
-
-```
-cd /Users/fernandocorreiachill/Work/production/apps/norviq/.norviq-backend-snapshot
-DATABASE_HOST=127.0.0.1 DATABASE_PORT=55499 DATABASE_USERNAME=pg DATABASE_PASSWORD=pg \
-DATABASE_NAME=norviq JWT_SECRET=parity-secret <FLAGS> \
-  "$(swift build --show-bin-path)/StockPlanBackend" serve --port <free port>
-```
+`cmd/parity` and `parity/*.jsonl` diffed v2 against a running Vapor during the
+port. Vapor no longer runs, so they cannot be run as a check now. Pin
+behavior with Go tests instead.
 
 ## Done means
 
-1. Every route in your scope appears in `scripts/coverage.sh` as ported.
-2. Ported tests pass, plus new ones for anything Swift left untested.
-3. Parity cases pass against Vapor, or every remaining diff is listed in your
-   report with the reason (e.g. Vapor nondeterminism).
-4. `golangci-lint run` passes. Files are gofumpt-formatted (`make hooks`
+1. Tests cover every route you add or change, including its main error path.
+2. `golangci-lint run` passes. Files are gofumpt-formatted (`make hooks`
    installs the pre-commit hook that does this).
-5. Committed on your branch. Your report lists: routes ported, jobs ported
-   (and the Vapor flag that disables Vapor's copy), env vars read, deviations
-   from Vapor, and anything left for later.
+3. Your report lists the routes and jobs added or changed, the env vars read,
+   and any client contract change.

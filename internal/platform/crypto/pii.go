@@ -172,7 +172,8 @@ func (p *PII) open(payload []byte, version int, aad []byte) (string, error) {
 // PIIFromEnv reads USER_PII_ENCRYPTION_ACTIVE_KEY_ID, USER_PII_ENCRYPTION_ACTIVE_KEY
 // and USER_PII_ENCRYPTION_PREVIOUS_KEYS ("id:base64,id:base64"), exactly as
 // UserPIIEncryptionBootstrap does. Outside production a missing key falls
-// back to Vapor's fixed development key, so both processes agree locally.
+// back to Vapor's fixed development key, so data written by a local Vapor
+// database stays readable.
 func PIIFromEnv(isProduction bool, logger *slog.Logger) (*PII, error) {
 	return PIIFromLookup(isProduction, logger, os.Getenv)
 }

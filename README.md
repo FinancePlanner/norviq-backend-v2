@@ -1,19 +1,21 @@
 # norviq-backend-v2
 
-The Norviq API in Go: Echo v5, pgx, sqlc, goose, caarlos0/env. It replaces the
-Swift/Vapor `norviq-backend` route by route behind the same hostname, and the
-wire contract is identical. See [docs/MIGRATION.md](docs/MIGRATION.md) for the
-plan and [docs/PORTING.md](docs/PORTING.md) for how to port a controller.
+The Norviq API in Go: Echo v5, pgx, sqlc, goose, caarlos0/env. It replaced the
+Swift/Vapor `norviq-backend` on 2026-10-30 with an identical wire contract.
+Vapor is archived for good: there is no rollback to it, and no code goes to the
+Swift repo. See [docs/MIGRATION.md](docs/MIGRATION.md) for the record of the
+migration and [docs/PORTING.md](docs/PORTING.md) for how to write and change
+routes.
 
 ## Develop
 
 ```sh
 make hooks                       # gofumpt + golangci-lint pre-commit hook
 cp .env.example .env             # then: set -a; . ./.env; set +a
-go run ./cmd/api serve           # serves ported routes, proxies the rest to LEGACY_UPSTREAM_URL
+go run ./cmd/api serve           # serves every registered route; anything else is a 404
 go run ./cmd/api migrate         # goose up (adopts a Vapor-migrated DB first)
 go run ./cmd/api routes          # every route v2 serves
-scripts/coverage.sh              # ported vs Vapor's 693 routes
+scripts/coverage.sh              # served vs Vapor's 693 routes
 ```
 
 Tests need a disposable Postgres:
@@ -30,13 +32,13 @@ in parallel and take milliseconds to set up.
 | Path | What |
 |---|---|
 | `cmd/api` | server, `migrate`, `routes` |
-| `cmd/parity` | replays requests against Vapor and v2 and diffs them |
+| `cmd/parity` | replayed requests against Vapor and v2 and diffed them (history: needs a running Vapor) |
 | `internal/apijson` | the Vapor wire format: dates, uppercase UUIDs, snake/camel request keys |
 | `internal/httpx` | error envelope, JSON helpers |
 | `internal/auth` | session JWTs, PATs, OAuth tokens, scopes, admin allowlist |
 | `internal/middleware` | client IP, rate limit, idempotency, security headers, request log |
-| `internal/server` | echo assembly, health, strangler proxy |
-| `internal/features/<domain>` | ported controllers |
+| `internal/server` | echo assembly, health |
+| `internal/features/<domain>` | one package per domain (ported from Vapor's controllers) |
 | `internal/platform/<name>` | services shared across domains |
 | `db/migrations` | goose migrations (00001 = Vapor's schema) |
 | `db/queries/<domain>` | sqlc queries → `internal/store/<domain>db` |

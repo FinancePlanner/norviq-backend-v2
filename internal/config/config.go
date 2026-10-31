@@ -2,8 +2,9 @@
 //
 // Feature packages own their own settings: each declares a struct with `env`
 // tags and calls Load on it, so adding a variable never touches this file.
-// Variable names are the Vapor backend's, unchanged, so the same Helm values
-// and sealed secrets configure both during the migration.
+// Variable names are the Vapor backend's, unchanged, so the Helm values and
+// sealed secrets written for Vapor still configure v2. Unknown variables are
+// ignored, so a leftover one (e.g. V2_DISABLED_ROUTES) is harmless.
 package config
 
 import (
@@ -39,19 +40,13 @@ type Base struct {
 
 	JWTSecret string `env:"JWT_SECRET" envDefault:"dev-secret"`
 
-	AllowedOrigins      string   `env:"ALLOWED_ORIGINS"`
-	TrustedProxyCIDRs   string   `env:"TRUSTED_PROXY_CIDRS" envDefault:"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,100.64.0.0/10"`
-	EdgeClientIPKey     string   `env:"EDGE_CLIENT_IP_KEY"`
-	AdminUserIDsRaw     string   `env:"NORVIQ_ADMIN_USER_IDS"`
-	APIDocsEnabled      *bool    `env:"API_DOCS_ENABLED"`
-	LegacyUpstreamURL   string   `env:"LEGACY_UPSTREAM_URL"`
-	PrometheusEnabled   bool     `env:"PROMETHEUS_ENABLED"`
-	MetricsSecret       string   `env:"METRICS_SECRET"`
-	ExtraDisabledRoutes []string `env:"V2_DISABLED_ROUTES" envSeparator:","`
-	// NativePrefixes, when set, limits v2 to the ported routes under these
-	// path prefixes; every other request goes to Vapor. It lets a release
-	// flip one domain at a time (e.g. "/v1/auth,/health").
-	NativePrefixes []string `env:"V2_NATIVE_PREFIXES" envSeparator:","`
+	AllowedOrigins    string `env:"ALLOWED_ORIGINS"`
+	TrustedProxyCIDRs string `env:"TRUSTED_PROXY_CIDRS" envDefault:"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,100.64.0.0/10"`
+	EdgeClientIPKey   string `env:"EDGE_CLIENT_IP_KEY"`
+	AdminUserIDsRaw   string `env:"NORVIQ_ADMIN_USER_IDS"`
+	APIDocsEnabled    *bool  `env:"API_DOCS_ENABLED"`
+	PrometheusEnabled bool   `env:"PROMETHEUS_ENABLED"`
+	MetricsSecret     string `env:"METRICS_SECRET"`
 	// PprofAddr, when set (e.g. "127.0.0.1:6060"), serves net/http/pprof
 	// on its own listener; see docs/pprof.md.
 	PprofAddr string `env:"PPROF_ADDR"`

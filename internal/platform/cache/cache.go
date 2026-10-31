@@ -6,11 +6,11 @@
 // than an error. An unreachable Redis means "pay the upstream again", never
 // "fail the request", so callers do not handle errors from it.
 //
-// Vapor and v2 share one Redis during the migration, so keys are passed
-// through verbatim and values are the JSON Foundation's default JSONEncoder
-// wrote: property names as declared, nil optionals omitted. Values carrying a
-// Swift `Date` must use SwiftDate, which encodes the way that encoder did
-// (seconds since 2001-01-01, as a number), or Vapor reads them as a miss.
+// Keys and values are Vapor's, kept from when Vapor and v2 shared this Redis:
+// keys are passed through verbatim and values are the JSON Foundation's
+// default JSONEncoder wrote: property names as declared, nil optionals
+// omitted. Values carrying a Swift `Date` use SwiftDate, which encodes the way
+// that encoder did (seconds since 2001-01-01, as a number).
 package cache
 
 import (

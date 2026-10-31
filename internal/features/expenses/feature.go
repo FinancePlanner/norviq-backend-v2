@@ -38,7 +38,7 @@ type Feature struct {
 	// evaluated after expense writes.
 	Drift func(d *server.Deps) DriftEvaluator
 	// Overview wires GET /v1/reports/overview. Nil: the route is not
-	// registered and stays on Vapor.
+	// registered (404).
 	Overview func(d *server.Deps) OverviewSource
 	// Service overrides the shared service (tests).
 	Service *Service

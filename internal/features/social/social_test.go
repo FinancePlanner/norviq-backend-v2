@@ -316,6 +316,25 @@ func TestPrivacyDefaultsAndPartialPut(t *testing.T) {
 	if r := e.call(http.MethodPut, "/v1/social/privacy", a, missing); r.Status != 400 {
 		t.Fatalf("missing = %d", r.Status)
 	}
+
+	// snake_case show_xp is rewritten to showXp, which never matched
+	// showXP: Vapor answered 400 "No such key 'showXP'". apijson.LookupKey's
+	// case-insensitive fallback accepts it now.
+	snake := map[string]any{
+		"search_visibility": "nobody", "discoverable_by_contacts": false, "discoverable_by_x": false,
+		"show_return_percent": false, "show_streaks": false, "show_xp": false, "leaderboard_opt_in": false,
+	}
+	if r := e.call(http.MethodPut, "/v1/social/privacy", a, snake); r.Status != 200 {
+		t.Fatalf("snake_case = %d %s", r.Status, r.Body)
+	} else if r.decode(t, &p); p.ShowXP || p.SearchVisibility != "nobody" || p.ShowStreaks {
+		t.Fatalf("snake_case = %+v", p)
+	}
+	// The camelCase key still wins over its snake_case twin.
+	twin := defaultPrivacy()
+	twin["show_xp"] = false
+	if e.call(http.MethodPut, "/v1/social/privacy", a, twin).decode(t, &p); !p.ShowXP {
+		t.Fatalf("twin = %+v", p)
+	}
 }
 
 func TestContactMatching(t *testing.T) {

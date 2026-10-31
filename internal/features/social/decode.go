@@ -123,8 +123,15 @@ func joinPath(path []string, name string) string {
 
 func decodeFields(obj map[string]json.RawMessage, fields []field, path []string) (map[string]any, error) {
 	out := map[string]any{}
+	names := make([]string, len(fields))
+	for i, f := range fields {
+		names[i] = f.name
+	}
 	for _, f := range fields {
-		v, present := obj[f.name]
+		// LookupKey: "show_xp" is rewritten to "showXp", which an exact
+		// lookup of showXP missed (a 400 in Vapor). Siblings that differ
+		// only by case (redirectURI, redirectUri) stay exact.
+		v, present := apijson.LookupKey(obj, f.name, names...)
 		isNull := present && bytes.Equal(bytes.TrimSpace(v), []byte("null"))
 		if !present || isNull {
 			if !f.required {

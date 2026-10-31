@@ -255,6 +255,19 @@ func rewrite(node any, t reflect.Type) any {
 			key := k
 			if strings.Contains(k, "_") {
 				key = NormalizeSnakeCaseKey(k)
+				// The rewrite spells an acronym segment as one capital
+				// ("show_source_urls" -> "showSourceUrls"), so it can miss a
+				// Swift property such as showSourceURLs. When the exact
+				// name misses, take the one field that matches it
+				// case-insensitively. Two such fields: pick none, so the
+				// value cannot land on whichever is declared first.
+				if fields != nil {
+					name, m := resolveField(fields, key)
+					if m == fieldAmbiguous {
+						continue
+					}
+					key = name
+				}
 			}
 			// A camelCase key wins over its snake_case twin, matching the
 			// last-write order Foundation is not guaranteed to give either way.
@@ -288,17 +301,80 @@ func rewrite(node any, t reflect.Type) any {
 }
 
 // lookupField matches a key to a field the way encoding/json does: exact
-// name first, then case-insensitively.
+// name first, then case-insensitively. A key that matches two fields only
+// case-insensitively has no type (it used to get either one at random).
 func lookupField(fields map[string]reflect.Type, key string) (reflect.Type, bool) {
-	if ft, ok := fields[key]; ok {
-		return ft, true
+	name, m := resolveField(fields, key)
+	if m == fieldMissing || m == fieldAmbiguous {
+		return nil, false
 	}
-	for name, ft := range fields {
+	return fields[name], true
+}
+
+type fieldMatch int
+
+const (
+	fieldMissing   fieldMatch = iota // no field has this name, in any case
+	fieldExact                       // a field has exactly this name
+	fieldFolded                      // exactly one field has this name in another case
+	fieldAmbiguous                   // two or more fields have this name in another case
+)
+
+// resolveField finds the field name that key decodes into: key itself when
+// a field has that exact name, else the single field whose name equals key
+// case-insensitively. It returns key unchanged when there is no such field
+// or more than one.
+func resolveField[V any](fields map[string]V, key string) (string, fieldMatch) {
+	if _, ok := fields[key]; ok {
+		return key, fieldExact
+	}
+	found, n := "", 0
+	for name := range fields {
 		if strings.EqualFold(name, key) {
-			return ft, true
+			found, n = name, n+1
 		}
 	}
-	return nil, false
+	switch n {
+	case 0:
+		return key, fieldMissing
+	case 1:
+		return found, fieldFolded
+	default:
+		return key, fieldAmbiguous
+	}
+}
+
+// LookupKey reads name from a keyed container that went through the
+// snake_case rewrite (UnmarshalKeyed into map[string]json.RawMessage), for
+// hand-written decoders that look Swift property names up one by one.
+//
+// An exact key always wins. Only when it is absent does the lookup fall
+// back to the single key that equals name case-insensitively: the rewrite
+// turns "show_source_urls" into "showSourceUrls" and "show_xp" into
+// "showXp", which the Swift properties showSourceURLs and showXP never
+// matched, so Vapor answered those snake_case bodies with a 400. Two keys
+// that differ from name only by case are ambiguous and match neither.
+//
+// siblings are the other names the decoder reads from the same container.
+// A name that equals one of them case-insensitively (a DTO with both
+// redirectURI and redirectUri) is matched exactly only, so one key never
+// feeds two properties. A decoder that cannot list its siblings must not
+// read two names that differ only by case.
+func LookupKey[V any](obj map[string]V, name string, siblings ...string) (V, bool) {
+	var zero V
+	if v, ok := obj[name]; ok {
+		return v, true
+	}
+	for _, s := range siblings {
+		if s != name && strings.EqualFold(s, name) {
+			return zero, false
+		}
+	}
+	key, m := resolveField(obj, name)
+	if m != fieldFolded {
+		return zero, false
+	}
+	return obj[key], true
 }
 
 var fieldCache sync.Map // reflect.Type -> map[string]reflect.Type

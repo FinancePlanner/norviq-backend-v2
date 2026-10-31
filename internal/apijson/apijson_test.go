@@ -2,6 +2,7 @@ package apijson
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -156,5 +157,151 @@ func TestUnmarshalKeyedRewritesRawContainers(t *testing.T) {
 	}
 	if string(obj["appUserId"]) != `{"innerKey":1}` {
 		t.Errorf("got %v", obj)
+	}
+}
+
+// show_source_urls rewrites to showSourceUrls; the Swift property is
+// showSourceURLs. The fallback maps a rewritten key that misses exactly to
+// the one field that matches it case-insensitively.
+func TestUnmarshalAcronymFieldsFromSnakeCase(t *testing.T) {
+	type settings struct {
+		ShowSourceURLs bool `json:"showSourceURLs"`
+		ShowXP         bool `json:"showXP"`
+		Nested         *struct {
+			FeedIDs []string `json:"feedIDs"`
+			Extra   struct {
+				InnerKey int `json:"innerKey"`
+			} `json:"extra"`
+		} `json:"nestedURLs"`
+	}
+	var s settings
+	raw := `{"show_source_urls":true,"show_xp":true,"nested_urls":{"feed_ids":["a"],"extra":{"inner_key":7}}}`
+	if err := Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ShowSourceURLs || !s.ShowXP || s.Nested == nil || len(s.Nested.FeedIDs) != 1 || s.Nested.Extra.InnerKey != 7 {
+		t.Fatalf("decoded to %+v (nested %+v)", s, s.Nested)
+	}
+	// The rewritten key now carries the field's exact name.
+	out, err := normalizeKeys([]byte(raw), reflect.TypeFor[settings]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"nestedURLs":{"extra":{"innerKey":7},"feedIDs":["a"]},"showSourceURLs":true,"showXP":true}` {
+		t.Fatalf("normalized %s", out)
+	}
+}
+
+// The camelCase spelling still wins over its snake_case twin when the twin
+// reaches the field only through the fallback (before, the twin sorted
+// after it and overwrote it).
+func TestUnmarshalExactCamelBeatsFoldedTwin(t *testing.T) {
+	var s struct {
+		ShowSourceURLs bool `json:"showSourceURLs"`
+	}
+	if err := Unmarshal([]byte(`{"show_source_urls":false,"showSourceURLs":true}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ShowSourceURLs {
+		t.Fatal("snake_case twin overwrote the camelCase key")
+	}
+}
+
+// An exact field name always wins over a case-insensitive one, and a
+// rewritten key that matches two fields only by case decodes into neither.
+func TestUnmarshalFallbackExactWinsAndAmbiguityPicksNone(t *testing.T) {
+	var exact struct {
+		Folded string `json:"fooID"`
+		Exact  string `json:"fooId"`
+	}
+	if err := Unmarshal([]byte(`{"foo_id":"x"}`), &exact); err != nil {
+		t.Fatal(err)
+	}
+	if exact.Exact != "x" || exact.Folded != "" {
+		t.Fatalf("exact match lost: %+v", exact)
+	}
+	var amb struct {
+		First  string `json:"barURLs"`
+		Second string `json:"barUrLs"`
+		Other  string `json:"other"`
+	}
+	if err := Unmarshal([]byte(`{"bar_urls":"x","other_":"y"}`), &amb); err != nil {
+		t.Fatal(err)
+	}
+	if amb.First != "" || amb.Second != "" || amb.Other != "y" {
+		t.Fatalf("ambiguous key landed on a field: %+v", amb)
+	}
+	// The type used to rewrite nested keys is deterministic too: no type.
+	fields := structFields(reflect.TypeOf(amb))
+	for range 50 {
+		if _, ok := lookupField(fields, "barurls"); ok {
+			t.Fatal("ambiguous key resolved to a field")
+		}
+	}
+}
+
+// Keys the client spelled in camelCase, and every map key, are untouched
+// by the fallback.
+func TestUnmarshalFallbackLeavesCamelAndMapKeys(t *testing.T) {
+	type body struct {
+		Tags map[string]bool `json:"tagIDs"`
+	}
+	out, err := normalizeKeys([]byte(`{"tag_ids":{"show_xp":true,"showxp":true},"shOwXp":1}`), reflect.TypeFor[body]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"shOwXp":1,"tagIDs":{"show_xp":true,"showxp":true}}` {
+		t.Fatalf("normalized %s", out)
+	}
+}
+
+func TestLookupKey(t *testing.T) {
+	var obj map[string]json.RawMessage
+	if err := UnmarshalKeyed([]byte(`{"show_source_urls":true,"show_xp":false,"plain":1}`), &obj); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"showSourceURLs": "true", "showXP": "false", "plain": "1"} {
+		if v, ok := LookupKey(obj, name); !ok || string(v) != want {
+			t.Errorf("%s: %q %v", name, v, ok)
+		}
+	}
+	if _, ok := LookupKey(obj, "missing"); ok {
+		t.Error("missing key found")
+	}
+	// Exact wins over a key that only folds to the name.
+	both := map[string]int{"showXP": 1, "showXp": 2}
+	if v, _ := LookupKey(both, "showXP"); v != 1 {
+		t.Errorf("exact lost: %d", v)
+	}
+	if v, _ := LookupKey(both, "showXp"); v != 2 {
+		t.Errorf("exact lost: %d", v)
+	}
+	// Two keys that only fold to the name: neither.
+	if v, ok := LookupKey(map[string]int{"showXp": 1, "SHOWXP": 2}, "showXP"); ok {
+		t.Errorf("ambiguous key resolved to %d", v)
+	}
+	if _, ok := LookupKey(map[string]int(nil), "x"); ok {
+		t.Error("nil map")
+	}
+}
+
+// A decoder that reads two names differing only by case (redirectURI and
+// redirectUri) gets exact matches only, so one key never feeds both.
+func TestLookupKeySiblingsDifferingByCaseStayExact(t *testing.T) {
+	names := []string{"redirectURI", "redirectUri", "other"}
+	obj := map[string]int{"redirectUri": 1, "OTHER": 2}
+	if _, ok := LookupKey(obj, "redirectURI", names...); ok {
+		t.Error("redirectURI fell back to redirectUri")
+	}
+	if v, ok := LookupKey(obj, "redirectUri", names...); !ok || v != 1 {
+		t.Errorf("redirectUri: %d %v", v, ok)
+	}
+	// Names without a case twin still fall back.
+	if v, ok := LookupKey(obj, "other", names...); !ok || v != 2 {
+		t.Errorf("other: %d %v", v, ok)
+	}
+	// Without the sibling list the fallback would take it.
+	if v, ok := LookupKey(obj, "redirectURI"); !ok || v != 1 {
+		t.Errorf("no siblings: %d %v", v, ok)
 	}
 }

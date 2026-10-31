@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/store/achievementsdb"
@@ -435,8 +436,10 @@ func startOfDayUTC(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-// inferSector is DatabaseStatisticsRepository.inferSector, quirks included
-// ("ai" matches any word containing it).
+// inferSector is DatabaseStatisticsRepository.inferSector, except that "ai"
+// must be a word of its own. Vapor matched it as a substring, so "retail",
+// "maintain" or "said" read as Technology, and since Technology is checked
+// before Consumer every retail thesis landed there.
 func inferSector(symbol string, notes []achievementsdb.StatsResearchNotesRow) string {
 	parts := make([]string, 0, len(notes)*4)
 	deref := func(s *string) string {
@@ -457,10 +460,14 @@ func inferSector(symbol string, notes []achievementsdb.StatsResearchNotesRow) st
 		}
 		return false
 	}
+	words := map[string]bool{}
+	for _, w := range strings.FieldsFunc(blob, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		words[w] = true
+	}
 	switch {
 	case has("bank", "insurance", "financial"):
 		return "Financials"
-	case has("semiconductor", "software", "cloud", "ai"):
+	case has("semiconductor", "software", "cloud") || words["ai"]:
 		return "Technology"
 	case has("oil", "gas", "energy"):
 		return "Energy"

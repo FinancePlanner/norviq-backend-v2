@@ -55,7 +55,9 @@ SELECT id, username, email FROM users WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 SELECT id FROM users WHERE email = $1 LIMIT 1;
 
 -- name: ActiveMemberships :many
-SELECT * FROM portfolio_memberships WHERE portfolio_id = $1 AND status = 'active';
+-- Join order (Vapor's query had no ORDER BY).
+SELECT * FROM portfolio_memberships WHERE portfolio_id = $1 AND status = 'active'
+ORDER BY joined_at ASC NULLS LAST, created_at ASC NULLS LAST, id;
 
 -- name: CountActiveMemberships :one
 SELECT count(*) FROM portfolio_memberships WHERE portfolio_id = $1 AND status = 'active';

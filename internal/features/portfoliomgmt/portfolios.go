@@ -77,11 +77,15 @@ func (h *handlers) list(c *echo.Context) error {
 	items := []Portfolio{}
 	owned = append(owned, shared...)
 	all := owned
+	// A membership row on a portfolio the caller also owns listed it twice
+	// in Vapor; each portfolio appears once, in its owned position.
+	seen := make(map[uuid.UUID]bool, len(all))
 	for i := range all {
 		p := &all[i]
-		if p.ArchivedAt != nil {
+		if p.ArchivedAt != nil || seen[p.ID] {
 			continue
 		}
+		seen[p.ID] = true
 		ac, err := h.access.Require(ctx, h.db, p.ID, s.UserID, portfolios.RequireOptions{})
 		if err != nil {
 			return err
@@ -601,7 +605,20 @@ func (h *handlers) compare(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return httpx.OK(c, makeComparison(l, leftStocks, r, rightStocks))
+	// Vapor reported cashBalance 0 for both sides; v2 reports each
+	// portfolio's cash as /v1/portfolio/summary does.
+	leftCash, err := portfolios.TotalCashBalance(ctx, h.db, l.Portfolio.UserID, &leftID)
+	if err != nil {
+		return err
+	}
+	rightCash, err := portfolios.TotalCashBalance(ctx, h.db, r.Portfolio.UserID, &rightID)
+	if err != nil {
+		return err
+	}
+	out := makeComparison(l, leftStocks, r, rightStocks)
+	out.Left.CashBalance = leftCash
+	out.Right.CashBalance = rightCash
+	return httpx.OK(c, out)
 }
 
 // queryValueNotFound is URLEncodedFormDecoder's valueNotFound for a missing
@@ -647,7 +664,8 @@ func total(m map[string]float64) float64 {
 	return t
 }
 
-// makeComparison is PortfolioManagementController.makeComparison.
+// makeComparison is PortfolioManagementController.makeComparison (cash is
+// filled in by the caller).
 func makeComparison(left portfolios.AccessContext, leftStocks []portfoliomgmtdb.Stock, right portfolios.AccessContext, rightStocks []portfoliomgmtdb.Stock) Comparison {
 	lv, rv := symbolValues(leftStocks), symbolValues(rightStocks)
 	lt, rt := total(lv), total(rv)

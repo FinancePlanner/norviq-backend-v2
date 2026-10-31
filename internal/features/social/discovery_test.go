@@ -202,7 +202,7 @@ func TestFacebookWebFlow(t *testing.T) {
 	ep := social.DefaultEndpoints()
 	ep.FacebookGraph = g.srv.URL
 	ep.FacebookDialog = "https://fb.test/dialog/oauth"
-	e := setup(t, social.Feature{Endpoints: &ep}, "SOCIAL_FACEBOOK_IMPORT_ENABLED", "1", "FACEBOOK_APP_ID", "ios-app,web-app",
+	e := setup(t, social.Feature{Endpoints: &ep}, "SOCIAL_FACEBOOK_IMPORT_ENABLED", "1", "FACEBOOK_APP_ID", "web-app,ios-app",
 		"FACEBOOK_APP_SECRET", "fb-secret", "OAUTH_ALLOWED_REDIRECT_URIS", "https://norviq.test/cb")
 	a, b, c := e.user("fb_web1"), e.user("fb_web2"), e.user("fb_web3")
 	e.exec(`INSERT INTO oauth_identities (id, user_id, provider, provider_user_id, created_at) VALUES ($1, $2, 'facebook', 'fb-web-b', now()), ($3, $4, 'facebook', 'fb-web-c', now())`,
@@ -221,7 +221,7 @@ func TestFacebookWebFlow(t *testing.T) {
 			t.Fatalf("start = %+v", res)
 		}
 		q := u.Query()
-		if q.Get("client_id") != "ios-app" || q.Get("scope") != "public_profile,user_friends" || q.Get("redirect_uri") != "https://norviq.test/cb" {
+		if q.Get("client_id") != "web-app" || q.Get("scope") != "public_profile,user_friends" || q.Get("redirect_uri") != "https://norviq.test/cb" {
 			t.Fatalf("query = %v", q)
 		}
 		return res.FlowID, q.Get("state")

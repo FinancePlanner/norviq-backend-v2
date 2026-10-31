@@ -1,12 +1,12 @@
 # Vapor bugs: social & platform
 
-These bugs were ported 1:1 from Vapor and are now being fixed in Go (branches
-`fix/vapor-bugs-social`, `-social-2` (PR #4) and `-social-3`). Status values:
+These bugs were ported 1:1 from Vapor and are now fixed in Go (branches
+`fix/vapor-bugs-social`, `-social-2` (PR #4), `-social-3` and
+`fix/decide-social`). Every item that needed an owner decision has one
+(2026-10-31); the decision is recorded in the row. Status values:
 
 - **FIX**: fixed, with a regression test.
 - **KEEP**: deliberately unchanged.
-- **DECIDE**: needs a product decision from the owner.
-- **PENDING**: not started.
 
 ## Done
 
@@ -30,7 +30,7 @@ These bugs were ported 1:1 from Vapor and are now being fixed in Go (branches
 | Telegram / AI | A typed "don't" declines the pending action | FIX | 52ac08a (PR #4) |
 | Telegram | Pairing sets the dedupe watermark; one undecodable update is skipped, not the batch | FIX | 6e51913 (PR #4) |
 | Assistant | `create_goal` activity label; `update_expense` finds lowercase ids | FIX | d9d6203 (PR #4) |
-| Insights | The daily aggregation reached only the protocol-default `fetchSymbolPosts` (source x), so the sp500 and trending tiers fetched nothing and Direct's StockTwits/Reddit/news never fed the roll-up. Each provider's own override now runs: Fallback tries each link's and the first answer with a post wins, Direct serves its sources. DeepAPI keeps the default (see DECIDE below) | FIX | 2b38d4c |
+| Insights | The daily aggregation reached only the protocol-default `fetchSymbolPosts` (source x), so the sp500 and trending tiers fetched nothing and Direct's StockTwits/Reddit/news never fed the roll-up. Each provider's own override now runs: Fallback tries each link's and the first answer with a post wins, Direct serves its sources. DeepAPI keeps the default (see the KEEP row below) | FIX | 2b38d4c |
 | Insights | StockTwits `created_at` and Reddit's `access_token`/`created_utc` never decoded (the snake_case-rewriting decoder). They decode now, so StockTwits posts keep their time and Reddit is searched when credentials are set | FIX | 2b38d4c |
 | Insights | Hermes sync failed every tick with "Direct provider serves per-symbol posts only." (501) whenever Direct was the link that answered (staging: no Hermes, DeepAPI out of credit), so ticker posts never synced either. A step the chain does not serve now counts as nothing synced; a real failure still fails the run, and in the fallback chain a 501 no longer replaces an earlier real error. Our bug, not a missing upstream endpoint: the 501 is synthesized locally by the Direct provider | FIX | 2b38d4c |
 | Social | An import exchange without a code returned 400 after spending the OAuth flow, so the retry was a 401. The code is now checked before the flow is marked used (after the flow checks, so statuses are unchanged) | FIX | 7f9444b |
@@ -43,22 +43,12 @@ These bugs were ported 1:1 from Vapor and are now being fixed in Go (branches
 | Admin / export | A negative `limit` or `offset` on the export list reached Postgres and answered 500. Negative values now take the defaults (20/0), as malformed ones already did | FIX | 0439df1 |
 | Admin | Unsuspending a user with no settings row inserted a default row. It now writes nothing (suspending still creates the row) | FIX | 0a957a7 |
 | Identity | A password change skipped the password rules that registration, set-password and reset enforce. It now applies them (after the current-password check), with the same reasons | FIX | 8234361 |
-
-## Decide (needs the owner)
-
-| Area | Bug | Options |
-|---|---|---|
-| Insights | DeepAPI's own `fetchSymbolPosts` (X, Reddit, StockTwits, Investing and Seeking Alpha scrapes keyed on stable ids) was never reached in Vapor and is not ported; DeepAPI keeps the default (x via `FetchTickerPosts`). Porting it makes the sp500 and trending tiers spend paid DeepAPI scrapes whenever Hermes has nothing for them (prod has `DEEPAPI_SOCIAL_SCRAPING_ENABLED=true`) | (a) keep as is: no new spend, the cheap tiers get Direct's news (StockTwits returns 403 from the cluster); (b) port the override, maybe behind a new flag and a per-run symbol cap |
-| Social | The Facebook web flow uses the first id in `FACEBOOK_APP_ID` with the single `FACEBOOK_APP_SECRET`. Nothing ties that secret to the first id. Facebook is not configured in production | (a) document "the web app id goes first"; (b) add `FACEBOOK_WEB_APP_ID` (default: the first id) |
-| Articles | Authors can edit an article an admin hid; it stays hidden. An admin who wrote a deleted article can also edit it | (a) keep: authors can fix a hidden article before an admin republishes it; (b) lock hidden articles (a new 403 reason the clients would show) and 404 edits of deleted ones |
-| Admin / export | `type=all` writes a one-row manifest of counts, not the data | (a) keep; (b) a real all-in-one export (JSON object of sections, or a zip of CSVs) |
-| Admin / export | Date filters accept only RFC 3339 without fractional seconds; anything else (a bare `2026-01-01`) is silently ignored and the export is unfiltered. No client sends filters today | (a) keep; (b) also accept dates and fractional seconds; (c) 400 on a filter that does not parse |
-| Admin / export | Pilot (simulated) accounts are left out of the transactions export, on purpose in Vapor | (a) keep (simulated cash is not the user's financial data); (b) include them with a marker |
-
-## Not started (PENDING; recommendation in the last column)
-
-| Area | Bug | Recommendation |
-|---|---|---|
-| apijson | The snake_case `show_source_urls` normalizes to `showSourceUrls` and never matches `showSourceURLs` | FIX: case-insensitive fallback when the exact camel key misses (needs a change in `internal/apijson`) |
-| Articles | Admin delete of a deleted article writes nothing | KEEP candidate (a repeat delete is already a 204) |
-| Groups | Members are sorted in memory; no push throttle without Redis; a digest payload that fails to decode gives a 500 | KEEP (performance and infra only) |
+| Insights | DeepAPI's own `fetchSymbolPosts` (X, Reddit, StockTwits, Investing and Seeking Alpha scrapes keyed on stable ids) was never reached in Vapor and is not ported; DeepAPI keeps the default (x via `FetchTickerPosts`). Owner decision: keep (option a). Porting it would make the sp500 and trending tiers spend paid DeepAPI scrapes whenever Hermes has nothing for them (prod has `DEEPAPI_SOCIAL_SCRAPING_ENABLED=true`); no new paid scrapes. The cheap tiers get Direct's news | KEEP | - |
+| Social | The Facebook web flow uses the first id in `FACEBOOK_APP_ID` with the single `FACEBOOK_APP_SECRET`, and nothing ties that secret to the first id. Owner decision (option a): **the web app id goes first in `FACEBOOK_APP_ID`, and `FACEBOOK_APP_SECRET` is that app's secret**; the other ids (iOS) are only Limited Login audiences, which need no secret. No `FACEBOOK_WEB_APP_ID`. Documented on `facebookConfig.webAppID` and pinned by a test. Facebook is not configured in production | KEEP | e736ccc |
+| Articles | Authors could edit an article an admin hid (it stayed hidden), and an admin who wrote a deleted article could edit it. Owner decision (option b): the author's edit of a hidden article is 403 "This article was hidden by a moderator and can't be edited." (the same `httpx.Forbidden` envelope, code `forbidden`, as "You can only edit your own articles."); an edit of a deleted article is 404 "Article not found", admins included. The web edit form shows any 4xx reason verbatim; iOS has no articles client | FIX | d50a814 |
+| Articles | Admin delete of a deleted article writes nothing. Owner decision: keep; a repeat delete is already a 204 | KEEP | - |
+| Admin / export | `type=all` writes a one-row manifest of counts, not the data. Owner decision: keep | KEEP | - |
+| Admin / export | Date filters accepted only RFC 3339 without fractional seconds; anything else (a bare `2026-01-01`) was silently ignored and the export unfiltered. Owner decision (option b): `dateFrom`/`dateTo` also accept fractional seconds and a bare `yyyy-MM-dd`, which means the start of that UTC day for both. `trade_date` is a date compared with `>=`/`<=`, so `dateTo=2026-01-31` includes trades dated 2026-01-31, exactly as `2026-01-31T00:00:00Z` always did. Any other value is still ignored. No client sends filters today | FIX | 81e5e29 |
+| Admin / export | Pilot (simulated) accounts are left out of the transactions export, on purpose in Vapor. Owner decision: keep (simulated cash is not the user's financial data) | KEEP | - |
+| apijson | The snake_case rewrite spells acronym segments with one capital (`show_source_urls` -> `showSourceUrls`, `show_xp` -> `showXp`), so hand-written keyed decoders never found `showSourceURLs` (reporting) or `showXP` (`PUT /v1/social/privacy`): a 400 in Vapor. `apijson.LookupKey` (used by the social and reporting decoders) and the typed rewrite now fall back to the single case-insensitive match when the exact key misses. An exact key always wins, two candidates match neither, and a name with a case twin among its siblings (`redirectURI`/`redirectUri`) stays exact. Struct targets already decoded through `encoding/json`'s case folding; the rewrite now names the field exactly, so a camelCase key also beats its snake_case twin there | FIX | b429cba |
+| Groups | Members are sorted in memory; there is no push throttle without Redis; a digest payload that fails to decode gives a 500. Owner decision: keep (performance and infra only) | KEEP | - |

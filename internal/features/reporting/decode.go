@@ -102,7 +102,7 @@ func (o obj) missing(key string) error {
 
 // required returns the child for key, or Swift's keyNotFound / valueNotFound.
 func (o obj) required(key, typ string) (node, error) {
-	raw, ok := o.fields[key]
+	raw, ok := apijson.LookupKey(o.fields, key)
 	if !ok {
 		return node{}, o.missing(key)
 	}
@@ -116,7 +116,7 @@ func (o obj) required(key, typ string) (node, error) {
 // optional returns the child for key and false when absent or null
 // (decodeIfPresent).
 func (o obj) optional(key string) (node, bool) {
-	raw, ok := o.fields[key]
+	raw, ok := apijson.LookupKey(o.fields, key)
 	if !ok || kindOf(raw) == "null" {
 		return node{}, false
 	}
@@ -355,14 +355,9 @@ func decodeSettings(o obj) (BlockSettings, error) {
 	}
 	// Deliberate fix: snake_case "show_source_urls" is rewritten to
 	// "showSourceUrls", which Vapor never matched against showSourceURLs,
-	// so snake_case clients always got a 400. Accept the rewritten key.
-	sourceKey := "showSourceURLs"
-	if _, ok := s.fields[sourceKey]; !ok {
-		if _, alt := s.fields["showSourceUrls"]; alt {
-			sourceKey = "showSourceUrls"
-		}
-	}
-	if out.ShowSourceURLs, err = reqBool(s, sourceKey); err != nil {
+	// so snake_case clients always got a 400. obj's lookups use
+	// apijson.LookupKey, which falls back to the case-insensitive match.
+	if out.ShowSourceURLs, err = reqBool(s, "showSourceURLs"); err != nil {
 		return out, err
 	}
 	if out.MaximumRows, err = optInt(s, "maximumRows"); err != nil {

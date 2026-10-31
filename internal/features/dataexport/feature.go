@@ -150,17 +150,30 @@ func (f *exportFilters) toDictionary() map[string]string {
 	return out
 }
 
-// parseISO8601 is ISO8601DateFormatter's default (.withInternetDateTime):
-// no fractional seconds.
-func parseISO8601(s *string) *time.Time {
-	if s == nil || strings.Contains(*s, ".") {
+// parseFilterDate reads a dateFrom/dateTo filter. Vapor used
+// ISO8601DateFormatter's default (.withInternetDateTime), so anything but
+// RFC 3339 without fractional seconds was silently ignored. Deliberate fix
+// (owner decision): it also accepts
+//
+//   - RFC 3339 with fractional seconds ("2026-01-01T00:00:00.000Z");
+//   - a bare date ("2026-01-01"), meaning the start of that UTC day, for
+//     dateFrom and dateTo alike. trade_date is a date compared with >= and
+//     <=, so dateTo=2026-01-31 includes trades dated 2026-01-31, exactly as
+//     dateTo=2026-01-31T00:00:00Z always did.
+//
+// A value that parses as none of these is still ignored (no filter).
+func parseFilterDate(s *string) *time.Time {
+	if s == nil {
 		return nil
 	}
-	t, err := time.Parse(time.RFC3339, *s)
-	if err != nil {
-		return nil
+	v := *s
+	if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return &t
 	}
-	return &t
+	if t, err := time.ParseInLocation(time.DateOnly, v, time.UTC); err == nil {
+		return &t
+	}
+	return nil
 }
 
 // parsed is ExportService.generateExport's filter conversion.
@@ -168,7 +181,7 @@ func (f *exportFilters) parsed() filters {
 	if f == nil {
 		return filters{}
 	}
-	out := filters{start: parseISO8601(f.DateFrom), end: parseISO8601(f.DateTo)}
+	out := filters{start: parseFilterDate(f.DateFrom), end: parseFilterDate(f.DateTo)}
 	if f.PortfolioListID != nil {
 		if id, ok := portfolios.ParseSwiftUUID(*f.PortfolioListID); ok {
 			out.portfolioListID = &id

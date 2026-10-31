@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +150,52 @@ func TestExportCSVAndJSONDownload(t *testing.T) {
 	r.JSON(t, &list)
 	if r.Status != http.StatusOK || len(list.Items) != 2 {
 		t.Fatalf("negative %d %s", r.Status, r.Body)
+	}
+}
+
+// Owner decision (docs/vapor-bugs/social.md): bare dates and fractional
+// seconds filter the transactions export; dateTo is inclusive of its day.
+// An unparseable value is still ignored.
+func TestTransactionsExportDateFilters(t *testing.T) {
+	e := newEnv(t)
+	user := strings.ToUpper(e.user.String())
+	instrument, account := uuid.New(), uuid.New()
+	e.exec(t, `INSERT INTO instruments (id, conid, symbol, exchange, currency, created_at) VALUES ($1, 'c1', 'AAPL', 'NASDAQ', 'USD', now())`, instrument)
+	e.exec(t, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at) VALUES ($1, $2, 'ext', 'ibkr', 'USD', now())`, account, e.user)
+	for _, day := range []string{"2025-12-31", "2026-01-01", "2026-01-31", "2026-02-01"} {
+		e.exec(t, `INSERT INTO transactions (id, account_id, instrument_id, type, currency, trade_date, created_at) VALUES ($1, $2, $3, 'buy', 'USD', $4::date, now())`,
+			uuid.New(), account, instrument, day)
+	}
+	dates := func(filters map[string]any) []string {
+		t.Helper()
+		id := e.create(t, map[string]any{"type": "transactions", "format": "json", "filters": filters})
+		r := e.app.Do(http.MethodGet, "/v1/api/v3/export/file/"+user+"/"+id+".json", e.tok, nil)
+		var rows []struct {
+			TradeDate string `json:"tradeDate"`
+		}
+		r.JSON(t, &rows)
+		out := make([]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, row.TradeDate[:10])
+		}
+		slices.Sort(out)
+		return out
+	}
+	january := []string{"2026-01-01", "2026-01-31"}
+	all := []string{"2025-12-31", "2026-01-01", "2026-01-31", "2026-02-01"}
+	for _, c := range []struct {
+		name     string
+		from, to string
+		want     []string
+	}{
+		{"rfc3339", "2026-01-01T00:00:00Z", "2026-01-31T00:00:00Z", january},
+		{"bare dates", "2026-01-01", "2026-01-31", january},
+		{"fractional seconds", "2026-01-01T00:00:00.000Z", "2026-01-31T00:00:00.000Z", january},
+		{"unparseable is ignored", "Jan 1 2026", "31/01/2026", all},
+	} {
+		if got := dates(map[string]any{"dateFrom": c.from, "dateTo": c.to}); !slices.Equal(got, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

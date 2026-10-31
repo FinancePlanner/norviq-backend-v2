@@ -102,7 +102,7 @@ func (q *Queries) GetCategory(ctx context.Context, id uuid.UUID) (ExpenseCategor
 }
 
 const getExpense = `-- name: GetExpense :one
-SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata FROM expenses WHERE id = $1
+SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata, external_id FROM expenses WHERE id = $1
 `
 
 func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error) {
@@ -126,6 +126,7 @@ func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error)
 		&i.ExchangeRate,
 		&i.Notes,
 		&i.ReceiptMetadata,
+		&i.ExternalID,
 	)
 	return i, err
 }
@@ -238,9 +239,9 @@ const insertExpense = `-- name: InsertExpense :exec
 INSERT INTO expenses (
     id, user_id, title, amount, pillar, occurred_on, linked_item_id, split_mode,
     user_share_percent, category_id, foreign_amount, foreign_currency,
-    exchange_rate, notes, receipt_metadata, created_at, updated_at
+    exchange_rate, notes, receipt_metadata, created_at, updated_at, external_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 `
 
@@ -262,6 +263,7 @@ type InsertExpenseParams struct {
 	ReceiptMetadata  json.RawMessage
 	CreatedAt        *time.Time
 	UpdatedAt        *time.Time
+	ExternalID       *string
 }
 
 func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) error {
@@ -283,6 +285,7 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) er
 		arg.ReceiptMetadata,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.ExternalID,
 	)
 	return err
 }
@@ -504,8 +507,40 @@ func (q *Queries) ListCategories(ctx context.Context, userID uuid.UUID) ([]Expen
 	return items, nil
 }
 
+const listExpenseExternalIDs = `-- name: ListExpenseExternalIDs :many
+SELECT external_id FROM expenses
+WHERE user_id = $1 AND external_id = ANY($2::text[])
+`
+
+type ListExpenseExternalIDsParams struct {
+	UserID      uuid.UUID
+	ExternalIds []string
+}
+
+// The import dedupe: which of these external ids the user already stored
+// (expenses_user_id_external_id_key).
+func (q *Queries) ListExpenseExternalIDs(ctx context.Context, arg ListExpenseExternalIDsParams) ([]*string, error) {
+	rows, err := q.db.Query(ctx, listExpenseExternalIDs, arg.UserID, arg.ExternalIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*string{}
+	for rows.Next() {
+		var external_id *string
+		if err := rows.Scan(&external_id); err != nil {
+			return nil, err
+		}
+		items = append(items, external_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpensesInMonth = `-- name: ListExpensesInMonth :many
-SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata FROM expenses
+SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata, external_id FROM expenses
 WHERE user_id = $1
   AND occurred_on >= $2::timestamptz
   AND occurred_on < $3::timestamptz
@@ -544,6 +579,7 @@ func (q *Queries) ListExpensesInMonth(ctx context.Context, arg ListExpensesInMon
 			&i.ExchangeRate,
 			&i.Notes,
 			&i.ReceiptMetadata,
+			&i.ExternalID,
 		); err != nil {
 			return nil, err
 		}
@@ -556,7 +592,7 @@ func (q *Queries) ListExpensesInMonth(ctx context.Context, arg ListExpensesInMon
 }
 
 const listExpensesPage = `-- name: ListExpensesPage :many
-SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata FROM expenses
+SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata, external_id FROM expenses
 WHERE user_id = $1
   AND ($2::timestamptz IS NULL OR occurred_on >= $2::timestamptz)
   AND ($3::timestamptz IS NULL OR occurred_on <= $3::timestamptz)
@@ -607,6 +643,7 @@ func (q *Queries) ListExpensesPage(ctx context.Context, arg ListExpensesPagePara
 			&i.ExchangeRate,
 			&i.Notes,
 			&i.ReceiptMetadata,
+			&i.ExternalID,
 		); err != nil {
 			return nil, err
 		}
@@ -619,7 +656,7 @@ func (q *Queries) ListExpensesPage(ctx context.Context, arg ListExpensesPagePara
 }
 
 const listExpensesRange = `-- name: ListExpensesRange :many
-SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata FROM expenses
+SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata, external_id FROM expenses
 WHERE user_id = $1
   AND ($2::timestamptz IS NULL OR occurred_on >= $2::timestamptz)
   AND ($3::timestamptz IS NULL OR occurred_on <= $3::timestamptz)
@@ -658,6 +695,7 @@ func (q *Queries) ListExpensesRange(ctx context.Context, arg ListExpensesRangePa
 			&i.ExchangeRate,
 			&i.Notes,
 			&i.ReceiptMetadata,
+			&i.ExternalID,
 		); err != nil {
 			return nil, err
 		}
@@ -992,7 +1030,7 @@ func (q *Queries) PortfolioListOwned(ctx context.Context, arg PortfolioListOwned
 }
 
 const searchExpenses = `-- name: SearchExpenses :many
-SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata FROM expenses
+SELECT id, user_id, title, amount, pillar, occurred_on, linked_item_id, created_at, updated_at, split_mode, user_share_percent, category_id, foreign_amount, foreign_currency, exchange_rate, notes, receipt_metadata, external_id FROM expenses
 WHERE user_id = $1
   AND ($2::timestamptz IS NULL OR occurred_on >= $2::timestamptz)
   AND ($3::timestamptz IS NULL OR occurred_on <= $3::timestamptz)
@@ -1046,6 +1084,7 @@ func (q *Queries) SearchExpenses(ctx context.Context, arg SearchExpensesParams) 
 			&i.ExchangeRate,
 			&i.Notes,
 			&i.ReceiptMetadata,
+			&i.ExternalID,
 		); err != nil {
 			return nil, err
 		}

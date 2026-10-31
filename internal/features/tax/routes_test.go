@@ -296,7 +296,7 @@ func TestDismissRestoreAndNotifications(t *testing.T) {
 
 func TestInstrumentClassification(t *testing.T) {
 	a := newTaxApp(t)
-	s := a.seed(false)
+	s := a.seed(true)
 	path := "/v1/tax/instruments/" + apijson.FormatUUID(s.spy)
 	a.json(http.MethodPut, "/v1/tax/instruments/nope/market-admission", s.token, map[string]any{"status": "regulated"}, 400)
 	a.json(http.MethodPut, path+"/market-admission", s.token, map[string]any{"status": "regulated"}, 422)

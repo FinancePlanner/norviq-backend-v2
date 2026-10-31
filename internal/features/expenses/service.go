@@ -1008,6 +1008,7 @@ func (s *Service) insertExpense(ctx context.Context, db expensesdb.DBTX, e *expe
 		UserSharePercent: e.UserSharePercent, CategoryID: e.CategoryID, ForeignAmount: e.ForeignAmount,
 		ForeignCurrency: e.ForeignCurrency, ExchangeRate: e.ExchangeRate, Notes: e.Notes,
 		ReceiptMetadata: e.ReceiptMetadata, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
+		ExternalID: e.ExternalID,
 	})
 }
 

@@ -122,10 +122,16 @@ SELECT * FROM expenses WHERE id = $1;
 INSERT INTO expenses (
     id, user_id, title, amount, pillar, occurred_on, linked_item_id, split_mode,
     user_share_percent, category_id, foreign_amount, foreign_currency,
-    exchange_rate, notes, receipt_metadata, created_at, updated_at
+    exchange_rate, notes, receipt_metadata, created_at, updated_at, external_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 );
+
+-- name: ListExpenseExternalIDs :many
+-- The import dedupe: which of these external ids the user already stored
+-- (expenses_user_id_external_id_key).
+SELECT external_id FROM expenses
+WHERE user_id = @user_id AND external_id = ANY(@external_ids::text[]);
 
 -- name: UpdateExpense :exec
 UPDATE expenses SET

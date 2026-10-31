@@ -144,8 +144,11 @@ func (h *handlers) saveProfile(c *echo.Context) error {
 
 func pathUUID(c *echo.Context, name string) (uuid.UUID, bool) { return parseUUID(c.Param(name)) }
 
+// saveMarketAdmission is Pro-gated like the other tax writes, and the gate
+// runs before the attestation 422. (Vapor had no gate here: a free user could
+// classify instruments, and got the 422 before any entitlement check.)
 func (h *handlers) saveMarketAdmission(c *echo.Context) error {
-	s, err := auth.Require(c)
+	userID, err := h.pro(c)
 	if err != nil {
 		return err
 	}
@@ -160,7 +163,7 @@ func (h *handlers) saveMarketAdmission(c *echo.Context) error {
 	if req.Status != "unknown" && strings.ToLower(c.Request().Header.Get("X-Tax-Evidence-Attested")) != "true" {
 		return httpx.Unprocessable("Verify market admission against a broker statement or official listing before classification.")
 	}
-	out, err := h.svc.saveMarketAdmission(c.Request().Context(), s.UserID, id, req.Status)
+	out, err := h.svc.saveMarketAdmission(c.Request().Context(), userID, id, req.Status)
 	if err != nil {
 		return err
 	}

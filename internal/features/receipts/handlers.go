@@ -67,6 +67,9 @@ func (h *handlers) ocr(c *echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	// Pro/trial only, and unmetered on purpose: no receipt scan is counted
+	// toward usage (owner decision I2, docs/vapor-bugs/money.md). The gate
+	// is the only check; there is no per-scan quota.
 	if err := h.ent.RequirePremium(ctx, entitlements.FeatureReceiptScan, s.UserID); err != nil {
 		return err
 	}
@@ -103,6 +106,9 @@ func (h *handlers) scan(c *echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	// Pro/trial only, and unmetered on purpose, like /ocr: the images are not
+	// counted toward usage (owner decision I2). Vapor's comment here said they
+	// were "counted per image below", but nothing ever counted them.
 	if err := h.ent.RequirePremium(ctx, entitlements.FeatureReceiptScan, s.UserID); err != nil {
 		return err
 	}

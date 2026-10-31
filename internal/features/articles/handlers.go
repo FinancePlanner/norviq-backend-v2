@@ -46,6 +46,10 @@ type handler struct {
 
 func notFoundArticle() error { return httpx.NotFound("Article not found") }
 
+// hiddenArticleReason is the 403 for an author's edit of an article a
+// moderator hid. The web shows a 4xx reason verbatim in the edit form.
+const hiddenArticleReason = "This article was hidden by a moderator and can't be edited."
+
 // --- wire types (StockPlanShared ArticlesDTOs) ------------------------------
 
 type articleAuthor struct {
@@ -531,8 +535,19 @@ func (h *handler) update(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Deliberate fix (owner decision): Vapor let an admin who wrote a
+	// deleted article edit it. A deleted article is gone for editing, admins
+	// included, with the same 404 as a missing one.
+	if a.Status == "deleted" {
+		return notFoundArticle()
+	}
 	if a.AuthorID != viewer.UserID {
 		return httpx.Forbidden("You can only edit your own articles.")
+	}
+	// Deliberate fix (owner decision): Vapor let the author edit an article
+	// a moderator hid. It is locked until an admin republishes it.
+	if a.Status == "hidden" {
+		return httpx.Forbidden(hiddenArticleReason)
 	}
 	in, err := decodeWriteRequest(c)
 	if err != nil {

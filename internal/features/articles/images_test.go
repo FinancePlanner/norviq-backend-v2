@@ -228,8 +228,10 @@ func TestHiddenIsAuthorAndAdminOnly(t *testing.T) {
 	expectStatus(t, k.send("GET", "/v1/articles/"+code, bo.token, nil, nil), 404)
 	expectStatus(t, k.send("GET", "/v1/articles/"+code, ana.token, nil, nil), 200)
 	expectStatus(t, k.send("GET", "/v1/articles/"+code, admin.token, nil, nil), 200)
-	// The author may still edit a hidden article; votes and views need it published.
-	expectStatus(t, k.send("PATCH", "/v1/articles/"+code, ana.token, articleInput(), nil), 200)
+	// Owner decision: a hidden article is locked for its author (Vapor let
+	// them edit it; see TestEditHiddenOrDeletedArticle). Votes and views
+	// need it published.
+	expectStatus(t, k.send("PATCH", "/v1/articles/"+code, ana.token, articleInput(), nil), 403)
 	expectStatus(t, k.send("POST", "/v1/articles/"+code+"/vote", ana.token, nil, nil), 404)
 	expectStatus(t, k.send("POST", "/v1/articles/"+code+"/view", ana.token, nil, nil), 404)
 	var l listResponse

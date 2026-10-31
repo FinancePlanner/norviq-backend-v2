@@ -505,6 +505,62 @@ func TestEditAndDelete(t *testing.T) {
 	expectStatus(t, k.send("DELETE", "/v1/articles/"+other, admin.token, nil, nil), 204)
 }
 
+// Owner decision (docs/vapor-bugs/social.md): a hidden article is locked for
+// its author, and a deleted one 404s for every editor, admins included.
+// Vapor allowed both edits.
+func TestEditHiddenOrDeletedArticle(t *testing.T) {
+	k := newKit(t, true)
+	ana, bo := k.member("lock_ana"), k.member("lock_bo")
+	admin := k.admin("lock_admin")
+	edit := articleInput().with("title", "An edited title for NEXT")
+
+	hidden := k.publish(ana, articleInput()).Article.Code
+	k.exec(`UPDATE articles SET status = 'hidden' WHERE code = $1`, hidden)
+	r := k.send("PATCH", "/v1/articles/"+hidden, ana.token, edit, nil)
+	if r.status != 403 || r.reason() != "This article was hidden by a moderator and can't be edited." || r.code() != "forbidden" {
+		t.Fatalf("hidden, author: %d %s", r.status, r.body)
+	}
+	// Same envelope as the existing edit 403.
+	var env map[string]any
+	_ = json.Unmarshal(r.body, &env)
+	if env["error"] != true {
+		t.Fatalf("hidden envelope %s", r.body)
+	}
+	// Nothing was written.
+	var title string
+	var edited *time.Time
+	if err := k.app.Deps.DB.QueryRow(context.Background(), `SELECT title, edited_at FROM articles WHERE code = $1`, hidden).Scan(&title, &edited); err != nil {
+		t.Fatal(err)
+	}
+	if title == "An edited title for NEXT" || edited != nil {
+		t.Fatalf("hidden article was edited: %q %v", title, edited)
+	}
+	// Strangers still get the 404 they got before (they can't see it).
+	expectStatus(t, k.send("PATCH", "/v1/articles/"+hidden, bo.token, edit, nil), 404)
+	// A non-author admin still gets the authorship 403.
+	r = k.send("PATCH", "/v1/articles/"+hidden, admin.token, edit, nil)
+	if r.status != 403 || r.reason() != "You can only edit your own articles." {
+		t.Fatalf("hidden, admin: %d %s", r.status, r.body)
+	}
+	// Republished, the author can edit again.
+	k.exec(`UPDATE articles SET status = 'published' WHERE code = $1`, hidden)
+	expectStatus(t, k.send("PATCH", "/v1/articles/"+hidden, ana.token, edit, nil), 200)
+
+	// An admin's own deleted article: 404, not an edit.
+	own := k.publish(admin, articleInput()).Article.Code
+	expectStatus(t, k.send("DELETE", "/v1/articles/"+own, admin.token, nil, nil), 204)
+	expectStatus(t, k.send("GET", "/v1/articles/"+own, admin.token, nil, nil), 200)
+	r = k.send("PATCH", "/v1/articles/"+own, admin.token, edit, nil)
+	if r.status != 404 || r.reason() != "Article not found" {
+		t.Fatalf("deleted, admin author: %d %s", r.status, r.body)
+	}
+	// Someone else's deleted article: 404 for an admin too (was the 403).
+	gone := k.publish(bo, articleInput()).Article.Code
+	expectStatus(t, k.send("DELETE", "/v1/articles/"+gone, bo.token, nil, nil), 204)
+	expectStatus(t, k.send("PATCH", "/v1/articles/"+gone, admin.token, edit, nil), 404)
+	expectStatus(t, k.send("PATCH", "/v1/articles/"+gone, bo.token, edit, nil), 404)
+}
+
 func (k *kit) sanction(m member, kind string) {
 	k.exec(`INSERT INTO community_sanctions (id, user_id, kind, reason, expires_at, created_at)
 		VALUES ($1, $2, $3, 'Testing', now() + interval '1 hour', now())`, uuid.New(), m.id, kind)

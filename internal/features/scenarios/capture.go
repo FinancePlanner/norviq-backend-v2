@@ -185,7 +185,7 @@ func Capture(ctx context.Context, q scenariosdb.Querier, market MarketData, now 
 		items = append(items, item)
 	}
 
-	if err := appendCash(ctx, q, market, userID, baseCurrency, &items, &warnings, &total); err != nil {
+	if err := appendCash(ctx, q, market, userID, portfolioListID, baseCurrency, &items, &warnings, &total); err != nil {
 		return Snapshot{}, err
 	}
 	if err := appendCrypto(ctx, q, market, userID, cryptoHoldingIDs, baseCurrency, &items, &warnings, &total); err != nil {
@@ -202,14 +202,15 @@ func Capture(ctx context.Context, q scenariosdb.Querier, market MarketData, now 
 	}, nil
 }
 
-// appendCash adds the latest balance per account and currency, across every
-// account the user has (not only the snapshot's portfolio, as Vapor did).
-// Vapor iterated a Dictionary, so its cash item order was random; v2 keeps
-// first-seen order.
-func appendCash(ctx context.Context, q scenariosdb.Querier, market MarketData, userID uuid.UUID, baseCurrency string,
+// appendCash adds the latest balance per account and currency of the
+// snapshot's portfolio: the accounts linked to it (accounts.portfolio_id).
+// Vapor read every account the user had, so a snapshot of one portfolio
+// counted the cash of all of them. Vapor iterated a Dictionary, so its cash
+// item order was random; v2 keeps first-seen order.
+func appendCash(ctx context.Context, q scenariosdb.Querier, market MarketData, userID, portfolioListID uuid.UUID, baseCurrency string,
 	items, warnings *[]any, total *float64,
 ) error {
-	balances, err := q.SnapshotCashBalances(ctx, userID)
+	balances, err := q.SnapshotCashBalances(ctx, scenariosdb.SnapshotCashBalancesParams{UserID: userID, PortfolioID: portfolioListID})
 	if err != nil {
 		return err
 	}

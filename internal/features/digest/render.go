@@ -26,6 +26,10 @@ type Renderer struct {
 
 const emailFooter = "Numbers come from your holdings' closing prices and your budget. Not investment advice."
 
+// emailLogoPath is the Precision lockup (175x80, shown at 88x40) that
+// norviq-web-v2 serves from static/static/brand/precision.
+const emailLogoPath = "/static/brand/precision/logo-lockup-email.png"
+
 // Render is DigestEmailRenderer.render.
 func (r Renderer) Render(digestID uuid.UUID, p *Payload, unsubscribeToken string) Rendered {
 	sections := r.Sections(p)
@@ -45,9 +49,15 @@ func (r Renderer) Render(digestID uuid.UUID, p *Payload, unsubscribeToken string
 	}
 	text.WriteString(emailFooter + "\nUnsubscribe: " + unsubscribePage + "\n")
 
+	// Precision identity (norviq/docs/precision-identity.md), light scope: warm
+	// page, white cards, navy ink, deep-gold links. The header is the one navy
+	// band, carrying the raster lockup that norviq-web-v2 serves; the alt text
+	// stands in when a client blocks images.
 	var html strings.Builder
-	html.WriteString(`<!doctype html><html><body style="margin:0;padding:0;background:#f6f7f9;">` +
-		`<div style="max-width:560px;margin:0 auto;padding:24px 16px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#111827;">` +
+	html.WriteString(`<!doctype html><html><body style="margin:0;padding:0;background:#f7f4ee;">` +
+		`<div style="max-width:560px;margin:0 auto;padding:24px 16px;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#111b2b;">` +
+		`<div style="background:#0a101a;border-radius:12px;padding:16px 20px;margin:0 0 20px;">` +
+		`<img src="` + escapeHTML(r.WebBaseURL+emailLogoPath) + `" width="88" height="40" alt="Norviq" style="display:block;border:0;color:#e9e9e5;font-size:18px;font-weight:600;"></div>` +
 		`<h1 style="font-size:20px;line-height:1.3;margin:0 0 20px;">` + escapeHTML(headline) + `</h1>`)
 	for _, s := range sections {
 		html.WriteString(`<div style="background:#ffffff;border-radius:12px;padding:16px;margin:0 0 12px;">` +
@@ -55,10 +65,10 @@ func (r Renderer) Render(digestID uuid.UUID, p *Payload, unsubscribeToken string
 		for _, l := range s.Lines {
 			html.WriteString(`<p style="font-size:14px;line-height:1.5;margin:0 0 4px;">` + escapeHTML(l) + `</p>`)
 		}
-		html.WriteString(`<a href="` + escapeHTML(r.link(digestID, s.Anchor)) + `" style="font-size:13px;color:#2563eb;">Open in Norviq</a></div>`)
+		html.WriteString(`<a href="` + escapeHTML(r.link(digestID, s.Anchor)) + `" style="font-size:13px;color:#80612a;">Open in Norviq</a></div>`)
 	}
-	html.WriteString(`<p style="font-size:12px;color:#6b7280;line-height:1.5;margin:20px 0 0;">` + escapeHTML(emailFooter) + ` ` +
-		`<a href="` + escapeHTML(unsubscribePage) + `" style="color:#6b7280;">Unsubscribe</a></p></div></body></html>`)
+	html.WriteString(`<p style="font-size:12px;color:#4a5568;line-height:1.5;margin:20px 0 0;">` + escapeHTML(emailFooter) + ` ` +
+		`<a href="` + escapeHTML(unsubscribePage) + `" style="color:#4a5568;">Unsubscribe</a></p></div></body></html>`)
 
 	return Rendered{
 		Subject: Subject(p),

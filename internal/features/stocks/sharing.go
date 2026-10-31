@@ -48,11 +48,15 @@ func (s sharingConfig) shareURL(c *echo.Context, path string) string {
 	return scheme + "://" + host + path
 }
 
-func (s sharingConfig) ogImage(c *echo.Context) string {
+// defaultOGImageURL is the site-wide social card norviq-web-v2 serves. The
+// API never shipped the /share/static/og-default.png it used to point at.
+const defaultOGImageURL = "https://norviq.org/static/images/og.png"
+
+func (s sharingConfig) ogImage() string {
 	if s.ogImageURL != "" {
 		return s.ogImageURL
 	}
-	return s.shareURL(c, "/share/static/og-default.png")
+	return defaultOGImageURL
 }
 
 // sanitizeShareSymbol keeps the leading run of alphanumerics, "." and "-",
@@ -79,7 +83,7 @@ func (h *handlers) shareStock(c *echo.Context) error {
 		title:       "$" + symbol + " on Norviqa",
 		description: "Track " + symbol + " — fundamentals, valuation, and your thesis on Norviqa.",
 		url:         h.sharing.shareURL(c, "/share/stock/"+symbol),
-		imageURL:    h.sharing.ogImage(c),
+		imageURL:    h.sharing.ogImage(),
 		twitterCard: "summary_large_image",
 		redirect:    h.sharing.appStoreURL,
 		extraHead:   "<meta name=\"al:ios:app_store_id\" content=\"6745227236\">\n<meta name=\"al:ios:app_name\" content=\"Norviqa\">",

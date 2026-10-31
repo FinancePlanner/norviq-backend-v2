@@ -1,10 +1,10 @@
 # Vapor bugs in the money domains: fixed, kept, or open
 
-The Go port copied these Vapor bugs on purpose. This file records, for each one, whether it is now fixed in Go only (Vapor is archived), kept as it is, or waiting for an owner decision (DECIDE).
+The Go port copied these Vapor bugs on purpose. This file records, for each one, whether it is now fixed in Go only (Vapor is archived) or kept as it is. Every item that waited for an owner decision (DECIDE) now records that decision as FIX or KEEP.
 
 Domains covered: billing, banking (Plaid, Enable Banking, GoCardless), brokers (IBKR), expenses, expense import and receipts, budgeting, tax (including tax report downloads), financing, advanced reporting and statistics.
 
-There are no goose migrations, and nothing outside these feature packages changed. The exceptions are the sqlc queries and generated code for billing and banking, which live under `db/queries` and `internal/store`.
+Nothing outside these feature packages changed, with these exceptions: the sqlc queries and generated code for billing, banking and expenses (under `db/queries` and `internal/store`), and one goose migration, `db/migrations/00003_expenses_external_id.sql` (I4).
 
 ## Billing
 
@@ -62,14 +62,14 @@ There are no goose migrations, and nothing outside these feature packages change
 | ID | Status | Bug | Before → after | Commit |
 |---|---|---|---|---|
 | I1 | KEEP | The spreadsheet and OCR providers send `temperature: 0` | They use the OpenAI-compatible wire, not the Haiku chain, so this is not a bug | — |
-| I2 | DECIDE | `/ocr` and `/scan` never count receipt scans toward usage | (a) Count each image, which means free users hit the quota for the first time. (b) Keep it unmetered and fix the comment | — |
+| I2 | KEEP (owner decision) | `/ocr` and `/scan` never count receipt scans toward usage | Kept unmetered on purpose: both stay Pro/trial-gated, with no per-scan quota. Vapor's comment said the batch was "counted per image below", which nothing did; the Go handlers now say they are unmetered on purpose | 8e72609 |
 | I3 | FIX | The bulk importer dropped FX, notes, receipt metadata and the linked plan item | Same fix as E2 | a8d4b6a |
-| I4 | DECIDE | Receipt-commit dedup never compares `externalId` with stored rows, because `expenses` has no external id column | (a) Add an `expenses.external_id` migration. (b) Match on date + amount + title. (c) Keep as is | — |
+| I4 | FIX (owner decision) | Receipt-commit dedup never compares `externalId` with stored rows, because `expenses` has no external id column | Migration 00003 adds a nullable `expenses.external_id` and a partial unique index on `(user_id, external_id) WHERE external_id IS NOT NULL`. Receipt commit, CSV import (`external_id`) and the spreadsheet importer (a column mapped to `externalId`, which Vapor ignored) store it. A row whose external id the user already has, whatever its date, is skipped and reported as each path reports duplicates: receipts `skipped`, CSV `skipped_duplicate`, spreadsheet `duplicateExisting`. A row a concurrent import stored first hits the index and is reported the same way. Bank transaction import carries no external id and is unchanged: the transaction row links to its expense, and a second import gets 409 | ad7aacd |
 | I5 | FIX | Raw-body `/ocr` accepted up to 10 MB | → 413 above 8 MB, the same as multipart | 3f632ff |
 | I6 | FIX | The currency character set included space and letters | Any text with a space "had a currency symbol" → only real symbols and whole tokens count | 6caf182 |
 | I7 | FIX | In a pretty-printed `styles.xml`, date cells lost their date styles | Read as numbers → read as dates | 6caf182 |
 | I8 | FIX | `skippedRows` ignored the sheet name | Another sheet's exclusions are no longer applied to the selected sheet | 6caf182 |
-| I9 | DECIDE | Fetching an import session has no premium check | (a) Add the check, so a lapsed user gets 403 on their own session. (b) Keep it, since sessions can only be created while premium | — |
+| I9 | KEEP (owner decision) | Fetching an import session has no premium check | Kept: sessions can only be created while premium, and a lapsed user can still read their own session | — |
 
 ## Budgeting
 
@@ -89,8 +89,8 @@ There are no goose migrations, and nothing outside these feature packages change
 |---|---|---|---|---|
 | X1 | FIX | Swift `Decimal(Double)` digits | 0.2800000000000000512 → 0.28 | 47c495e |
 | X2 | FIX | Stored doubles were read back with different trailing digits | 88.55000000000003 → 88.55 | 47c495e |
-| X3 | DECIDE | PUT market-admission has no Pro gate, and its 422 runs before the owner check | Add a Pro gate (403) and move the owner check first, or keep it ungated | — |
-| X4 | DECIDE | GET profile and profile/context are not Pro-gated | Keep them open for the upsell screens (recommended), or gate them with 403 | — |
+| X3 | FIX (owner decision) | PUT market-admission has no Pro gate, and its 422 runs before the owner check | A free user now gets the same 403 `upgrade_required` (`feature=tax_optimization`) as the other tax writes. The gate runs first, before the path check and the attestation 422, in the same order as the sibling gated routes. The owner check stays in the service, after the 422 | 1ca2c07 |
+| X4 | KEEP (owner decision) | GET profile and profile/context are not Pro-gated | Kept open for the upsell screens | — |
 | X5a | FIX | A malformed `scenarioId` on action-plans and placement-plans | 404 → 400 "Invalid tax scenario id." | dee7586 |
 | X5b | KEEP | A harvest scenario sent to placement-plans returns 404 | "Asset-location scenario not found." is accurate | — |
 | X6 | FIX | Report download sent `Accept: bytes` on a 206 | Now sends `Accept-Ranges: bytes` | 47c495e |
@@ -117,7 +117,7 @@ There are no goose migrations, and nothing outside these feature packages change
 | S1–S3 | KEEP | `currency-split`, `scenario-tracking`, `scorecard` and the top-level routes return the full overview | Missing features, not bugs | — |
 | S4 | FIX | Any word containing "ai" ("retail") made a sector Technology | "ai" must now be a whole word | 78b807a |
 | S5 | KEEP | `totalRealizedPnl` is always 0 | Missing feature; the portfolio group owns realized P&L | — |
-| S6 | DECIDE | `baseCurrency` is always "USD", and the quote currency is ignored | Keep it, or build FX conversion as feature work | — |
+| S6 | KEEP (owner decision) | `baseCurrency` is always "USD", and the quote currency is ignored | Kept. FX conversion to a real base currency is feature work, not a bug fix | — |
 | S7 | KEEP | A non-integer `top` gets Vapor's decode-error wording | Not a bug | — |
 
 ## Notes

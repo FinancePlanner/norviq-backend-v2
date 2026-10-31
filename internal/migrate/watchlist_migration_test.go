@@ -16,7 +16,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func gooseProvider(t *testing.T, pool *pgxpool.Pool) *goose.Provider {
+func poolProvider(t *testing.T, pool *pgxpool.Pool) *goose.Provider {
 	t.Helper()
 	sub, err := fs.Sub(db.Migrations, "migrations")
 	if err != nil {
@@ -45,7 +45,7 @@ func constraintOf(err error) string {
 func TestWatchlistSymbolPerListMigration(t *testing.T) {
 	ctx := context.Background()
 	pool := testutil.DB(t)
-	p := gooseProvider(t, pool)
+	p := poolProvider(t, pool)
 	if _, err := p.DownTo(ctx, 3); err != nil {
 		t.Fatalf("down to 3: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestWatchlistSymbolPerListMigration(t *testing.T) {
 func TestWatchlistPerListIndexCreatedWhenMissing(t *testing.T) {
 	ctx := context.Background()
 	pool := testutil.DB(t)
-	p := gooseProvider(t, pool)
+	p := poolProvider(t, pool)
 	if _, err := p.DownTo(ctx, 3); err != nil {
 		t.Fatalf("down to 3: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestTransactionsRealizedPnlMigration(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'realized_pnl'`).Scan(&nullable); err != nil || nullable != "YES" {
 		t.Fatalf("transactions.realized_pnl nullable=%q (%v)", nullable, err)
 	}
-	p := gooseProvider(t, pool)
+	p := poolProvider(t, pool)
 	if _, err := p.DownTo(context.Background(), 4); err != nil {
 		t.Fatalf("down to 4: %v", err)
 	}

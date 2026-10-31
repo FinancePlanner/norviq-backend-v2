@@ -157,7 +157,7 @@ func TestExpensesExternalIDMigration(t *testing.T) {
 		!strings.Contains(s.def, "(user_id, external_id) WHERE (external_id IS NOT NULL)") {
 		t.Fatalf("index %+v", s)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != 3 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v < 3 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var nullable, typ string
@@ -191,7 +191,7 @@ func TestExpensesExternalIDMigration(t *testing.T) {
 	}
 
 	// Down and up again.
-	if _, err := p.Down(ctx); err != nil {
+	if _, err := p.DownTo(ctx, 2); err != nil {
 		t.Fatalf("down: %v", err)
 	}
 	if s := externalIDIndex(t, pool); s.exists {

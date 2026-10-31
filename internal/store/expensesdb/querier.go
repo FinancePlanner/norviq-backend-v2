@@ -31,6 +31,9 @@ type Querier interface {
 	InsertSuggestionDismissal(ctx context.Context, arg InsertSuggestionDismissalParams) error
 	LatestSnapshotByUser(ctx context.Context, userID uuid.UUID) (BudgetSnapshot, error)
 	ListCategories(ctx context.Context, userID uuid.UUID) ([]ExpenseCategory, error)
+	// The import dedupe: which of these external ids the user already stored
+	// (expenses_user_id_external_id_key).
+	ListExpenseExternalIDs(ctx context.Context, arg ListExpenseExternalIDsParams) ([]*string, error)
 	ListExpensesInMonth(ctx context.Context, arg ListExpensesInMonthParams) ([]Expense, error)
 	// getExpenses: newest first, the cursor already moved to the preceding day.
 	ListExpensesPage(ctx context.Context, arg ListExpensesPageParams) ([]Expense, error)

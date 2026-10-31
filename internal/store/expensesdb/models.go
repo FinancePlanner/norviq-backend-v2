@@ -111,6 +111,7 @@ type Expense struct {
 	ExchangeRate     *float64
 	Notes            *string
 	ReceiptMetadata  json.RawMessage
+	ExternalID       *string
 }
 
 type ExpenseCategory struct {

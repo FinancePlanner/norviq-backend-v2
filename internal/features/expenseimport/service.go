@@ -44,6 +44,10 @@ type ExpenseDraft struct {
 	ForeignCurrency *string
 	ExchangeRate    *float64
 	Notes           *string
+	// ExternalID is the row's externalId column (trimmed; nil when empty),
+	// stored on the expense and deduped against stored ones. Vapor ignored
+	// the column.
+	ExternalID *string
 }
 
 // Candidate is ExpenseBulkImporter.Candidate for a spreadsheet row.
@@ -57,6 +61,9 @@ type InsertOutcome struct {
 	Imported int
 	Failures map[int]string
 	Months   []time.Time
+	// Duplicates are rows whose external id was stored by a concurrent
+	// import between the dedupe and the insert.
+	Duplicates []int
 }
 
 // Expenses is what the importer needs from ExpensesService and
@@ -67,6 +74,9 @@ type Expenses interface {
 	// ExistingDedupKeys is existingDedupKeys(occurredOnRange:); from/to nil
 	// is an unbounded range.
 	ExistingDedupKeys(ctx context.Context, userID uuid.UUID, from, to *time.Time) (map[string]bool, error)
+	// ExistingExternalIDs is which of ids the user already stored as an
+	// expense's external id, whatever its date.
+	ExistingExternalIDs(ctx context.Context, userID uuid.UUID, ids []string) (map[string]bool, error)
 	Insert(ctx context.Context, userID uuid.UUID, candidates []Candidate) (InsertOutcome, error)
 	DedupKey(occurredOn string, amount float64, title string) string
 }
@@ -299,11 +309,15 @@ func (s *Service) Commit(ctx context.Context, session Session, decision Decision
 	if err := s.Store.MarkCommitted(ctx, s.Queries, session); err != nil {
 		return nil, err
 	}
+	duplicates := map[int]bool{}
+	for _, ref := range outcome.Duplicates {
+		duplicates[ref] = true
+	}
 	rows := make([]RowResult, 0, min(len(derived.rows), previewRowLimit))
 	skipped := 0
 	for i := range derived.rows {
 		r := &derived.rows[i]
-		if r.status != StatusOK {
+		if r.status != StatusOK || duplicates[r.reference] {
 			skipped++
 		}
 		if len(rows) >= previewRowLimit {
@@ -313,6 +327,10 @@ func (s *Service) Commit(ctx context.Context, session Session, decision Decision
 		if failure, ok := outcome.Failures[r.reference]; ok {
 			res.Status = StatusUnknown
 			res.Message = strPtr(failure)
+		}
+		if duplicates[r.reference] {
+			res.Status = StatusDuplicateExisting
+			res.Message = strPtr(duplicateExistingMessage)
 		}
 		rows = append(rows, res)
 	}
@@ -359,6 +377,22 @@ func sortedRoleLetters(roles map[string]ColumnRole) []string {
 	}
 	sort.Strings(letters)
 	return letters
+}
+
+// duplicateExistingMessage is the row message for a duplicateExisting row.
+const duplicateExistingMessage = "You already have this expense."
+
+// rowExternalID is a stored row's externalId cell, trimmed; nil when the
+// sheet maps no such column or the cell is blank.
+func rowExternalID(cells map[string]string, letter string) *string {
+	if letter == "" {
+		return nil
+	}
+	v := strings.TrimSpace(cells[letter])
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func (s *Service) derive(ctx context.Context, sheets []StoredSheet, mapping StoredMapping, overrides map[string]RowOverride, userID uuid.UUID) (derivation, error) {
@@ -416,12 +450,28 @@ func (s *Service) derive(ctx context.Context, sheets []StoredSheet, mapping Stor
 	}
 
 	existingKeys := map[string]bool{}
-	dateLetter := ""
+	dateLetter, externalLetter := "", ""
 	for _, l := range letters {
-		if roles[l] == RoleDate {
+		if roles[l] == RoleDate && dateLetter == "" {
 			dateLetter = l
-			break
 		}
+		if roles[l] == RoleExternalID && externalLetter == "" {
+			externalLetter = l
+		}
+	}
+	existingExternal := map[string]bool{}
+	if externalLetter != "" {
+		var ids []string
+		for _, row := range sheet.Rows {
+			if ext := rowExternalID(row.Cells, externalLetter); ext != nil {
+				ids = append(ids, *ext)
+			}
+		}
+		stored, err := s.Expenses.ExistingExternalIDs(ctx, userID, ids)
+		if err != nil {
+			return out, err
+		}
+		existingExternal = stored
 	}
 	var minDate, maxDate *time.Time
 	if dateLetter != "" {
@@ -452,7 +502,7 @@ func (s *Service) derive(ctx context.Context, sheets []StoredSheet, mapping Stor
 		existingKeys = keys
 	}
 
-	seen := map[string]bool{}
+	seen, seenExternal := map[string]bool{}, map[string]bool{}
 	for _, stored := range sheet.Rows {
 		override, hasOverride := overrides[overrideKey(sheet.Name, stored.Row)]
 		if (hasOverride && !override.Include) || skipped[stored.Row] {
@@ -516,16 +566,22 @@ func (s *Service) derive(ctx context.Context, sheets []StoredSheet, mapping Stor
 			out.rows = append(out.rows, makeDerivedRow(sheet.Name, stored.Row, StatusInvalidAmount, strPtr("This row is missing a value."), &normalized, rule))
 			continue
 		}
+		// A row is a duplicate by date, amount and title (as in Vapor), or by
+		// its external id when the sheet maps one.
 		key := s.Expenses.DedupKey(*occurredOn, *amount, *title)
-		if existingKeys[key] {
-			out.rows = append(out.rows, makeDerivedRow(sheet.Name, stored.Row, StatusDuplicateExisting, strPtr("You already have this expense."), &normalized, rule))
+		ext := rowExternalID(stored.Cells, externalLetter)
+		if existingKeys[key] || (ext != nil && existingExternal[*ext]) {
+			out.rows = append(out.rows, makeDerivedRow(sheet.Name, stored.Row, StatusDuplicateExisting, strPtr(duplicateExistingMessage), &normalized, rule))
 			continue
 		}
-		if seen[key] {
+		if seen[key] || (ext != nil && seenExternal[*ext]) {
 			out.rows = append(out.rows, makeDerivedRow(sheet.Name, stored.Row, StatusDuplicateInFile, strPtr("This row repeats an earlier row."), &normalized, rule))
 			continue
 		}
 		seen[key] = true
+		if ext != nil {
+			seenExternal[*ext] = true
+		}
 
 		if pillar == nil {
 			label := *title
@@ -543,7 +599,7 @@ func (s *Service) derive(ctx context.Context, sheets []StoredSheet, mapping Stor
 		req := &ExpenseDraft{
 			Title: *title, Amount: *amount, Pillar: *pillar, OccurredOn: *occurredOn, CategoryID: categoryID,
 			ForeignAmount: normalized.ForeignAmount, ForeignCurrency: foreignCurrency, ExchangeRate: normalized.ExchangeRate,
-			Notes: normalized.Notes,
+			Notes: normalized.Notes, ExternalID: ext,
 		}
 		out.totalAmount += *amount
 		if normalized.Currency != nil {

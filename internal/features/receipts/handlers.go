@@ -253,7 +253,7 @@ func (h *handlers) commit(c *echo.Context) error {
 
 	importer := expenses.NewBulkImporter(h.expenses)
 	db := h.expenses.Pool()
-	existing, err := importer.ExistingDedupKeys(ctx, db, s.UserID, expenses.OccurredOnRange(candidates))
+	existing, err := importer.ExistingKeys(ctx, db, s.UserID, candidates)
 	if err != nil {
 		return err
 	}
@@ -274,6 +274,7 @@ func (h *handlers) commit(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	skipped += len(outcome.Duplicates)
 	errs := make([]RowError, 0, len(outcome.Failures))
 	for idx, msg := range outcome.Failures {
 		errs = append(errs, RowError{Index: idx, Message: msg})

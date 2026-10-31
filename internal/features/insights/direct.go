@@ -3,6 +3,7 @@ package insights
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -104,6 +105,16 @@ func (d DirectProvider) FetchTickerPosts(ctx context.Context, symbol string, day
 	return hermesTickerPostsResponse{Symbol: &symbol, Days: &days, Count: &n, Posts: &out}, nil
 }
 
+// sentimentSources and symbolPosts make the Direct provider's own
+// supportedSentimentSources and fetchSymbolPosts the ones the aggregation
+// reaches (symbolPostProvider).
+func (d DirectProvider) sentimentSources() []string { return d.supportedSources() }
+
+//nolint:unparam // the error is the interface's; Direct skips what fails.
+func (d DirectProvider) symbolPosts(ctx context.Context, _ *slog.Logger, symbols, sources []string, _, limit int, _ func() time.Time) ([]symbolPostBatch, error) {
+	return d.fetchSymbolPosts(ctx, symbols, sources, limit), nil
+}
+
 // fetchSymbolPosts is DirectAPIInsightsProvider.fetchSymbolPosts.
 func (d DirectProvider) fetchSymbolPosts(ctx context.Context, symbols, sources []string, limit int) []symbolPostBatch {
 	usable := intersect(sources, d.supportedSources())
@@ -189,10 +200,10 @@ func (d DirectProvider) fetchSymbolPosts(ctx context.Context, symbols, sources [
 	return batches
 }
 
-// Wire formats. Vapor decoded these with the backendAPI decoder too, so the
-// snake_case CodingKeys (created_at, access_token, created_utc) never
-// matched: StockTwits posts carry no timestamp, and the Reddit token never
-// decodes. The tags keep those spellings so apijson.Unmarshal reproduces it.
+// Wire formats, decoded as the providers spell them (encoding/json). Vapor
+// ran them through the backendAPI decoder, which rewrites snake_case keys,
+// so created_at, access_token and created_utc never matched: StockTwits
+// posts lost their timestamp and the Reddit token never decoded.
 
 type stocktwitsStream struct {
 	Messages *[]stocktwitsMessage `json:"messages"`
@@ -242,8 +253,9 @@ func (d DirectProvider) get(ctx context.Context, rawURL string, header http.Head
 	return resp.StatusCode, body, err
 }
 
+// decodeChecked decodes a third-party body with its own key spellings.
 func decodeChecked(body []byte, out any) error {
-	if err := apijson.Unmarshal(body, out); err != nil {
+	if err := json.Unmarshal(body, out); err != nil {
 		return err
 	}
 	if v, ok := out.(validator); ok {
@@ -343,7 +355,7 @@ func (d DirectProvider) redditAccessToken(ctx context.Context) (string, error) {
 		return "", httpx.Abort(http.StatusBadGateway, fmt.Sprintf("Reddit auth returned HTTP %d.", resp.StatusCode))
 	}
 	var tok redditToken
-	if err := apijson.Unmarshal(body, &tok); err != nil {
+	if err := json.Unmarshal(body, &tok); err != nil {
 		return "", err
 	}
 	if tok.AccessToken == nil {
@@ -380,8 +392,7 @@ func (l redditListing) validate() error {
 	return nil
 }
 
-// fetchReddit is unreachable while redditAccessToken cannot decode Reddit's
-// token (as in Vapor); ported for completeness.
+// fetchReddit searches the equity subreddits for symbol.
 func (d DirectProvider) fetchReddit(ctx context.Context, symbol, token string, limit int) ([]ingestedPost, error) {
 	query := alphanumericEscape(symbol + " stock")
 	u := fmt.Sprintf("%s/r/%s/search?q=%s&restrict_sr=1&sort=new&t=week&limit=%d",

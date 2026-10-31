@@ -17,8 +17,9 @@ processes share one Postgres and one Redis. So:
   proxying.
 - `V2_DISABLED_ROUTES="GET /v1/foo/:id,..."` sends a ported route back to
   Vapor without a deploy. It is the rollback switch.
-- **Vapor still owns the schema** until cutover. Do not add goose migrations
-  that change existing tables. If a port truly needs one, stop and report it.
+- **v2 owns the schema** since the cutover (Vapor is archived). A schema
+  change is a new goose migration; follow "Schema changes after cutover" in
+  `docs/MIGRATION.md`.
 - **Background jobs run in exactly one process.** v2 jobs start only when
   named in `V2_JOBS`, and each flips there at the same time as Vapor's copy is
   switched off. Port the job, and say in your report which Vapor env/flag turns

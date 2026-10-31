@@ -262,20 +262,26 @@ func eventResponses(events []insightsdb.InsightEvent) []InsightEventResponse {
 
 // SyncFromHermes is syncFromHermes(on:): events, sentiment snapshots, net
 // worth, then ticker posts. A disabled provider is a 503.
+//
+// A step the provider chain does not serve at all (a 501: only the Direct
+// provider answered, which serves per-symbol posts only) counts as nothing
+// synced rather than failing the run. Vapor failed the whole tick there, so
+// with Hermes absent and DeepAPI failing or out of credit, ticker posts
+// never synced either and every tick logged "hermes_sync failed".
 func (s *Service) SyncFromHermes(ctx context.Context) (SyncSummary, error) {
 	if !s.provider.Enabled() {
 		return SyncSummary{}, httpx.Abort(http.StatusServiceUnavailable, "Insights provider is disabled.")
 	}
 	events, err := s.syncEvents(ctx)
-	if err != nil {
+	if err := s.unlessUnsupported("events", err); err != nil {
 		return SyncSummary{}, err
 	}
 	snapshots, err := s.syncSentimentSnapshots(ctx)
-	if err != nil {
+	if err := s.unlessUnsupported("sentiment", err); err != nil {
 		return SyncSummary{}, err
 	}
 	netWorth, err := s.syncNetWorth(ctx)
-	if err != nil {
+	if err := s.unlessUnsupported("net-worth", err); err != nil {
 		return SyncSummary{}, err
 	}
 	tp := s.syncTickerPosts(ctx)
@@ -292,6 +298,15 @@ func (s *Service) SyncFromHermes(ctx context.Context) (SyncSummary, error) {
 		out.TickerPostsNewestAt = &t
 	}
 	return out, nil
+}
+
+// unlessUnsupported drops a 501 (see SyncFromHermes), logging the skip.
+func (s *Service) unlessUnsupported(step string, err error) error {
+	if err != nil && errNotImplemented(err) {
+		s.logger.Info(fmt.Sprintf("insights.sync %s skipped: %s", step, describe(err)))
+		return nil
+	}
+	return err
 }
 
 func (s *Service) syncEvents(ctx context.Context) (int, error) {

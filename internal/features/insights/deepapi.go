@@ -26,7 +26,9 @@ import (
 // Its per-symbol multi-source ingest (fetchSymbolPosts override, X/Reddit/
 // page scrapes keyed on stable ids) is not ported: Vapor only ever reached
 // the protocol-extension default (see fetchSymbolPosts), so that code never
-// ran outside unit tests.
+// ran outside unit tests. DeepAPI therefore keeps the default here too
+// (source x through FetchTickerPosts); porting the scrapes would add paid
+// DeepAPI calls for the sp500 and trending tiers (docs/vapor-bugs/social.md).
 type DeepAPIProvider struct {
 	APIKey                string
 	BaseURL               string

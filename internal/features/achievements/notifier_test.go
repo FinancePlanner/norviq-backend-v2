@@ -71,6 +71,26 @@ func TestHookNoCapableDeviceNoPush(t *testing.T) {
 	}
 }
 
+// A push that reached no device leaves notified_at unset (Vapor stamped it
+// regardless of the send's outcome).
+func TestHookUndeliveredPushLeavesNotifiedAtUnset(t *testing.T) {
+	lowFounding(t, 0)
+	e := newEnv(t)
+	e.activate()
+	e.sender.fail = true
+	u, _ := e.user("ntf-undelivered")
+	e.addDevice(u, "capable", capability)
+	e.latch(u, "first_holding_at")
+	e.runHook(u)
+	unlock := e.find(u, "start.first_holding", "")
+	if unlock == nil || unlock.NotifiedAt != nil {
+		t.Fatalf("unlock %+v", unlock)
+	}
+	if len(e.sender.all()) != 1 {
+		t.Fatal("push not attempted")
+	}
+}
+
 func TestHookBackfillIsSilent(t *testing.T) {
 	lowFounding(t, 0)
 	e := newEnv(t)

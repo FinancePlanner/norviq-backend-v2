@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // DB is what the service needs from Postgres: queries plus transactions
@@ -272,7 +273,25 @@ func (s *Service) Summary(ctx context.Context, userID, viewer uuid.UUID) (UserSu
 
 // EnsureSettings is SocialService.ensureSettings: the user's settings row,
 // created on first use, with the email hash kept current.
+//
+// Two first calls racing (the app fires /v1/social/config and a discovery
+// request together) both found no row, and the loser's insert hit the
+// unique user_id and answered 500. The loser now re-reads the winner's row
+// and carries on from there.
 func (s *Service) EnsureSettings(ctx context.Context, userID uuid.UUID, cfg Config) (socialdb.SocialSetting, error) {
+	rec, err := s.ensureSettings(ctx, userID, cfg)
+	if isUniqueViolation(err) {
+		return s.ensureSettings(ctx, userID, cfg)
+	}
+	return rec, err
+}
+
+func isUniqueViolation(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
+}
+
+func (s *Service) ensureSettings(ctx context.Context, userID uuid.UUID, cfg Config) (socialdb.SocialSetting, error) {
 	q := s.q()
 	rec, err := q.SettingsByUser(ctx, userID)
 	exists := true

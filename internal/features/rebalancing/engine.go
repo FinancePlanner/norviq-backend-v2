@@ -212,7 +212,9 @@ func (e Engine) Simulate(portfolioID string, model AllocationModel, req Simulati
 	if err := e.Validate(model); err != nil {
 		return Simulation{}, err
 	}
-	if req.ModelRevision != model.Revision || req.ModelID != model.ID {
+	// model.ID is uppercase; Swift compared the strings exactly, so a
+	// lowercase modelId was a stale-model 409.
+	if req.ModelRevision != model.Revision || !strings.EqualFold(req.ModelID, model.ID) {
 		return Simulation{}, errStaleModel
 	}
 	if !isFinite(req.CashFlow) {

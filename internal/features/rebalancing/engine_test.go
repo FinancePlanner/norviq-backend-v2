@@ -111,7 +111,7 @@ func TestStaleModelRevisionIsRejected(t *testing.T) {
 	if !errors.Is(err, errStaleModel) {
 		t.Fatalf("err %v", err)
 	}
-	if mapped := mapEngineError(err); !strings.Contains(mapped.Error(), "Reload before simulating") {
+	if mapped := MapEngineError(err); !strings.Contains(mapped.Error(), "Reload before simulating") {
 		t.Fatalf("mapped %v", mapped)
 	}
 }
@@ -196,11 +196,11 @@ func TestFundBuysScalesDownAndOversellIsRejected(t *testing.T) {
 	}
 	held := Snapshot{Holdings: []Holding{{Symbol: "STOCK", Quantity: 1, Price: 100}, {Symbol: "BOND", Quantity: 1, Price: 50}}, PriceQuality: QualityLive}
 	_, err = Engine{}.Simulate("p", m, SimulationRequest{ModelID: m.ID, ModelRevision: m.Revision, Overrides: []TradeOverride{{Symbol: "stock", Amount: -500}}}, held)
-	if mapped := mapEngineError(err); mapped.Error() != "A sell override exceeds the available STOCK holding." {
+	if mapped := MapEngineError(err); mapped.Error() != "A sell override exceeds the available STOCK holding." {
 		t.Fatalf("oversell %v", mapped)
 	}
 	_, err = Engine{}.Simulate("p", m, SimulationRequest{ModelID: m.ID, ModelRevision: m.Revision, Overrides: []TradeOverride{{Symbol: "zzz", Amount: 5}}}, held)
-	if mapped := mapEngineError(err); mapped.Error() != "Unknown or duplicate trade override: ZZZ." {
+	if mapped := MapEngineError(err); mapped.Error() != "Unknown or duplicate trade override: ZZZ." {
 		t.Fatalf("override %v", mapped)
 	}
 	_, err = Engine{}.Simulate("p", m, SimulationRequest{ModelID: m.ID, ModelRevision: m.Revision, CashFlow: -1000}, held)

@@ -26,6 +26,7 @@ type handlers struct {
 	d            *server.Deps
 	filters      FilterResolver
 	valuation    ValuationService
+	fx           FxSource // nil: realized P&L converts 1:1
 	entitlements *entitlements.Service
 }
 
@@ -358,6 +359,10 @@ func (h *handlers) summary(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	realized, err := filter.realizedPnl(ctx, h.d.DB, h.fx, h.d.Logger)
+	if err != nil {
+		return err
+	}
 	allocation := make([]allocationItem, 0, len(v.Holdings)+1)
 	for _, hd := range v.Holdings {
 		allocation = append(allocation, allocationItem{Symbol: hd.Symbol, Value: round2(hd.MarketValue), Currency: filter.BaseCurrency})
@@ -371,7 +376,7 @@ func (h *handlers) summary(c *echo.Context) error {
 		TotalValue:           round2(v.TotalValue),
 		TotalCost:            round2(v.TotalCost),
 		UnrealizedPnl:        round2(v.UnrealizedPnl),
-		RealizedPnl:          0,
+		RealizedPnl:          round2(realized.Total),
 		CashBalance:          round2(v.CashBalance),
 		Allocation:           allocation,
 		DayChange:            ptr(round2(v.DayChange)),
@@ -499,12 +504,16 @@ func (h *handlers) pnl(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	realized, err := filter.realizedPnl(ctx, h.d.DB, h.fx, h.d.Logger)
+	if err != nil {
+		return err
+	}
 	items := make([]pnlBySymbol, 0, len(v.Holdings))
 	for _, hd := range v.Holdings {
 		item := pnlBySymbol{
 			Symbol:               hd.Symbol,
 			Currency:             filter.BaseCurrency,
-			RealizedPnl:          0,
+			RealizedPnl:          round2(realized.BySymbol[hd.Symbol]),
 			UnrealizedPnl:        round2(hd.UnrealizedPnl),
 			Shares:               ptr(hd.Shares),
 			BuyPrice:             ptr(round2(hd.AverageBuyPrice)),

@@ -503,6 +503,89 @@ func (q *Queries) PortfolioListsForUser(ctx context.Context, userID uuid.UUID) (
 	return items, nil
 }
 
+const realizedPnlAccountIDs = `-- name: RealizedPnlAccountIDs :many
+SELECT id FROM accounts
+WHERE user_id = $1
+  AND (portfolio_id = ANY($2::uuid[])
+       OR ($3::boolean AND portfolio_id IS NULL))
+`
+
+type RealizedPnlAccountIDsParams struct {
+	UserID          uuid.UUID
+	PortfolioIds    []uuid.UUID
+	IncludeUnlinked bool
+}
+
+// The accounts whose realized P&L a portfolio filter counts: those linked to
+// the filter's portfolios, plus (for the all-portfolios filter only) legacy
+// accounts linked to none.
+func (q *Queries) RealizedPnlAccountIDs(ctx context.Context, arg RealizedPnlAccountIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, realizedPnlAccountIDs, arg.UserID, arg.PortfolioIds, arg.IncludeUnlinked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const realizedPnlBySymbol = `-- name: RealizedPnlBySymbol :many
+SELECT coalesce(i.symbol, '')::text AS symbol, x.currency::text AS currency, sum(x.realized_pnl)::float8 AS realized_pnl
+FROM (
+    SELECT l.instrument_id, l.currency, d.realized_pnl
+    FROM lot_disposals d
+    JOIN lots l ON l.id = d.lot_id
+    WHERE l.account_id = ANY($1::uuid[])
+    UNION ALL
+    SELECT t.instrument_id, t.currency, t.realized_pnl
+    FROM transactions t
+    WHERE t.account_id = ANY($1::uuid[])
+      AND t.realized_pnl IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM lot_disposals d WHERE d.transaction_id = t.id)
+) x
+LEFT JOIN instruments i ON i.id = x.instrument_id
+GROUP BY i.symbol, x.currency
+`
+
+type RealizedPnlBySymbolRow struct {
+	Symbol      string
+	Currency    string
+	RealizedPnl float64
+}
+
+// Realized P&L per instrument symbol and currency: broker lot disposals (in
+// the lot's currency) plus manual and ledger sells (transactions.realized_pnl,
+// in the transaction's currency) that no disposal already accounts for.
+func (q *Queries) RealizedPnlBySymbol(ctx context.Context, accountIds []uuid.UUID) ([]RealizedPnlBySymbolRow, error) {
+	rows, err := q.db.Query(ctx, realizedPnlBySymbol, accountIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RealizedPnlBySymbolRow{}
+	for rows.Next() {
+		var i RealizedPnlBySymbolRow
+		if err := rows.Scan(&i.Symbol, &i.Currency, &i.RealizedPnl); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renamePortfolioList = `-- name: RenamePortfolioList :one
 UPDATE portfolio_lists SET name = $2, updated_at = $3 WHERE id = $1
 RETURNING id, user_id, name, is_default, created_at, updated_at, purpose, ownership, mode, base_currency, source_portfolio_id, cloned_at, archived_at

@@ -295,6 +295,20 @@ func (t transactionHandlers) createFor(ctx context.Context, userID uuid.UUID, p 
 	return transactionResponse(row, instrument.Symbol), nil
 }
 
+// repriceRealized keeps a ledger sell's realized P&L in step with an edit of
+// its quantity or price. The sale's average cost is implied by what was
+// stored, oldPrice - realized/oldQuantity, so the new P&L is (newPrice -
+// cost) x newQuantity. Rows without one (buys, broker rows, sells recorded
+// before transactions.realized_pnl existed) stay nil.
+func repriceRealized(realized, oldQuantity, oldPrice, newQuantity, newPrice *float64) *float64 {
+	if realized == nil || oldQuantity == nil || oldPrice == nil || newQuantity == nil || newPrice == nil || *oldQuantity <= 0 {
+		return realized
+	}
+	cost := *oldPrice - *realized / *oldQuantity
+	v := (*newPrice - cost) * *newQuantity
+	return &v
+}
+
 // requireTransactionID is the controller's "Invalid transaction id.".
 func requireTransactionID(c *echo.Context) (uuid.UUID, error) {
 	id, ok := portfolios.ParseSwiftUUID(pathParam(c, "transactionId"))
@@ -353,6 +367,7 @@ func (t transactionHandlers) update(c *echo.Context) error {
 		return err
 	}
 	changed := false
+	oldQuantity, oldPrice := m.Quantity, m.Price
 	if p.Quantity != nil {
 		if !(*p.Quantity > 0) {
 			return httpx.BadRequest("quantity must be greater than 0.")
@@ -398,6 +413,7 @@ func (t transactionHandlers) update(c *echo.Context) error {
 		if m, err = q.UpdateTransaction(ctx, stocksdb.UpdateTransactionParams{
 			ID: m.ID, Quantity: m.Quantity, Price: m.Price, Currency: m.Currency,
 			TradeDate: m.TradeDate, SettleDate: m.SettleDate, Fees: m.Fees, UpdatedAt: &now,
+			RealizedPnl: repriceRealized(m.RealizedPnl, oldQuantity, oldPrice, m.Quantity, m.Price),
 		}); err != nil {
 			return err
 		}

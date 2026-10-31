@@ -115,3 +115,24 @@ func TestWatchlistPerListIndexCreatedWhenMissing(t *testing.T) {
 		t.Fatalf("stale constraint count = %d (%v)", constraints, err)
 	}
 }
+
+// Migration 00005 adds the nullable transactions.realized_pnl (manual and
+// ledger sells; NULL for every older row).
+func TestTransactionsRealizedPnlMigration(t *testing.T) {
+	pool := testutil.DB(t)
+	var nullable string
+	if err := pool.QueryRow(context.Background(), `SELECT is_nullable FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'realized_pnl'`).Scan(&nullable); err != nil || nullable != "YES" {
+		t.Fatalf("transactions.realized_pnl nullable=%q (%v)", nullable, err)
+	}
+	p := gooseProvider(t, pool)
+	if _, err := p.DownTo(context.Background(), 4); err != nil {
+		t.Fatalf("down to 4: %v", err)
+	}
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'realized_pnl'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("column after down: %d (%v)", n, err)
+	}
+	if _, err := p.Up(context.Background()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+}

@@ -136,3 +136,32 @@ SELECT date, adjusted_close FROM market_price_bars
 WHERE instrument_key = sqlc.arg(instrument_key)::text
   AND date BETWEEN sqlc.arg(from_day)::date AND sqlc.arg(to_day)::date
 ORDER BY date ASC;
+
+-- name: RealizedPnlAccountIDs :many
+-- The accounts whose realized P&L a portfolio filter counts: those linked to
+-- the filter's portfolios, plus (for the all-portfolios filter only) legacy
+-- accounts linked to none.
+SELECT id FROM accounts
+WHERE user_id = @user_id
+  AND (portfolio_id = ANY(@portfolio_ids::uuid[])
+       OR (sqlc.arg(include_unlinked)::boolean AND portfolio_id IS NULL));
+
+-- name: RealizedPnlBySymbol :many
+-- Realized P&L per instrument symbol and currency: broker lot disposals (in
+-- the lot's currency) plus manual and ledger sells (transactions.realized_pnl,
+-- in the transaction's currency) that no disposal already accounts for.
+SELECT coalesce(i.symbol, '')::text AS symbol, x.currency::text AS currency, sum(x.realized_pnl)::float8 AS realized_pnl
+FROM (
+    SELECT l.instrument_id, l.currency, d.realized_pnl
+    FROM lot_disposals d
+    JOIN lots l ON l.id = d.lot_id
+    WHERE l.account_id = ANY(sqlc.arg(account_ids)::uuid[])
+    UNION ALL
+    SELECT t.instrument_id, t.currency, t.realized_pnl
+    FROM transactions t
+    WHERE t.account_id = ANY(sqlc.arg(account_ids)::uuid[])
+      AND t.realized_pnl IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM lot_disposals d WHERE d.transaction_id = t.id)
+) x
+LEFT JOIN instruments i ON i.id = x.instrument_id
+GROUP BY i.symbol, x.currency;

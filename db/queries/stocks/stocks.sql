@@ -144,16 +144,16 @@ SELECT * FROM transactions WHERE id = $1 LIMIT 1;
 -- name: InsertTransaction :one
 INSERT INTO transactions (
     id, account_id, instrument_id, external_id, type, quantity, price, currency,
-    trade_date, settle_date, fees, created_at, updated_at
+    trade_date, settle_date, fees, realized_pnl, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, sqlc.arg(now), sqlc.arg(now)
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, sqlc.narg(realized_pnl), sqlc.arg(now), sqlc.arg(now)
 )
 RETURNING *;
 
 -- name: UpdateTransaction :one
 UPDATE transactions SET
     quantity = $2, price = $3, currency = $4, trade_date = $5, settle_date = $6,
-    fees = $7, updated_at = $8
+    fees = $7, updated_at = $8, realized_pnl = sqlc.narg(realized_pnl)
 WHERE id = $1
 RETURNING *;
 

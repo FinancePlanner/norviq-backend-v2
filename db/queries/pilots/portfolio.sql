@@ -113,8 +113,8 @@ INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, b
 VALUES (@id, @user_id, @portfolio_list_id, @symbol, @shares, @buy_price, @buy_date, 'stock', @source_provider, @created_at, @created_at);
 
 -- name: InsertTransaction :exec
-INSERT INTO transactions (id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, created_at, updated_at)
-VALUES (@id, @account_id, @instrument_id, @external_id, @type, @quantity, @price, @currency, @trade_date, @created_at, @created_at);
+INSERT INTO transactions (id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, realized_pnl, created_at, updated_at)
+VALUES (@id, @account_id, @instrument_id, @external_id, @type, @quantity, @price, @currency, @trade_date, sqlc.narg(realized_pnl), @created_at, @created_at);
 
 -- name: InstrumentBySymbol :one
 SELECT id FROM instruments WHERE symbol = $1 LIMIT 1;

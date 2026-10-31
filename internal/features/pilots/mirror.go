@@ -406,11 +406,14 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 		balance = row.Balance
 	}
 	for _, t := range trades {
+		var realized *float64
 		switch t.Side {
 		case SideSell:
-			if err := applySell(ctx, q, t, userID, portfolioID); err != nil {
+			pnl, err := applySell(ctx, q, t, userID, portfolioID)
+			if err != nil {
 				return err
 			}
+			realized = &pnl
 			balance += t.Quantity * t.Price
 		default:
 			cost := t.Quantity * t.Price
@@ -430,7 +433,8 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 			qty, price, ext := t.Quantity, t.Price, t.ExternalID
 			if err := q.InsertTransaction(ctx, pilotsdb.InsertTransactionParams{
 				ID: uuid.New(), AccountID: account.ID, InstrumentID: *t.InstrumentID, ExternalID: &ext, Type: typ,
-				Quantity: &qty, Price: &price, Currency: account.BaseCurrency, TradeDate: dateOf(t.TradeDate), CreatedAt: time.Now(),
+				Quantity: &qty, Price: &price, Currency: account.BaseCurrency, TradeDate: dateOf(t.TradeDate),
+				RealizedPnl: realized, CreatedAt: time.Now(),
 			}); err != nil {
 				return err
 			}
@@ -445,21 +449,25 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 	})
 }
 
-func applySell(ctx context.Context, q *pilotsdb.Queries, t ledgerTrade, userID, portfolioID uuid.UUID) error {
+// applySell reduces the holding and returns the sale's realized P&L,
+// (sell price - average cost) x shares, which recordTrades stores on the
+// sell transaction (transactions.realized_pnl).
+func applySell(ctx context.Context, q *pilotsdb.Queries, t ledgerTrade, userID, portfolioID uuid.UUID) (float64, error) {
 	stock, err := q.StockBySymbol(ctx, pilotsdb.StockBySymbolParams{UserID: userID, PortfolioListID: portfolioID, Symbol: t.Symbol})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrHoldingNotFound
+		return 0, ErrHoldingNotFound
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !(t.Quantity <= stock.Shares+ledgerEpsilon) {
-		return ErrInsufficientShares
+		return 0, ErrInsufficientShares
 	}
+	realized := (t.Price - stock.BuyPrice) * t.Quantity
 	if stock.Shares-t.Quantity <= ledgerEpsilon {
-		return q.DeleteStock(ctx, stock.ID)
+		return realized, q.DeleteStock(ctx, stock.ID)
 	}
-	return q.UpdateStockShares(ctx, pilotsdb.UpdateStockSharesParams{ID: stock.ID, Shares: stock.Shares - t.Quantity})
+	return realized, q.UpdateStockShares(ctx, pilotsdb.UpdateStockSharesParams{ID: stock.ID, Shares: stock.Shares - t.Quantity})
 }
 
 // applyBuy merges into an existing row the way DatabaseStocksRepository

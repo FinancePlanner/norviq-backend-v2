@@ -3,7 +3,9 @@ package social_test
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"norviq-api/internal/features/social"
@@ -539,4 +541,38 @@ func TestPushNotificationKinds(t *testing.T) {
 		t.Fatalf("push = %+v", n)
 	}
 	_ = context.Background
+}
+
+// Concurrent first calls used to race on the unique user_id: the loser's
+// insert answered 500. Every caller now gets the one row.
+func TestEnsureSettingsConcurrentFirstUse(t *testing.T) {
+	e := setup(t, social.Feature{})
+	svc := social.NewService(e.app.Deps.DB)
+	cfg := social.ConfigFromEnv()
+	for i := range 5 {
+		u := e.user("ensure_race" + strconv.Itoa(i))
+		const n = 12
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make([]error, n)
+		ids := make([]uuid.UUID, n)
+		for j := range n {
+			wg.Go(func() {
+				<-start
+				rec, err := svc.EnsureSettings(context.Background(), u, cfg)
+				errs[j], ids[j] = err, rec.ID
+			})
+		}
+		close(start)
+		wg.Wait()
+		for j := range n {
+			if errs[j] != nil || ids[j] != ids[0] {
+				t.Fatalf("user %d caller %d: %v (id %s vs %s)", i, j, errs[j], ids[j], ids[0])
+			}
+		}
+		var rows int
+		if err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM social_settings WHERE user_id = $1`, u).Scan(&rows); err != nil || rows != 1 {
+			t.Fatalf("rows %d %v", rows, err)
+		}
+	}
 }

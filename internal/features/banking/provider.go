@@ -94,7 +94,7 @@ const RevokeTimeout = 10 * time.Second
 // Revoke is BankConnectionRevoker.revoke: best-effort revocation at the
 // aggregator, capped at RevokeTimeout. Failures are logged, never returned,
 // so a local disconnect or account deletion always goes through. Account
-// deletion (DELETE /v1/users, still on Vapor) calls this too.
+// deletion (DELETE /v1/users) calls this too.
 func (r *Registry) Revoke(ctx context.Context, logger *slog.Logger, conn *bankingdb.BankConnection) {
 	err := func() error {
 		p, err := r.Provider(kindOrPlaid(conn.Provider))

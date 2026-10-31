@@ -37,8 +37,7 @@ func (r RedisCounter) Expire(ctx context.Context, key string, ttl time.Duration)
 const DefaultCapBucket = "ai_daily"
 
 // DailyCap is AIDailyCap: a per-user, per-UTC-day Redis counter in front of
-// Norviq-paid LLM endpoints. Keys are Vapor's, so both backends share one
-// count while the migration runs.
+// Norviq-paid LLM endpoints. Keys are Vapor's, unchanged.
 type DailyCap struct {
 	// Counter is nil when REDIS_URL is unset.
 	Counter    Counter

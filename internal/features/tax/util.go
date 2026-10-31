@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Vapor runs with the process time zone; production containers are UTC,
+// Vapor ran with the process time zone; production containers are UTC,
 // so every Calendar computation here is UTC.
 
 // isoDate is TaxService.isoDate: ISO8601DateFormatter with fractional

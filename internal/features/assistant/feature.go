@@ -29,7 +29,7 @@ type Feature struct {
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// Sources wires the other domains' services the AI surfaces read; see
-	// Sources. Nil leaves every source-dependent route on Vapor.
+	// Sources. Nil leaves every source-dependent route unregistered (404).
 	Sources SourcesFunc
 
 	// Telegram overrides the environment's bot configuration (tests);
@@ -150,8 +150,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	r.V1.POST(a+"/actions/:id/cancel", h.cancelAction, write...)
 
 	// Turn surfaces read through AIReadToolRegistry and the memo writer, so
-	// they move to v2 only once every read source and the memo writer are
-	// wired; until then they stay on Vapor.
+	// they are registered only once every read source and the memo writer
+	// are wired; until then they answer 404.
 	if h.turnsReady() {
 		r.V1.POST(a+"/conversations/:id/chat", h.chat, write...)
 		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, write...)
@@ -169,7 +169,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 
 	// AIInsightsController and AIViewSummaryController: the same
 	// `ratelimit:ai` group, then their own authenticator, guard and
-	// assistant.read scope. Each stays on Vapor until its sources are wired.
+	// assistant.read scope. Each is registered only once its sources are
+	// wired.
 	if h.src.hasDashboard() {
 		r.V1.GET("/ai/insights/expenses", h.insightHandler("expenses"), read...)
 		r.V1.GET("/ai/insights/portfolio", h.insightHandler("portfolio"), read...)

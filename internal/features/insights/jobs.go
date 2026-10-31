@@ -13,10 +13,9 @@ import (
 // Lock and V2_JOBS names. SentimentAggregationJob ran under
 // JobLock.runAsLeader("sentiment_aggregation_job"); HermesSyncJob and
 // SentimentRetentionJob took no lock in Vapor, so their names here only
-// keep v2 replicas from overlapping. None of the three has a Vapor disable
-// flag (HermesSyncJob and SentimentAggregationJob skip only when the
-// provider chain is disabled, which the always-enabled Direct provider
-// rules out), so each must stay off in v2 until Vapor is scaled down.
+// keep v2 replicas from overlapping. HermesSyncJob and
+// SentimentAggregationJob skip only when the provider chain is disabled,
+// which the always-enabled Direct provider rules out.
 const (
 	HermesSyncJobName           = "hermes_sync_job"
 	SentimentAggregationJobName = "sentiment_aggregation_job"

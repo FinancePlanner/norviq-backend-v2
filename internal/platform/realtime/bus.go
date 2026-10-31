@@ -3,10 +3,9 @@
 // event catches up over REST when its next stream opens, so nothing here is
 // durable.
 //
-// Like Vapor's InProcessRealtimeBus, it is only correct with one API replica,
-// and it does not reach clients connected to the other backend: Vapor never
-// published to Redis, so during the strangler period the stream and every
-// route that publishes to it must be served by the same process.
+// Like Vapor's InProcessRealtimeBus, it is only correct with one API replica:
+// nothing is published to Redis, so the stream and every route that publishes
+// to it must be served by the same process.
 package realtime
 
 import (

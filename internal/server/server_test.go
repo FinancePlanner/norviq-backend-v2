@@ -2,9 +2,9 @@ package server_test
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,68 +94,72 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-func TestStranglerProxiesUnportedRoutes(t *testing.T) {
-	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Legacy", "1")
-		_, _ = io.WriteString(w, r.Method+" "+r.URL.Path)
-	}))
-	defer legacy.Close()
-
-	app := testutil.NewApp(t, []server.Feature{probeFeature{}}, func(d *server.Deps) {
-		d.Config.LegacyUpstreamURL = legacy.URL
-		d.Config.ExtraDisabledRoutes = []string{"GET /v1/probe/scoped"}
-	})
-	cases := map[string]bool{ // path -> served by legacy
-		"/v1/probe/me":      false,
-		"/v1/probe/scoped":  true, // kill-switched back to Vapor
-		"/v1/portfolios":    true,
-		"/health":           false,
-		"/webhooks/plaid":   true,
-		"/v1/probe/me/deep": true,
+// TestUnmatchedRoutes pins what a request no route serves gets back: the
+// JSON error envelope, the global headers, and echo's 405 with Allow. Group
+// middleware runs before the miss, so an unknown path under an authenticated
+// group answers 401, not 404. Captured before the Vapor fallback was removed
+// and unchanged after.
+func TestUnmatchedRoutes(t *testing.T) {
+	app := testutil.NewApp(t, []server.Feature{probeFeature{}})
+	const (
+		notFound     = `{"error":true,"code":"not_found","reason":"Not Found","requestId":"%s"}`
+		unauthorized = `{"error":true,"code":"unauthorized","reason":"SessionToken not authenticated.","requestId":"%s"}`
+		notAllowed   = `{"error":true,"code":"request_failed","reason":"Method Not Allowed","requestId":"%s"}`
+	)
+	cases := []struct {
+		method, path string
+		status       int
+		body         string // %s is the request id; "" expects an empty body
+		allow        string
+	}{
+		{"GET", "/nope", 404, notFound, ""},
+		{"GET", "/v1/nope", 404, notFound, ""},
+		{"OPTIONS", "/v1/nope", 404, notFound, ""},
+		{"HEAD", "/v1/nope", 404, "", ""},
+		{"DELETE", "/health", 405, notAllowed, "OPTIONS, GET"},
+		{"GET", "/v1/probe/nope", 401, unauthorized, ""},
+		{"POST", "/v1/probe/me", 401, unauthorized, ""},
 	}
-	for path, wantLegacy := range cases {
-		r := app.Do("GET", path, "", nil)
-		if got := r.Header.Get("X-Legacy") == "1"; got != wantLegacy {
-			t.Errorf("%s: legacy=%v want %v (status %d)", path, got, wantLegacy, r.Status)
+	for _, c := range cases {
+		r := app.Do(c.method, c.path, "", nil)
+		id := r.Header.Get("X-Request-ID")
+		want := ""
+		if c.body != "" {
+			want = fmt.Sprintf(c.body, id)
+		}
+		if r.Status != c.status || string(r.Body) != want || id == "" {
+			t.Errorf("%s %s: %d %s (request id %q)", c.method, c.path, r.Status, r.Body, id)
+		}
+		if got := r.Header.Get("Allow"); got != c.allow {
+			t.Errorf("%s %s: Allow=%q want %q", c.method, c.path, got, c.allow)
+		}
+		wantHeaders := map[string]string{
+			"X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+			"Vary": "Origin, Accept-Encoding",
+		}
+		if c.body != "" {
+			wantHeaders["Content-Type"] = "application/json; charset=utf-8"
+		}
+		for k, v := range wantHeaders {
+			if got := strings.Join(r.Header.Values(k), ", "); got != v {
+				t.Errorf("%s %s: %s=%q want %q", c.method, c.path, k, got, v)
+			}
 		}
 	}
-	// Same path, a method v2 does not serve, goes to Vapor too.
-	if r := app.Do("POST", "/v1/probe/me", "", nil); r.Header.Get("X-Legacy") != "1" {
-		t.Errorf("POST on GET-only route not proxied: %d", r.Status)
-	}
-}
 
-func TestStranglerNativePrefixesNarrowV2(t *testing.T) {
-	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Legacy", "1")
-	}))
-	defer legacy.Close()
-
-	app := testutil.NewApp(t, []server.Feature{probeFeature{}}, func(d *server.Deps) {
-		d.Config.LegacyUpstreamURL = legacy.URL
-		d.Config.NativePrefixes = []string{" /health/ ", "/v1/pro"}
-	})
-	cases := map[string]bool{ // path -> served by legacy
-		"/health":       false,
-		"/health/live":  false,
-		"/v1/probe/me":  true, // ported, but "/v1/pro" is not a segment prefix of it
-		"/v1/portfolio": true,
+	// A CORS preflight for an unknown path is still answered by CORS.
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodOptions, app.Server.URL+"/v1/nope", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for path, wantLegacy := range cases {
-		r := app.Do("GET", path, "", nil)
-		if got := r.Header.Get("X-Legacy") == "1"; got != wantLegacy {
-			t.Errorf("%s: legacy=%v want %v (status %d)", path, got, wantLegacy, r.Status)
-		}
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	resp, err := app.Server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	app = testutil.NewApp(t, []server.Feature{probeFeature{}}, func(d *server.Deps) {
-		d.Config.LegacyUpstreamURL = legacy.URL
-		d.Config.NativePrefixes = []string{"/v1/probe"}
-	})
-	if r := app.Do("GET", "/v1/probe/me", "", nil); r.Header.Get("X-Legacy") == "1" {
-		t.Errorf("/v1/probe/me under native prefix went to legacy")
-	}
-	if r := app.Do("GET", "/health", "", nil); r.Header.Get("X-Legacy") != "1" {
-		t.Errorf("/health outside native prefixes stayed in v2")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || resp.Header.Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
+		t.Fatalf("preflight: %d %v", resp.StatusCode, resp.Header)
 	}
 }

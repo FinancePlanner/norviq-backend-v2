@@ -196,7 +196,7 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 	httpServer.RegisterOnShutdown(realtime.FinishAll)
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "port", cfg.Port, "env", cfg.Environment, "legacy_upstream", cfg.LegacyUpstreamURL)
+		logger.Info("listening", "port", cfg.Port, "env", cfg.Environment)
 		errCh <- httpServer.ListenAndServe()
 	}()
 

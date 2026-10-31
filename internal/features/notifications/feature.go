@@ -27,7 +27,7 @@ const BillingFeatureTargetAlerts = "target_alerts"
 // Feature mounts /v1/notifications/*.
 type Feature struct {
 	// Premium builds the billing gate. The earnings preference routes need
-	// it, so they stay on Vapor until the billing port provides it.
+	// it, so they are not registered (404) while it is nil.
 	Premium func(d *server.Deps) PremiumGate
 }
 

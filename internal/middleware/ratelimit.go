@@ -28,9 +28,9 @@ end
 return count
 `)
 
-// Limiter builds RateLimitMiddleware instances. Keys are the Vapor keys, and
-// both processes share one Redis, so a user's budget is the same whichever
-// backend served the request.
+// Limiter builds RateLimitMiddleware instances. Keys are the Vapor keys,
+// unchanged, and every replica shares one Redis, so a user's budget is the
+// same whichever replica served the request.
 type Limiter struct {
 	Redis      redis.UniversalClient // nil when REDIS_URL is unset
 	ClientIP   *ClientIP

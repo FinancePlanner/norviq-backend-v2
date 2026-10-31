@@ -1,161 +1,119 @@
-# Vapor → Go migration plan
+# Vapor → Go migration (finished 2026-10-30)
 
-Goal: replace `norviq-backend` (Swift 6 / Vapor 4, ~128k lines, 693 routes,
-163 Fluent migrations, ~30 background jobs) with this Go service, serving the
-same endpoints to iOS, the Go web app, web-v2 and norviq-mcp, without any
-client release. Then archive the Vapor repo.
+This service replaced `norviq-backend` (Swift 6 / Vapor 4, ~128k lines, 693
+routes, 163 Fluent migrations, ~30 background jobs). It serves the same
+endpoints to iOS, web-v2 and norviq-mcp with the same wire contract, and no
+client release was needed.
 
-## Approach: strangler behind the same hostname
+**Vapor is archived for good.** GitHub `FinancePlanner/norviq-backend` is
+read-only, no Vapor service runs in the cluster, and there is no rollback to
+it. No code goes to the Swift repo: every fix, including fixes for bugs ported
+from Vapor, lands here.
 
-```
-              api.norviq.org (Traefik)
-                       │
-               norviq-backend-v2  ──── route ported? ── yes ──▶ Go handler
-                       │                                          │
-                       no                                         │
-                       ▼                                          ▼
-               norviq-backend (Vapor) ───────── same Postgres + Redis
-```
+## Schema
 
-- v2 takes all API traffic from the first deploy. Unported routes are proxied
-  to Vapor untouched, so deploying v2 changes nothing observable.
-- Each domain flips when its parity suite passes, simply by being registered.
-  `V2_DISABLED_ROUTES` sends any route back to Vapor without a deploy.
-  `V2_NATIVE_PREFIXES` (e.g. `/v1/auth,/health,/.well-known`) narrows v2 to
-  the ported routes under those prefixes, so production can widen domain by
-  domain with a values change.
-- **Realtime is in-process** (as in Vapor; no Redis pub/sub). An SSE client on
-  `/v1/realtime/stream` only sees events published by the same process, so
-  `/v1/realtime` must flip together with every route that publishes to it:
-  `/v1/groups`, `/v1/group-channels`, `/v1/group-invites`,
-  `/v1/group-messages`. Keep api-v2 at one replica. The
-  ingress pointing back at the Vapor service is the full rollback.
-- Shared Redis keeps rate-limit buckets and idempotency keys consistent across
-  both processes. The Vapor-compatible cache format is in
-  `internal/middleware/ratelimit.go`.
-- Background jobs move one at a time: on in v2 (`V2_JOBS`), off in Vapor, in
-  the same infra change. Most Vapor jobs have **no disable flag** (e.g.
-  TargetAlertPoller, EarningsNotificationPoller are always registered); they
-  run under `JobLock.runAsLeader(name)`, a Postgres advisory lock on
-  `hashtext(name)` held for **one tick**. `internal/platform/joblock` takes the
-  same lock, so the two copies never run a tick concurrently, but each still
-  runs one tick per interval, so a non-idempotent job (tips, digests, pushes)
-  would fire twice. Plan: **every job stays on Vapor until the final cutover**,
-  when Vapor scales to zero and `V2_JOBS=all` lands in the same change
-  (rehearsed on staging first). Ported jobs must wrap each tick in
-  `joblock.RunAsLeader` with the Swift job's lock name.
+v2 owns the schema. Its migrate job runs as an ArgoCD PreSync hook, which
+takes a `pg_dump` first.
 
-## Schema ownership
-
-- Until cutover, **Vapor's migrate job owns the schema**. v2's chart runs no
-  migrate job.
 - `db/migrations/00001_baseline.sql` is the schema Vapor's first 159
-  migrations produce (norviq-backend e6e35df). `00002_vapor_37128c4.sql` adds
-  the 4 Vapor gained by 37128c4 (groups, achievements, digests, social
-  activity). Both were verified by migrating scratch DBs both ways and
-  diffing `pg_dump`s (zero lines of difference).
-- `internal/migrate/fluent_migrations.txt` maps each goose version to the
-  Fluent migrations it mirrors. At cutover `norviq-api migrate` adopts the
-  production DB: when it finds `_fluent_migrations` but no goose table, it
-  stamps every version whose Fluent migrations are all applied, without
-  running them, then runs the rest. It refuses a version applied only in
-  part, and any Fluent migration no goose version mirrors.
-- **Vapor keeps moving:** anything merged into Vapor after the snapshot
-  (`.norviq-backend-snapshot`, now 37128c4) must be ported too. To catch up:
-  move the snapshot, rebuild, migrate a scratch DB with Vapor, generate the
-  next goose migration from the `pg_dump` diff, add its `# goose N` section,
-  verify a zero-line diff, and regenerate `docs/vapor-routes.txt` with every
-  `*_ENABLED` flag on.
+  migrations produced (norviq-backend e6e35df). `00002_vapor_37128c4.sql` adds
+  the 4 that Vapor gained by 37128c4 (groups, achievements, digests, social
+  activity). Both were checked by migrating scratch DBs both ways and diffing
+  the `pg_dump`s (zero lines of difference).
+- **Goose adoption.** `internal/migrate/fluent_migrations.txt` maps each goose
+  version to the Fluent migrations it mirrors. When `norviq-api migrate` finds
+  `_fluent_migrations` but no goose table, it stamps every version whose
+  Fluent migrations are all applied, without running them, then runs the
+  rest. It refuses a version that is applied only in part, and any Fluent
+  migration that no goose version mirrors. Production and staging were
+  adopted this way at cutover. The code stays because it is what makes an old
+  Vapor-migrated dump usable.
 
 ### Schema changes after cutover
 
-v2's migrate job (the PreSync hook, which takes a `pg_dump` first) owns the
-schema now. A new change is the next numbered file in `db/migrations`, v2-only,
-with no section in `fluent_migrations.txt`. Keep it safe on a populated table
-under traffic: a nullable column with no default, `lock_timeout` around any
-`ALTER TABLE`, and `CREATE INDEX CONCURRENTLY` under `-- +goose NO TRANSACTION`
-(goose then runs each statement on its own, on one connection). Drop a
-same-named index first so a retry after a failed concurrent build does not keep
-an INVALID one. `00003_expenses_external_id.sql` is the worked example, and
-`internal/migrate/externalid_db_test.go` its test.
+A new change is the next numbered file in `db/migrations`, with no section in
+`fluent_migrations.txt`. Keep it safe on a populated table under traffic: a
+nullable column with no default, `lock_timeout` around any `ALTER TABLE`, and
+`CREATE INDEX CONCURRENTLY` under `-- +goose NO TRANSACTION` (goose then runs
+each statement on its own, on one connection). Drop a same-named index first,
+so a retry after a failed concurrent build does not keep an INVALID one.
+`00003_expenses_external_id.sql` is the worked example, and
+`internal/migrate/externalid_db_test.go` is its test.
+
+## Background jobs
+
+Jobs start only when they are named in `V2_JOBS` (comma-separated, or `all`).
+The default is none, so a local run or a one-off command sends no pushes or
+emails. Production and staging set `V2_JOBS=all`. Each job wraps its tick in
+`joblock.RunAsLeader` with the Swift job's lock name (a Postgres advisory lock
+on `hashtext(name)`, held for one tick), so replicas never run a tick at the
+same time.
+
+## Realtime: one replica
+
+Realtime is in-process, as it was in Vapor: there is no Redis pub/sub. An SSE
+client on `/v1/realtime/stream` sees only the events published by the same
+process. The groups routes (`/v1/groups`, `/v1/group-channels`,
+`/v1/group-invites`, `/v1/group-messages`) publish to it. **Keep api-v2 at one
+replica** until the bus is moved to Redis.
+
+## Shared state with Vapor's formats
+
+Redis keys and values (rate-limit buckets, idempotency keys, caches, the AI
+daily cap), sealed secrets and env variable names are Vapor's, unchanged.
+That is why the code reads `DATABASE_*`, `JWT_SECRET` and the feature flags
+under Vapor's names.
+The config loader ignores env variables it does not know, so leftovers in the
+infra values are harmless.
 
 ## Deliberate deviations from Vapor
 
-Vapor bugs are ported faithfully unless listed here. Each fix is v2-only;
-Vapor is archived after cutover, not patched. **No line of code is added to
-the Vapor repo.** The faithfully ported bugs are fixed in Go, after cutover.
+Vapor bugs were ported faithfully unless they are listed here or in
+`docs/vapor-bugs/`. Each fix is made in Go only.
 
 - **RevenueCat decoding** (billing): Vapor's `JSONDecoder.backendAPI`
   rewrote RevenueCat's snake_case keys to camelCase, so every snake_case
   field decoded as nil. `/v1/billing/restore` downgraded paying users to
   free, and `/v1/billing/management-url` never returned RevenueCat's URL or
   the web-billing portal. v2 decodes RevenueCat bodies with plain
-  `encoding/json` (`internal/features/billing/revenuecat.go`). Until cutover
-  a user restoring through a route still served by Vapor gets the old result.
+  `encoding/json` (`internal/features/billing/revenuecat.go`).
+- The bugs that were ported faithfully, and the owner's decision on each (fix
+  or keep), are in `docs/vapor-bugs/money.md`, `docs/vapor-bugs/portfolio.md`
+  and `docs/vapor-bugs/social.md`. Tests that pin those decisions cite the
+  file.
 
-## Order
+## Reference material
 
-| Wave | Domains | Why first |
-|---|---|---|
-| 0 | Foundation: wire format, errors, auth, rate limit, idempotency, client IP, health, strangler, parity tool, test DB | everything depends on it (**done**) |
-| 1 | identity (auth, users, OAuth server, PATs, crypto, mailer), billing/entitlements, market data platform, notifications/push, AI provider platform | shared services the other domains call (**done**) |
-| 2 | portfolio, expenses/budget/receipts, tax, social/community, banking/brokers, AI features, news/macro/crypto/brief | the bulk of the routes |
-| 3 | planning, scenarios, goals, retirement, rebalancing, automation, financing, statistics, reporting, recap, pilots, terminal positions, export, sharing, messaging, internal metrics | the remaining routes |
-| 4 | jobs flip, full parity sweep on staging, cutover, archive Vapor | |
+- `docs/vapor-routes.txt`: every route Vapor mounted (693, every feature flag
+  on). `scripts/coverage.sh` compares it with `go run ./cmd/api routes`; v2
+  serves 693/693.
+- `cmd/parity` and `parity/*.jsonl`: the tool and cases that diffed v2
+  against a running Vapor during the port. They need a Vapor build to run
+  against, so they are history now, not a check to run.
+- Code comments such as "ported from Vapor's X" explain why code is shaped the
+  way it is. Vapor's behavior is the contract that clients were built
+  against. That is why it still matters, even though Vapor no longer runs.
 
-Progress: `scripts/coverage.sh` (693/693 since 5fce96b).
+## History (2026-10-30)
 
-**The Vapor repo is archived** (GitHub `FinancePlanner/norviq-backend`, read-only
-since 2026-10-30). New backend features land here only. Vapor still runs as
-release `api` until cutover: the proxy target for prefixes not yet in
-`V2_NATIVE_PREFIXES`, and the owner of every background job and the schema.
-
-## Hosting (platform/infra)
-
-- `apps/norviq/api-v2/values-*.yaml` with the existing `charts/norviq-app`,
-  release name `norviq-backend-v2`, same `api-env` secret and sealed secrets
-  as Vapor (both run in namespace `norviq` / `norviq-staging`, so the existing
-  sealed blobs decrypt).
-- `LEGACY_UPSTREAM_URL=http://api:8080` (the Vapor service).
-- Staging first: point the staging ingress (port-forward only today) at v2,
-  run the parity suites against both, then production.
-- Cutover: Traefik `api.norviq.org` → `norviq-backend-v2`; Vapor stays
-  deployed (no ingress) as the proxy target until coverage hits 693/693 and
-  all jobs run in v2. Then remove `LEGACY_UPSTREAM_URL`, enable v2's migrate
-  job, scale Vapor to zero, and archive the repo.
-
-## Coordination with web-v2 (SvelteKit on Cloudflare Workers)
-
-Agreed with the web-v2 session: backend v2 goes first, behind the same host.
-That is invisible to clients. web-v2 builds against today's contract. Its
-order: (1) v2 owns api.norviq.org, (2) web-v2 parity, (3) norviq.org moves to
-the Worker, with the Go web kept for rollback.
-
-API-side needs from web-v2:
-
-- **Client IP from the edge:** web-v2 sends `X-Norviq-Client-IP`
-  (from `CF-Connecting-IP`) and `X-Norviq-Edge-Key`. v2 trusts the IP only
-  when the key equals `EDGE_CLIENT_IP_KEY` (`internal/middleware/clientip.go`).
-  `/v1/auth` must be ported before web-v2's cutover so login/signup rate
-  limits key per user IP.
-- **Preview origins:** `WEBAUTHN_ORIGINS` and OAuth redirect URIs gain the
-  preview host when it exists (config only).
-- **Staging access:** the staging API has no public ingress. A protected one
-  for a hosted web-v2 preview is the owner's decision.
-
-## Removed from platform/infra at cutover (not before)
-
-Each item below is still load-bearing until Vapor scales to zero:
-
-- `norviq-api-{staging,production}` Argo Applications (Vapor release `api`)
-  and the Vapor migrate job. First fold the env and secrets api-v2 inherits
-  from `apps/norviq/api/values-*.yaml` into `apps/norviq/api-v2/`, because
-  api-v2 layers on them today.
-- `LEGACY_UPSTREAM_URL`, `V2_NATIVE_PREFIXES` and `V2_DISABLED_ROUTES` in the
-  api-v2 values; `V2_JOBS=all`; enable v2's migrate job (goose adoption).
-- `ingress.serviceName: api-v2` on the Vapor values: the ingress moves to the
-  api-v2 release itself, and the PVCs get owned by it.
-- The `api` option in `promote-norviq.yml`.
-- `prometheus.io/scrape: "false"` on api-v2 (it was there so Vapor's series,
-  proxied through v2's `/metrics` while `/metrics` was not native, were not
-  counted twice): scrape api-v2 instead of Vapor.
+- **Strangler.** From its first deploy, v2 took all API traffic behind
+  `api.norviq.org`. It reverse-proxied every route it had not registered to
+  Vapor (`LEGACY_UPSTREAM_URL`). Domains moved over as their parity suites
+  passed. `V2_NATIVE_PREFIXES` widened production one prefix at a time, and
+  `V2_DISABLED_ROUTES` could send a route back to Vapor. Jobs and the schema
+  stayed with Vapor until the cutover. Both processes shared Postgres and
+  Redis.
+- **Cutover.** Staging was rehearsed first (infra #509, #510). Production
+  went to wave 1 at 487/693 routes (#511), then to the full cutover at 14:41
+  UTC (#513): Vapor was scaled to 0, and all routes and jobs moved to v2.
+  `LEGACY_UPSTREAM_URL` was dropped at 14:52 (#515). The Vapor Applications
+  were removed and api-v2 took over the ingress and the migrations (goose
+  adoption) on staging (#516) and production (#517). MCP now calls api-v2 in
+  the cluster (#520). The Vapor values were folded into
+  `apps/norviq/api-v2/` and `api` was dropped from `promote-norviq` (#524).
+- **Strangler removed.** The proxy, `LEGACY_UPSTREAM_URL`,
+  `V2_NATIVE_PREFIXES` and `V2_DISABLED_ROUTES` were removed from the code
+  after the cutover. With no upstream set, the proxy had already passed every
+  request straight to echo. An unregistered route answers echo's 404, or 405
+  with `Allow`, in the JSON error envelope (pinned by `TestUnmatchedRoutes`
+  in `internal/server`).

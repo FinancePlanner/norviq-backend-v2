@@ -9,14 +9,12 @@ import (
 	"norviq-api/internal/server"
 )
 
-// JobLockName is WeeklyDigestJob's JobLock name, shared with Vapor so a v2
-// tick and a Vapor tick never overlap.
+// JobLockName is WeeklyDigestJob's JobLock name (Vapor's, unchanged), so
+// two replicas' ticks never overlap.
 const JobLockName = "weekly_digest_job"
 
 // Job is WeeklyDigestJob: every 15 minutes (after a 2-minute delay) it sends
-// the digests that are due. Vapor installs it only when DIGEST_ENABLED is
-// on, and setting DIGEST_ENABLED=false on Vapor is also what turns Vapor's
-// copy off (it also 404s Vapor's digest routes, which v2 then serves).
+// the digests that are due. It does nothing while DIGEST_ENABLED is off.
 type Job struct {
 	// Tick and InitialDelay override 900 s and 120 s (tests).
 	Tick, InitialDelay time.Duration

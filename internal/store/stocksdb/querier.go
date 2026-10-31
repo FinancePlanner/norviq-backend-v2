@@ -11,6 +11,9 @@ import (
 )
 
 type Querier interface {
+	// The account's latest balance in the currency. Rows are unique per
+	// (account, currency, as_of), so an account can hold several; the ledger
+	// moves the latest one to today (Vapor took an arbitrary row).
 	CashRow(ctx context.Context, arg CashRowParams) ([]CashBalance, error)
 	CountUserStocks(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountValuations(ctx context.Context, userID uuid.UUID) (int64, error)

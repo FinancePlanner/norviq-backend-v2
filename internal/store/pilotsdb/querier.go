@@ -20,6 +20,9 @@ type Querier interface {
 	CashBalancesForAccount(ctx context.Context, accountID uuid.UUID) ([]CashBalance, error)
 	CashBalancesForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]CashBalance, error)
 	CashPositionBalances(ctx context.Context, portfolioID uuid.UUID) ([]float64, error)
+	// The account's latest balance in the currency. Rows are unique per
+	// (account, currency, as_of), so an account can hold several; the ledger
+	// moves the latest one to today (Vapor took an arbitrary row).
 	CashRow(ctx context.Context, arg CashRowParams) (CashBalance, error)
 	// Moves applied_version forward; no row when another run already applied
 	// this version or a later one. The idempotency guard between pods.

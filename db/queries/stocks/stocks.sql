@@ -105,8 +105,13 @@ SELECT * FROM instruments WHERE id = $1 LIMIT 1;
 -- name: InstrumentsByIDs :many
 SELECT * FROM instruments WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
+-- The account's latest balance in the currency. Rows are unique per
+-- (account, currency, as_of), so an account can hold several; the ledger
+-- moves the latest one to today (Vapor took an arbitrary row).
 -- name: CashRow :many
-SELECT * FROM cash_balances WHERE account_id = $1 AND currency = $2 LIMIT 1;
+SELECT * FROM cash_balances WHERE account_id = $1 AND currency = $2
+ORDER BY as_of DESC, updated_at DESC NULLS LAST, id
+LIMIT 1;
 
 -- name: InsertCashBalance :exec
 INSERT INTO cash_balances (id, account_id, currency, balance, as_of, created_at, updated_at)

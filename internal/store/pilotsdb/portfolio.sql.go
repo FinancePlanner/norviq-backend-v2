@@ -192,7 +192,9 @@ func (q *Queries) CashPositionBalances(ctx context.Context, portfolioID uuid.UUI
 }
 
 const cashRow = `-- name: CashRow :one
-SELECT id, account_id, currency, balance, as_of, created_at, updated_at FROM cash_balances WHERE account_id = $1 AND currency = $2 LIMIT 1
+SELECT id, account_id, currency, balance, as_of, created_at, updated_at FROM cash_balances WHERE account_id = $1 AND currency = $2
+ORDER BY as_of DESC, updated_at DESC NULLS LAST, id
+LIMIT 1
 `
 
 type CashRowParams struct {
@@ -200,6 +202,9 @@ type CashRowParams struct {
 	Currency  string
 }
 
+// The account's latest balance in the currency. Rows are unique per
+// (account, currency, as_of), so an account can hold several; the ledger
+// moves the latest one to today (Vapor took an arbitrary row).
 func (q *Queries) CashRow(ctx context.Context, arg CashRowParams) (CashBalance, error) {
 	row := q.db.QueryRow(ctx, cashRow, arg.AccountID, arg.Currency)
 	var i CashBalance

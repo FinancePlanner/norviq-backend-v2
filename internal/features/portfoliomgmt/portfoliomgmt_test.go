@@ -666,6 +666,21 @@ func TestInvitationsAndMembers(t *testing.T) {
 		t.Fatalf("membership row not reused: %v vs %v", again["id"], mem["id"])
 	}
 
+	// Revoking the accepted invitation used to answer 204 and leave the
+	// membership active: now 409, pointing at removing the member, and
+	// nothing changes.
+	var acceptedID string
+	if err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT id::text FROM portfolio_invitations
+		WHERE portfolio_id = $1 AND email = 'mgmt-editor@example.com' AND status = 'accepted' ORDER BY accepted_at DESC LIMIT 1`, listID).Scan(&acceptedID); err != nil {
+		t.Fatal(err)
+	}
+	expectReason(t, e.do(http.MethodDelete, base+"/invitations/"+acceptedID, ownerToken, nil), http.StatusConflict,
+		"This invitation was accepted; remove the member instead.")
+	if e.count(`SELECT count(*) FROM portfolio_invitations WHERE id = $1 AND status = 'accepted'`, acceptedID) != 1 ||
+		e.count(`SELECT count(*) FROM portfolio_memberships WHERE portfolio_id = $1 AND user_id = $2 AND status = 'active'`, listID, editorID) != 1 {
+		t.Fatal("accepted invitation or membership changed")
+	}
+
 	// Revoke the member, then a pending invitation.
 	expectReason(t, e.do(http.MethodDelete, base+"/members/"+uuid.NewString(), ownerToken, nil), http.StatusNotFound, "Portfolio member not found.")
 	expectStatus(t, e.do(http.MethodDelete, base+"/members/"+again["id"].(string), ownerToken, nil), http.StatusNoContent)

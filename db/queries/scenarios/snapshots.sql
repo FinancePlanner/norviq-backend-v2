@@ -33,10 +33,14 @@ FROM holding_risk_profiles
 WHERE user_id = $1;
 
 -- name: SnapshotCashBalances :many
--- Account.query.filter(userId) then CashBalance.query.filter(accountId ~~ ids).
+-- The cash of the snapshot's portfolio: its accounts' balances. Vapor read
+-- every account of the user (Account.query.filter(userId)), so each
+-- portfolio's snapshot counted the cash of all of them.
 SELECT cb.id, cb.account_id, cb.currency, cb.balance, cb.as_of
 FROM cash_balances cb
-WHERE cb.account_id IN (SELECT a.id FROM accounts a WHERE a.user_id = $1);
+WHERE cb.account_id IN (
+    SELECT a.id FROM accounts a WHERE a.user_id = @user_id AND a.portfolio_id = @portfolio_id::uuid
+);
 
 -- name: SnapshotCryptoHoldings :many
 SELECT id, symbol, quantity, average_buy_price

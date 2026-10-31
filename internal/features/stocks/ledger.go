@@ -126,11 +126,14 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 	results := make([]LedgerTradeResult, 0, len(trades))
 	for _, t := range trades {
 		var remaining float64
+		var realized *float64
 		switch t.Side {
 		case LedgerSell:
-			if remaining, err = r.applySell(ctx, q, t, userID, portfolioID); err != nil {
+			var pnl float64
+			if remaining, pnl, err = r.applySell(ctx, q, t, userID, portfolioID); err != nil {
 				return nil, err
 			}
+			realized = &pnl
 			cash.Balance += t.Quantity * t.Price
 		case LedgerBuy:
 			cost := t.Quantity * t.Price
@@ -151,7 +154,7 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 			if _, err := q.InsertTransaction(ctx, stocksdb.InsertTransactionParams{
 				ID: uuid.New(), AccountID: account.ID, InstrumentID: *t.InstrumentID, ExternalID: &ext,
 				Type: typ, Quantity: &qty, Price: &price, Currency: account.BaseCurrency,
-				TradeDate: t.TradeDate.UTC(), Now: r.now(),
+				TradeDate: t.TradeDate.UTC(), RealizedPnl: realized, Now: r.now(),
 			}); err != nil {
 				return nil, err
 			}
@@ -171,30 +174,34 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 	return results, nil
 }
 
-func (r LedgerTradeRecorder) applySell(ctx context.Context, q *stocksdb.Queries, t LedgerTrade, userID, portfolioID uuid.UUID) (float64, error) {
+// applySell reduces the holding and returns the shares left and the sale's
+// realized P&L, (sell price - average cost) x shares, which Record stores on
+// the sell transaction (transactions.realized_pnl). The row's buy price is
+// the weighted average cost (applyBuy keeps it so).
+func (r LedgerTradeRecorder) applySell(ctx context.Context, q *stocksdb.Queries, t LedgerTrade, userID, portfolioID uuid.UUID) (shares, realized float64, err error) {
 	var rows []stocksdb.Stock
-	var err error
 	if t.StockID != nil {
 		rows, err = q.StockInListByID(ctx, stocksdb.StockInListByIDParams{UserID: userID, PortfolioListID: portfolioID, ID: *t.StockID})
 	} else {
 		rows, err = q.StockInList(ctx, stocksdb.StockInListParams{UserID: userID, PortfolioListID: portfolioID, Symbol: t.Symbol})
 	}
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if len(rows) == 0 {
-		return 0, &LedgerTradeError{Kind: "holdingNotFound", Symbol: t.Symbol}
+		return 0, 0, &LedgerTradeError{Kind: "holdingNotFound", Symbol: t.Symbol}
 	}
 	stock := rows[0]
 	if !(t.Quantity <= stock.Shares+ledgerEpsilon) {
-		return 0, &LedgerTradeError{Kind: "insufficientShares", Symbol: t.Symbol}
+		return 0, 0, &LedgerTradeError{Kind: "insufficientShares", Symbol: t.Symbol}
 	}
+	realized = (t.Price - stock.BuyPrice) * t.Quantity
 	if stock.Shares-t.Quantity <= ledgerEpsilon {
-		return 0, q.DeleteStock(ctx, stock.ID)
+		return 0, realized, q.DeleteStock(ctx, stock.ID)
 	}
-	shares := stock.Shares - t.Quantity
+	shares = stock.Shares - t.Quantity
 	now := r.now()
-	return shares, q.SetStockShares(ctx, stocksdb.SetStockSharesParams{ID: stock.ID, Shares: shares, UpdatedAt: &now})
+	return shares, realized, q.SetStockShares(ctx, stocksdb.SetStockSharesParams{ID: stock.ID, Shares: shares, UpdatedAt: &now})
 }
 
 // applyBuy merges into an existing row the way the repository's create does:

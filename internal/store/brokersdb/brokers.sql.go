@@ -57,7 +57,7 @@ func (q *Queries) AccountByExternal(ctx context.Context, arg AccountByExternalPa
 }
 
 const accountInstrumentTransactions = `-- name: AccountInstrumentTransactions :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions WHERE account_id = $1 AND instrument_id = $2
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions WHERE account_id = $1 AND instrument_id = $2
 `
 
 type AccountInstrumentTransactionsParams struct {
@@ -88,6 +88,7 @@ func (q *Queries) AccountInstrumentTransactions(ctx context.Context, arg Account
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -140,7 +141,7 @@ func (q *Queries) AccountLots(ctx context.Context, accountID uuid.UUID) ([]Lot, 
 }
 
 const accountSellsForInstruments = `-- name: AccountSellsForInstruments :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = $1 AND instrument_id = ANY($2::uuid[]) AND type = 'SELL'
 `
 
@@ -172,6 +173,7 @@ func (q *Queries) AccountSellsForInstruments(ctx context.Context, arg AccountSel
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -184,7 +186,7 @@ func (q *Queries) AccountSellsForInstruments(ctx context.Context, arg AccountSel
 }
 
 const accountTransactionsOfTypes = `-- name: AccountTransactionsOfTypes :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions WHERE account_id = $1 AND type = ANY($2::text[])
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions WHERE account_id = $1 AND type = ANY($2::text[])
 `
 
 type AccountTransactionsOfTypesParams struct {
@@ -215,6 +217,7 @@ func (q *Queries) AccountTransactionsOfTypes(ctx context.Context, arg AccountTra
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -348,7 +351,7 @@ func (q *Queries) AllInstruments(ctx context.Context) ([]Instrument, error) {
 }
 
 const buysInAccountsBetween = `-- name: BuysInAccountsBetween :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = ANY($1::uuid[]) AND type = 'BUY'
   AND trade_date >= $2::timestamptz AND trade_date <= $3::timestamptz
 `
@@ -382,6 +385,7 @@ func (q *Queries) BuysInAccountsBetween(ctx context.Context, arg BuysInAccountsB
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -1447,7 +1451,7 @@ INSERT INTO transactions (
     id, account_id, instrument_id, external_id, type, quantity, price, currency,
     trade_date, settle_date, fees, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
-RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at
+RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl
 `
 
 type InsertTransactionParams struct {
@@ -1495,6 +1499,7 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 		&i.Fees,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RealizedPnl,
 	)
 	return i, err
 }
@@ -2218,7 +2223,7 @@ func (q *Queries) StocksInListForSymbols(ctx context.Context, arg StocksInListFo
 }
 
 const transactionByExternal = `-- name: TransactionByExternal :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions WHERE account_id = $1 AND external_id = $2 LIMIT 1
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions WHERE account_id = $1 AND external_id = $2 LIMIT 1
 `
 
 type TransactionByExternalParams struct {
@@ -2249,6 +2254,7 @@ func (q *Queries) TransactionByExternal(ctx context.Context, arg TransactionByEx
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -2386,7 +2392,7 @@ UPDATE transactions SET
     instrument_id = $2, type = $3, quantity = $4, price = $5, currency = $6,
     trade_date = $7, settle_date = $8, fees = $9, updated_at = $10
 WHERE id = $1
-RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at
+RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl
 `
 
 type UpdateTransactionParams struct {
@@ -2430,6 +2436,7 @@ func (q *Queries) UpdateTransaction(ctx context.Context, arg UpdateTransactionPa
 		&i.Fees,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RealizedPnl,
 	)
 	return i, err
 }

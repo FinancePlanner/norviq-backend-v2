@@ -61,8 +61,10 @@ type Querier interface {
 	OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfolioListExistsParams) (bool, error)
 	RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) error
 	SetScenarioRunProgress(ctx context.Context, arg SetScenarioRunProgressParams) error
-	// Account.query.filter(userId) then CashBalance.query.filter(accountId ~~ ids).
-	SnapshotCashBalances(ctx context.Context, userID uuid.UUID) ([]SnapshotCashBalancesRow, error)
+	// The cash of the snapshot's portfolio: its accounts' balances. Vapor read
+	// every account of the user (Account.query.filter(userId)), so each
+	// portfolio's snapshot counted the cash of all of them.
+	SnapshotCashBalances(ctx context.Context, arg SnapshotCashBalancesParams) ([]SnapshotCashBalancesRow, error)
 	SnapshotCryptoHoldings(ctx context.Context, arg SnapshotCryptoHoldingsParams) ([]SnapshotCryptoHoldingsRow, error)
 	// Stock.query.filter(userId).filter(portfolioListId).sort(symbol).all()
 	SnapshotHoldings(ctx context.Context, arg SnapshotHoldingsParams) ([]SnapshotHoldingsRow, error)

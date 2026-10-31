@@ -704,6 +704,8 @@ const recapWatchlistSymbols = `-- name: RecapWatchlistSymbols :many
 SELECT symbol FROM watchlist_items
 WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
   AND (cardinality($4::uuid[]) = 0 OR watchlist_list_id <> ALL($4::uuid[]))
+GROUP BY symbol
+ORDER BY min(created_at), symbol
 `
 
 type RecapWatchlistSymbolsParams struct {
@@ -713,6 +715,7 @@ type RecapWatchlistSymbolsParams struct {
 	Excluded []uuid.UUID
 }
 
+// One row per symbol: adding a symbol to two lists is one addition.
 func (q *Queries) RecapWatchlistSymbols(ctx context.Context, arg RecapWatchlistSymbolsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, recapWatchlistSymbols,
 		arg.UserID,

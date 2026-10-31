@@ -432,7 +432,7 @@ func (q *Queries) TrackedStockSymbols(ctx context.Context, userID uuid.UUID) ([]
 }
 
 const trackedWatchlistSymbols = `-- name: TrackedWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 AND status <> 'archived'
+SELECT DISTINCT symbol FROM watchlist_items WHERE user_id = $1 AND status <> 'archived'
 `
 
 func (q *Queries) TrackedWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
@@ -503,7 +503,7 @@ func (q *Queries) UpdateNewsTickerPreference(ctx context.Context, arg UpdateNews
 }
 
 const watchlistOwnersForSymbols = `-- name: WatchlistOwnersForSymbols :many
-SELECT symbol, user_id FROM watchlist_items
+SELECT DISTINCT symbol, user_id FROM watchlist_items
 WHERE status <> 'archived' AND symbol = ANY($1::text[])
 `
 
@@ -512,6 +512,8 @@ type WatchlistOwnersForSymbolsRow struct {
 	UserID uuid.UUID
 }
 
+// One row per (symbol, user): a symbol in two of a user's lists must not
+// notify them twice.
 func (q *Queries) WatchlistOwnersForSymbols(ctx context.Context, symbols []string) ([]WatchlistOwnersForSymbolsRow, error) {
 	rows, err := q.db.Query(ctx, watchlistOwnersForSymbols, symbols)
 	if err != nil {

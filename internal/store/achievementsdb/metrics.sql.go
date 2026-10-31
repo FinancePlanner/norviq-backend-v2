@@ -457,9 +457,10 @@ func (q *Queries) MetricThesis(ctx context.Context, userID uuid.UUID) (int32, er
 }
 
 const metricWatchlistReview = `-- name: MetricWatchlistReview :one
-SELECT COUNT(*)::int AS n FROM watchlist_items WHERE user_id = $1 AND (last_reviewed_at IS NOT NULL)
+SELECT COUNT(DISTINCT symbol)::int AS n FROM watchlist_items WHERE user_id = $1 AND (last_reviewed_at IS NOT NULL)
 `
 
+// Distinct symbols: a symbol in two lists is one review, not two.
 func (q *Queries) MetricWatchlistReview(ctx context.Context, userID uuid.UUID) (int32, error) {
 	row := q.db.QueryRow(ctx, metricWatchlistReview, userID)
 	var n int32

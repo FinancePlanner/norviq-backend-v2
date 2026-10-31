@@ -214,9 +214,27 @@ func (h *handlers) insertAndCopy(c *echo.Context, userID uuid.UUID, payload crea
 	}
 	var dest portfoliocoredb.PortfolioList
 	err = pgx.BeginFunc(ctx, h.db, func(tx pgx.Tx) error {
+		mq := portfoliomgmtdb.New(tx)
+		if isDefault {
+			if err := mq.LockUserDefaultPortfolio(ctx, userID); err != nil {
+				return err
+			}
+		}
 		var err error
 		if dest, err = portfoliocoredb.New(tx).InsertPortfolioList(ctx, params); err != nil {
 			return listNameConflict(err)
+		}
+		// isDefault is "no unarchived owned list", so a user whose only
+		// default was archived (legacy data), or two racing creates, got a
+		// second default and DefaultPortfolioList picked one arbitrarily.
+		// The new default now demotes every other one, under a per-user lock,
+		// so there is never more than one.
+		if isDefault {
+			if err := mq.DemoteOtherDefaultPortfolioLists(ctx, portfoliomgmtdb.DemoteOtherDefaultPortfolioListsParams{
+				Now: &params.CreatedAt, UserID: userID, KeepID: dest.ID,
+			}); err != nil {
+				return err
+			}
 		}
 		if dest.SourcePortfolioID != nil {
 			return copySandbox(ctx, tx, *dest.SourcePortfolioID, dest, userID, payload.CopyRetirementPlan)

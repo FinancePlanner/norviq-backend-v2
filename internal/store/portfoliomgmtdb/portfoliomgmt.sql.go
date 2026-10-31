@@ -451,6 +451,23 @@ func (q *Queries) DeletePortfolioList(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const demoteOtherDefaultPortfolioLists = `-- name: DemoteOtherDefaultPortfolioLists :exec
+UPDATE portfolio_lists SET is_default = false, updated_at = $1
+WHERE user_id = $2 AND is_default AND id <> $3
+`
+
+type DemoteOtherDefaultPortfolioListsParams struct {
+	Now    *time.Time
+	UserID uuid.UUID
+	KeepID uuid.UUID
+}
+
+// Every other default of the user, archived ones included, stops being one.
+func (q *Queries) DemoteOtherDefaultPortfolioLists(ctx context.Context, arg DemoteOtherDefaultPortfolioListsParams) error {
+	_, err := q.db.Exec(ctx, demoteOtherDefaultPortfolioLists, arg.Now, arg.UserID, arg.KeepID)
+	return err
+}
+
 const insertCashPosition = `-- name: InsertCashPosition :one
 INSERT INTO portfolio_cash_positions (id, portfolio_id, label, currency, balance, as_of, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
@@ -712,6 +729,17 @@ func (q *Queries) InvitationsForPortfolio(ctx context.Context, portfolioID uuid.
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockUserDefaultPortfolio = `-- name: LockUserDefaultPortfolio :exec
+SELECT pg_advisory_xact_lock(hashtext('portfolio-default:' || $1::uuid::text))
+`
+
+// Serializes the transactions that make one of the user's portfolios the
+// default, so two racing creates cannot both keep is_default.
+func (q *Queries) LockUserDefaultPortfolio(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockUserDefaultPortfolio, userID)
+	return err
 }
 
 const membershipForUser = `-- name: MembershipForUser :many

@@ -12,7 +12,8 @@ FROM cash_balances
 WHERE account_id = ANY(@account_ids::uuid[]);
 
 -- name: CountWatchlistItems :one
-SELECT count(*)::bigint
+-- Distinct symbols: a symbol in two lists is one watched stock.
+SELECT count(DISTINCT symbol)::bigint
 FROM watchlist_items
 WHERE user_id = $1;
 

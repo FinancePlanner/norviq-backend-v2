@@ -33,6 +33,14 @@ type Querier interface {
 	LotsForAccounts(ctx context.Context, accountIds []uuid.UUID) ([]Lot, error)
 	MoveStockToList(ctx context.Context, arg MoveStockToListParams) error
 	PortfolioListsForUser(ctx context.Context, userID uuid.UUID) ([]PortfolioList, error)
+	// The accounts whose realized P&L a portfolio filter counts: those linked to
+	// the filter's portfolios, plus (for the all-portfolios filter only) legacy
+	// accounts linked to none.
+	RealizedPnlAccountIDs(ctx context.Context, arg RealizedPnlAccountIDsParams) ([]uuid.UUID, error)
+	// Realized P&L per instrument symbol and currency: broker lot disposals (in
+	// the lot's currency) plus manual and ledger sells (transactions.realized_pnl,
+	// in the transaction's currency) that no disposal already accounts for.
+	RealizedPnlBySymbol(ctx context.Context, accountIds []uuid.UUID) ([]RealizedPnlBySymbolRow, error)
 	RenamePortfolioList(ctx context.Context, arg RenamePortfolioListParams) (PortfolioList, error)
 	ResearchNotesForSymbols(ctx context.Context, arg ResearchNotesForSymbolsParams) ([]ResearchNote, error)
 	RevokeShareLinksForScope(ctx context.Context, arg RevokeShareLinksForScopeParams) error

@@ -13,7 +13,7 @@ import (
 )
 
 const activeWatchlistSymbols = `-- name: ActiveWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 AND status = 'active'
+SELECT DISTINCT symbol FROM watchlist_items WHERE user_id = $1 AND status = 'active'
 `
 
 func (q *Queries) ActiveWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
@@ -37,7 +37,7 @@ func (q *Queries) ActiveWatchlistSymbols(ctx context.Context, userID uuid.UUID) 
 }
 
 const allActiveWatchlistSymbols = `-- name: AllActiveWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE status = 'active'
+SELECT DISTINCT symbol FROM watchlist_items WHERE status = 'active'
 `
 
 func (q *Queries) AllActiveWatchlistSymbols(ctx context.Context) ([]string, error) {

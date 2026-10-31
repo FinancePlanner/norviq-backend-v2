@@ -30,6 +30,8 @@ type Querier interface {
 	CountPendingInvitations(ctx context.Context, portfolioID uuid.UUID) (int64, error)
 	DeleteCashPosition(ctx context.Context, id uuid.UUID) error
 	DeletePortfolioList(ctx context.Context, id uuid.UUID) error
+	// Every other default of the user, archived ones included, stops being one.
+	DemoteOtherDefaultPortfolioLists(ctx context.Context, arg DemoteOtherDefaultPortfolioListsParams) error
 	InsertCashPosition(ctx context.Context, arg InsertCashPositionParams) (PortfolioCashPosition, error)
 	InsertInvitation(ctx context.Context, arg InsertInvitationParams) (PortfolioInvitation, error)
 	InsertMembership(ctx context.Context, arg InsertMembershipParams) (PortfolioMembership, error)
@@ -37,6 +39,9 @@ type Querier interface {
 	InsertStock(ctx context.Context, arg InsertStockParams) error
 	InvitationByID(ctx context.Context, arg InvitationByIDParams) ([]PortfolioInvitation, error)
 	InvitationsForPortfolio(ctx context.Context, portfolioID uuid.UUID) ([]PortfolioInvitation, error)
+	// Serializes the transactions that make one of the user's portfolios the
+	// default, so two racing creates cannot both keep is_default.
+	LockUserDefaultPortfolio(ctx context.Context, userID uuid.UUID) error
 	MembershipForUser(ctx context.Context, arg MembershipForUserParams) ([]PortfolioMembership, error)
 	OwnedAccount(ctx context.Context, arg OwnedAccountParams) ([]Account, error)
 	// PortfolioManagementController (/v1/portfolios/*, /v1/portfolio-invitations).

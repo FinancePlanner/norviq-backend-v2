@@ -8,10 +8,11 @@ Fixes are v2-only; Vapor is archived.
 
 | Area | Bug: before → after | Commit |
 |---|---|---|
-| watchlist | POST /v1/watchlist with a symbol already in another list: 500 PSQLError → 409 | 616a99b |
-| watchlist | CSV commit with such a symbol: 500 after some rows were written → 409 up front, nothing written | 616a99b |
+| watchlist | POST /v1/watchlist with a symbol already in another list: 500 PSQLError → 409 (616a99b) → added, a symbol may sit in several lists (migration 00004) | a5bdbd2 |
+| watchlist | CSV commit with such a symbol: 500 after some rows were written → 409 up front (616a99b) → inserted | a5bdbd2 |
+| watchlist | Readers of a user's watchlist symbols (news, thesis watch, earnings reminders, recaps, aiplatform, statistics, sentiment, screens, stocks peers, goals, dashboard, achievements) would repeat a symbol in two lists → one row per symbol / user; item quotas still count rows | a5bdbd2 |
 | watchlist | Duplicate list name (create or rename): 500 → 409 | 616a99b |
-| pilots | A book symbol already in another list rolled back the whole mirror apply on every tick → that symbol is skipped (`skipped_duplicate` event), the rest applies | 8a48a9a |
+| pilots | A book symbol already in another list rolled back the whole mirror apply on every tick → skipped with a `skipped_duplicate` event (8a48a9a) → mirrored into the follow list; the savepoint and event are gone | a5bdbd2 |
 | portfoliomgmt | Duplicate portfolio name (create, clone, PATCH): 500 → 409 | db82c04 |
 | portfoliomgmt | Deleting a portfolio with holdings: 500 (FK RESTRICT) → 409 | db82c04 |
 | portfoliomgmt | Create with a source the caller can't see saved the list, then 404 → 404 before anything is saved; list and copied sandbox in one transaction | db82c04 |
@@ -49,6 +50,10 @@ Fixes are v2-only; Vapor is archived.
 | portfoliomgmt | GET /v1/portfolios listed a portfolio twice for an owner who is also a member → once | 8569843 |
 | portfoliomgmt | Compare `cashBalance` always 0 → each portfolio's cash, as /v1/portfolio/summary | 8569843 |
 | portfoliomgmt | Members list had no ORDER BY → owner, then join order | 8569843 |
+| portfolio | `realizedPnl` always 0 on /v1/portfolio/summary and /v1/pnl → broker `lot_disposals.realized_pnl` plus manual/ledger sells (new nullable `transactions.realized_pnl`, migration 00005, new sells only) over the portfolio's accounts, FX-converted into the base currency | f1153b4 |
+| scenarios | Snapshot cash counted every account of the user → only accounts linked to the snapshot's portfolio (`accounts.portfolio_id`) | dbcd7ed |
+| portfoliomgmt | Revoking an accepted invitation: 204, invitation revoked, membership still active → 409 "This invitation was accepted; remove the member instead.", nothing changes | 97ef97e |
+| portfoliomgmt | POST /v1/portfolios could leave two defaults (archived legacy default, racing creates) → same rule for when the new one is default, but it demotes every other default in the same transaction under a per-user lock | 9d7b8a0 |
 
 ## KEEP
 
@@ -70,40 +75,46 @@ Fixes are v2-only; Vapor is archived.
   (the route still needs `planning:write`): the row is the caller's own push
   opt-in, and drift alerts are per user, so a read-only member choosing
   whether to be pushed is correct.
+- The `skipped_duplicate` pilot event is gone with the cross-list
+  constraint (a5bdbd2), so the iOS/web label question is moot.
+- System goals timestamps (`/v1/goals`): `completedAt`/`updatedAt` are the
+  current time on every call. Kept (owner, 2026-10-31): iOS may decode them
+  as non-optional dates, so null would break it.
+- `goals.completed_at` has no time zone (stores UTC, read as UTC). Kept
+  (owner, 2026-10-31): consistent as is; a `timestamptz` migration buys
+  nothing today.
+- Realized P&L of sells recorded before migration 00005 stays unknown
+  (NULL, counted as 0): the average cost at the time of those sells is
+  gone. A manual sell whose instrument could not be resolved writes no
+  transaction row, so its P&L is not recorded either. /v1/pnl fills
+  realized P&L for held symbols only (a fully sold symbol has no item).
+- Realized P&L converts with the market data service's FX and falls back
+  to 1:1 (logged) when a rate is missing, like the scenario snapshot. The
+  live valuation itself does no FX (holdings and cash are summed as is).
+- Scenario snapshot cash reads `cash_balances` of the portfolio's accounts
+  only; the portfolio's manual cash positions (`portfolio_cash_positions`)
+  are still not part of a snapshot, as in Vapor.
+- `/v1/statistics` `totalRealizedPnl` is still 0 (statistics feature, not
+  this decision); it can reuse the same two sources when wanted.
+
+## Feature notes (not bugs)
+
+- **Dividends** (`/v1/portfolio/dividends`): a flat 5% yield on cost with
+  hardcoded dates. A real version needs a dividend calendar source
+  (per-symbol ex-dividend/payment dates and amounts per share, e.g. the
+  market data provider's dividends endpoint, cached like quotes), then
+  projects shares held x amount per upcoming payment and sums the monthly
+  breakdown from those. Same response shape.
+- **Sector benchmark** (`/v1/portfolio/sector-exposure`):
+  `benchmarkWeightPercent` and `overweightPercent` are always null. Needs a
+  benchmark-weights source (e.g. S&P 500 sector weights from an ETF
+  holdings feed, refreshed by a job and stored with an as-of date), then
+  `overweightPercent = weightPercent - benchmarkWeightPercent` per sector
+  and `benchmarkName`/`benchmarkAsOf` from that row.
 
 ## DECIDE
 
-- **Watchlist symbol in several lists.** Vapor meant symbols to be unique per
-  list, but its migration dropped the old constraint under the wrong name, so
-  `uq:watchlist_items.user_id+watchlist_items.symbol` still blocks it. (a) keep
-  the 409 (done); (b) a migration dropping the constraint, after the readers
-  that select a user's symbols de-duplicate (news, thesiswatch, recaps,
-  aiplatform, stocks queries).
-- **`skipped_duplicate` pilot event:** clients render it generically; add a
-  label in iOS and web?
-- **`realizedPnl` always 0:** sum broker `lot_disposals.realized_pnl` (needs FX),
-  record P&L on manual/ledger sells (new storage), or keep 0.
-- **Dividends:** flat 5% yield on cost with hardcoded dates. Feature work.
-- **Sector benchmark fields always null:** needs a benchmark-weights source.
-- **Scenario snapshot cash** counts all the user's accounts, not just the
-  portfolio's (`scenarios/capture.go`): filter, or keep and document.
-- **System goals timestamps** (`/v1/goals`): `completedAt`/`updatedAt` are the
-  current time on every call. Keep, return null, or use the first matching
-  budget/expense row's `created_at`.
-- **`goals.completed_at`** has no time zone (stores UTC, read as UTC). Keep, or
-  migrate to `timestamptz`.
-- **Revoking an accepted invitation** (`DELETE .../invitations/:id`) flips it
-  to `revoked` and answers 204, but the membership stays active. (a) 409
-  "This invitation was accepted; remove the member instead."; (b) also revoke
-  the membership it created (same effect as `DELETE .../members/:id`); (c)
-  keep. Membership change, so left to the owner.
-- **`isDefault` on POST /v1/portfolios** is "no unarchived owned list"
-  (`count == 0`). A user whose only default is archived (legacy data; archive
-  now refuses the default) or two racing creates get a second default, and
-  `DefaultPortfolioList` then picks one arbitrarily. (a) default only when the
-  user has no default list at all, archived included; (b) keep the rule but
-  demote other defaults in the same transaction; (c) keep. Touches the
-  default-list rules (pilot follows demote too), so left to the owner.
+None (all decided 2026-10-31; see FIX, KEEP and the feature notes).
 
 ## TODO (still Vapor behaviour)
 

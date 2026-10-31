@@ -473,8 +473,8 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) error 
 }
 
 const insertTransaction = `-- name: InsertTransaction :exec
-INSERT INTO transactions (id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+INSERT INTO transactions (id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, realized_pnl, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
 `
 
 type InsertTransactionParams struct {
@@ -487,6 +487,7 @@ type InsertTransactionParams struct {
 	Price        *float64
 	Currency     string
 	TradeDate    time.Time
+	RealizedPnl  *float64
 	CreatedAt    time.Time
 }
 
@@ -501,6 +502,7 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 		arg.Price,
 		arg.Currency,
 		arg.TradeDate,
+		arg.RealizedPnl,
 		arg.CreatedAt,
 	)
 	return err

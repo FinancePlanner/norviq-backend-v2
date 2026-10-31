@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -248,19 +247,12 @@ func (m *Mirror) applyWatchlist(ctx context.Context, db *pgxpool.Pool, follow pi
 					}
 					continue
 				}
-				skipped, err := insertWatchItem(ctx, tx, pilotsdb.InsertWatchlistItemParams{
+				ts := time.Now()
+				if err := tq.InsertWatchlistItem(ctx, pilotsdb.InsertWatchlistItemParams{
 					ID: uuid.New(), UserID: follow.UserID, WatchlistListID: listID, Symbol: symbol,
-					Note: &note, Status: StatusActive, CreatedAt: time.Now(),
-				})
-				if err != nil {
+					Note: &note, Status: StatusActive, CreatedAt: ts,
+				}); err != nil {
 					return err
-				}
-				if skipped {
-					n := "Already in another of your watchlists."
-					if err := insertEvent(ctx, tq, follow.ID, version.Version, EventSkippedDuplicate, symbol, nil, nil, now, &n); err != nil {
-						return err
-					}
-					continue
 				}
 			default:
 				return err
@@ -294,35 +286,6 @@ func (m *Mirror) applyWatchlist(ctx context.Context, db *pgxpool.Pool, follow pi
 		return nil
 	})
 	return applied, err
-}
-
-// EventSkippedDuplicate is the follow event for a book symbol the user
-// already has in another watchlist. watchlist_items is unique on (user_id,
-// symbol) across lists, so Vapor's insert failed and rolled back the whole
-// apply on every mirror tick; v2 skips that symbol and applies the rest.
-const EventSkippedDuplicate = "skipped_duplicate"
-
-// watchlistCrossListConstraint is the (user_id, symbol) unique constraint on
-// watchlist_items (see watchlist/conflict.go).
-const watchlistCrossListConstraint = "uq:watchlist_items.user_id+watchlist_items.symbol"
-
-// insertWatchItem inserts the item inside a savepoint. skipped is true when
-// the symbol already sits in another of the user's watchlists; the savepoint
-// is rolled back and the outer transaction stays usable.
-func insertWatchItem(ctx context.Context, tx pgx.Tx, p pilotsdb.InsertWatchlistItemParams) (skipped bool, err error) {
-	sp, err := tx.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	if err := pilotsdb.New(sp).InsertWatchlistItem(ctx, p); err != nil {
-		_ = sp.Rollback(ctx)
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == watchlistCrossListConstraint {
-			return true, nil
-		}
-		return false, err
-	}
-	return false, sp.Commit(ctx)
 }
 
 // appendNote is PilotMirrorService.appending: pilot activity is appended,
@@ -443,11 +406,14 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 		balance = row.Balance
 	}
 	for _, t := range trades {
+		var realized *float64
 		switch t.Side {
 		case SideSell:
-			if err := applySell(ctx, q, t, userID, portfolioID); err != nil {
+			pnl, err := applySell(ctx, q, t, userID, portfolioID)
+			if err != nil {
 				return err
 			}
+			realized = &pnl
 			balance += t.Quantity * t.Price
 		default:
 			cost := t.Quantity * t.Price
@@ -467,7 +433,8 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 			qty, price, ext := t.Quantity, t.Price, t.ExternalID
 			if err := q.InsertTransaction(ctx, pilotsdb.InsertTransactionParams{
 				ID: uuid.New(), AccountID: account.ID, InstrumentID: *t.InstrumentID, ExternalID: &ext, Type: typ,
-				Quantity: &qty, Price: &price, Currency: account.BaseCurrency, TradeDate: dateOf(t.TradeDate), CreatedAt: time.Now(),
+				Quantity: &qty, Price: &price, Currency: account.BaseCurrency, TradeDate: dateOf(t.TradeDate),
+				RealizedPnl: realized, CreatedAt: time.Now(),
 			}); err != nil {
 				return err
 			}
@@ -482,21 +449,25 @@ func recordTrades(ctx context.Context, q *pilotsdb.Queries, trades []ledgerTrade
 	})
 }
 
-func applySell(ctx context.Context, q *pilotsdb.Queries, t ledgerTrade, userID, portfolioID uuid.UUID) error {
+// applySell reduces the holding and returns the sale's realized P&L,
+// (sell price - average cost) x shares, which recordTrades stores on the
+// sell transaction (transactions.realized_pnl).
+func applySell(ctx context.Context, q *pilotsdb.Queries, t ledgerTrade, userID, portfolioID uuid.UUID) (float64, error) {
 	stock, err := q.StockBySymbol(ctx, pilotsdb.StockBySymbolParams{UserID: userID, PortfolioListID: portfolioID, Symbol: t.Symbol})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrHoldingNotFound
+		return 0, ErrHoldingNotFound
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !(t.Quantity <= stock.Shares+ledgerEpsilon) {
-		return ErrInsufficientShares
+		return 0, ErrInsufficientShares
 	}
+	realized := (t.Price - stock.BuyPrice) * t.Quantity
 	if stock.Shares-t.Quantity <= ledgerEpsilon {
-		return q.DeleteStock(ctx, stock.ID)
+		return realized, q.DeleteStock(ctx, stock.ID)
 	}
-	return q.UpdateStockShares(ctx, pilotsdb.UpdateStockSharesParams{ID: stock.ID, Shares: stock.Shares - t.Quantity})
+	return realized, q.UpdateStockShares(ctx, pilotsdb.UpdateStockSharesParams{ID: stock.ID, Shares: stock.Shares - t.Quantity})
 }
 
 // applyBuy merges into an existing row the way DatabaseStocksRepository

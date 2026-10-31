@@ -262,4 +262,5 @@ type Transaction struct {
 	Fees         *float64
 	CreatedAt    time.Time
 	UpdatedAt    *time.Time
+	RealizedPnl  *float64
 }

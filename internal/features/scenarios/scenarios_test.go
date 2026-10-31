@@ -190,10 +190,19 @@ func TestSnapshotCapture(t *testing.T) {
 		VALUES ($1, $2, $3, 'real_estate', 'VNQ', 250000, 'Housing', '{"values":{"beta":0.4}}', now())`, uuid.New(), owner, house)
 
 	account := uuid.New()
-	e.exec(`INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at) VALUES ($1, $2, 'x', 'manual', 'EUR', now())`, account, owner)
+	e.exec(`INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at, portfolio_id) VALUES ($1, $2, 'x', 'manual', 'EUR', now(), $3)`, account, owner, list)
 	e.exec(`INSERT INTO cash_balances (id, account_id, currency, balance, as_of, created_at) VALUES
 		($1, $4, 'eur', 10, '2026-01-01', now()), ($2, $4, 'EUR', 500, '2026-02-01', now()), ($3, $4, 'BASE', 0, '2026-02-01', now())`,
 		uuid.New(), uuid.New(), uuid.New(), account)
+	// Cash of the user's other portfolio and of an account linked to none:
+	// Vapor counted both in every snapshot; only the snapshot portfolio's
+	// accounts count now.
+	otherList := e.portfolio(owner)
+	for _, pid := range []*uuid.UUID{&otherList, nil} {
+		acct := uuid.New()
+		e.exec(`INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at, portfolio_id) VALUES ($1, $2, $3, 'manual', 'EUR', now(), $4)`, acct, owner, acct.String(), pid)
+		e.exec(`INSERT INTO cash_balances (id, account_id, currency, balance, as_of, created_at) VALUES ($1, $2, 'USD', 777, '2026-02-01', now())`, uuid.New(), acct)
+	}
 	coin := uuid.New()
 	e.exec(`INSERT INTO crypto_portfolio_items (id, user_id, symbol, name, quantity, average_buy_price, created_at) VALUES ($1, $2, 'btc', 'Bitcoin', 0.5, 20000, now())`, coin, owner)
 

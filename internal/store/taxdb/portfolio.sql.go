@@ -234,7 +234,7 @@ func (q *Queries) AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) 
 }
 
 const buysBetween = `-- name: BuysBetween :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = ANY($1::uuid[]) AND type = 'BUY'
   AND trade_date >= $2::timestamptz AND trade_date <= $3::timestamptz
 `
@@ -268,6 +268,7 @@ func (q *Queries) BuysBetween(ctx context.Context, arg BuysBetweenParams) ([]Tra
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -890,7 +891,7 @@ func (q *Queries) PositionsForAccounts(ctx context.Context, accountIds []uuid.UU
 }
 
 const recentBuys = `-- name: RecentBuys :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = ANY($1::uuid[]) AND instrument_id = ANY($2::uuid[])
   AND trade_date >= $3::timestamptz AND type = ANY(ARRAY['BUY', 'BOT', 'buy'])
 `
@@ -924,6 +925,7 @@ func (q *Queries) RecentBuys(ctx context.Context, arg RecentBuysParams) ([]Trans
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -936,7 +938,7 @@ func (q *Queries) RecentBuys(ctx context.Context, arg RecentBuysParams) ([]Trans
 }
 
 const sellTransactionsInRange = `-- name: SellTransactionsInRange :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = ANY($1::uuid[]) AND type = 'SELL'
   AND trade_date >= $2::timestamptz AND trade_date < $3::timestamptz
 `
@@ -970,6 +972,7 @@ func (q *Queries) SellTransactionsInRange(ctx context.Context, arg SellTransacti
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -1040,7 +1043,7 @@ func (q *Queries) TransactionInstrumentIDsForAccounts(ctx context.Context, accou
 }
 
 const transactionsByIDs = `-- name: TransactionsByIDs :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions WHERE id = ANY($1::uuid[])
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) TransactionsByIDs(ctx context.Context, ids []uuid.UUID) ([]Transaction, error) {
@@ -1066,6 +1069,7 @@ func (q *Queries) TransactionsByIDs(ctx context.Context, ids []uuid.UUID) ([]Tra
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -1078,7 +1082,7 @@ func (q *Queries) TransactionsByIDs(ctx context.Context, ids []uuid.UUID) ([]Tra
 }
 
 const transactionsByIDsInRange = `-- name: TransactionsByIDsInRange :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE id = ANY($1::uuid[]) AND trade_date >= $2::timestamptz AND trade_date < $3::timestamptz
 `
 
@@ -1111,6 +1115,7 @@ func (q *Queries) TransactionsByIDsInRange(ctx context.Context, arg Transactions
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}

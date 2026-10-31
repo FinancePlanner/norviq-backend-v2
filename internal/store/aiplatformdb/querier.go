@@ -22,6 +22,7 @@ type Querier interface {
 	ListAICredentials(ctx context.Context, userID uuid.UUID) ([]UserAiProviderCredential, error)
 	SetUserAIConsent(ctx context.Context, arg SetUserAIConsentParams) error
 	UpdateAICredential(ctx context.Context, arg UpdateAICredentialParams) error
+	// One row per symbol: a symbol may sit in several of the user's lists.
 	WatchlistSymbolsForUser(ctx context.Context, arg WatchlistSymbolsForUserParams) ([]string, error)
 }
 

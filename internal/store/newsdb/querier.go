@@ -59,6 +59,8 @@ type Querier interface {
 	UpdateThesisUserState(ctx context.Context, arg UpdateThesisUserStateParams) error
 	UserResearchNotes(ctx context.Context, userID uuid.UUID) ([]ResearchNote, error)
 	UserStocksForThesis(ctx context.Context, userID uuid.UUID) ([]UserStocksForThesisRow, error)
+	// One row per (symbol, user): a symbol in two of a user's lists must not
+	// notify them twice.
 	WatchlistOwnersForSymbols(ctx context.Context, symbols []string) ([]WatchlistOwnersForSymbolsRow, error)
 }
 

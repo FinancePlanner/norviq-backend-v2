@@ -60,4 +60,8 @@ WHERE user_id = $1 AND month_start = sqlc.arg(month_start)::date
 LIMIT 1;
 
 -- name: WatchlistSymbolsForUser :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 LIMIT $2;
+-- One row per symbol: a symbol may sit in several of the user's lists.
+SELECT symbol FROM watchlist_items WHERE user_id = $1
+GROUP BY symbol
+ORDER BY min(created_at), symbol
+LIMIT $2;

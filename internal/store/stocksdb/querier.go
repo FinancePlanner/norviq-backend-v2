@@ -50,6 +50,8 @@ type Querier interface {
 	UpdateStock(ctx context.Context, arg UpdateStockParams) (Stock, error)
 	UpdateTransaction(ctx context.Context, arg UpdateTransactionParams) (Transaction, error)
 	UpdateValuation(ctx context.Context, arg UpdateValuationParams) (StockValuation, error)
+	// One row per symbol (a symbol may sit in several lists), at the position of
+	// its most recently updated row.
 	WatchlistSymbolsByRecency(ctx context.Context, userID uuid.UUID) ([]string, error)
 }
 

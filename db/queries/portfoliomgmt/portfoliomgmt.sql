@@ -156,3 +156,13 @@ SELECT * FROM retirement_plans WHERE portfolio_id = $1 LIMIT 1;
 -- name: InsertRetirementPlan :exec
 INSERT INTO retirement_plans (id, portfolio_id, rule_version, input_json, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $5);
+
+-- name: LockUserDefaultPortfolio :exec
+-- Serializes the transactions that make one of the user's portfolios the
+-- default, so two racing creates cannot both keep is_default.
+SELECT pg_advisory_xact_lock(hashtext('portfolio-default:' || sqlc.arg(user_id)::uuid::text));
+
+-- name: DemoteOtherDefaultPortfolioLists :exec
+-- Every other default of the user, archived ones included, stops being one.
+UPDATE portfolio_lists SET is_default = false, updated_at = sqlc.arg(now)
+WHERE user_id = sqlc.arg(user_id) AND is_default AND id <> sqlc.arg(keep_id);

@@ -92,6 +92,7 @@ type Querier interface {
 	MetricScenario(ctx context.Context, userID uuid.UUID) (int32, error)
 	MetricTargetHit(ctx context.Context, userID uuid.UUID) (int32, error)
 	MetricThesis(ctx context.Context, userID uuid.UUID) (int32, error)
+	// Distinct symbols: a symbol in two lists is one review, not two.
 	MetricWatchlistReview(ctx context.Context, userID uuid.UUID) (int32, error)
 	MutualFriendRows(ctx context.Context, arg MutualFriendRowsParams) ([]uuid.UUID, error)
 	OpenedMonthlyRecapKeys(ctx context.Context, userID uuid.UUID) ([]string, error)

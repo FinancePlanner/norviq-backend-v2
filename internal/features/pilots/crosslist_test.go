@@ -9,9 +9,11 @@ import (
 )
 
 // A book symbol the user already watches in another list used to fail the
-// (user_id, symbol) constraint and roll back the whole apply on every tick.
-// It is now skipped with a skipped_duplicate event and the rest applies.
-func TestMirrorWatchlistSkipsSymbolInAnotherList(t *testing.T) {
+// (user_id, symbol) constraint and roll back the whole apply on every tick
+// (v2 then skipped it with a skipped_duplicate event). Since migration 00004
+// a symbol may sit in several lists, so the follow list mirrors the whole
+// book, NVDA included.
+func TestMirrorWatchlistMirrorsSymbolInAnotherList(t *testing.T) {
 	pool := testutil.DB(t)
 	user := newUser(t, pool)
 	p := makePilot(t, pool, KindPolitician)
@@ -34,13 +36,13 @@ func TestMirrorWatchlistSkipsSymbolInAnotherList(t *testing.T) {
 	if n := count(t, pool, `SELECT count(*) FROM watchlist_items WHERE watchlist_list_id = $1 AND symbol = 'AAPL'`, listID); n != 1 {
 		t.Fatalf("AAPL rows in follow list = %d", n)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM watchlist_items WHERE user_id = $1 AND symbol = 'NVDA'`, user); n != 1 {
-		t.Fatalf("NVDA rows = %d", n)
+	if n := count(t, pool, `SELECT count(*) FROM watchlist_items WHERE watchlist_list_id = $1 AND symbol = 'NVDA'`, listID); n != 1 {
+		t.Fatalf("NVDA rows in follow list = %d", n)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM pilot_follow_events WHERE follow_id = $1 AND kind = $2 AND symbol = 'NVDA'`, f.ID, EventSkippedDuplicate); n != 1 {
-		t.Fatalf("skipped_duplicate events = %d", n)
+	if n := count(t, pool, `SELECT count(*) FROM watchlist_items WHERE user_id = $1 AND symbol = 'NVDA'`, user); n != 2 {
+		t.Fatalf("NVDA rows = %d, want 2 (own list and follow list)", n)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM pilot_follow_events WHERE follow_id = $1 AND kind = 'watch_added' AND symbol = 'AAPL'`, f.ID); n != 1 {
-		t.Fatalf("watch_added events = %d", n)
+	if n := count(t, pool, `SELECT count(*) FROM pilot_follow_events WHERE follow_id = $1 AND kind = 'watch_added'`, f.ID); n != 2 {
+		t.Fatalf("watch_added events = %d, want 2", n)
 	}
 }

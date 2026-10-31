@@ -227,7 +227,7 @@ func (q *Queries) GetInstrument(ctx context.Context, id uuid.UUID) ([]Instrument
 }
 
 const getTransaction = `-- name: GetTransaction :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions WHERE id = $1 LIMIT 1
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetTransaction(ctx context.Context, id uuid.UUID) ([]Transaction, error) {
@@ -253,6 +253,7 @@ func (q *Queries) GetTransaction(ctx context.Context, id uuid.UUID) ([]Transacti
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -487,11 +488,11 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) (Stock
 const insertTransaction = `-- name: InsertTransaction :one
 INSERT INTO transactions (
     id, account_id, instrument_id, external_id, type, quantity, price, currency,
-    trade_date, settle_date, fees, created_at, updated_at
+    trade_date, settle_date, fees, realized_pnl, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13
 )
-RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at
+RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl
 `
 
 type InsertTransactionParams struct {
@@ -506,6 +507,7 @@ type InsertTransactionParams struct {
 	TradeDate    time.Time
 	SettleDate   *time.Time
 	Fees         *float64
+	RealizedPnl  *float64
 	Now          time.Time
 }
 
@@ -522,6 +524,7 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 		arg.TradeDate,
 		arg.SettleDate,
 		arg.Fees,
+		arg.RealizedPnl,
 		arg.Now,
 	)
 	var i Transaction
@@ -539,6 +542,7 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 		&i.Fees,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RealizedPnl,
 	)
 	return i, err
 }
@@ -994,7 +998,7 @@ func (q *Queries) StocksInList(ctx context.Context, arg StocksInListParams) ([]S
 }
 
 const transactionsForAccounts = `-- name: TransactionsForAccounts :many
-SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at FROM transactions
+SELECT id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl FROM transactions
 WHERE account_id = ANY($1::uuid[])
 ORDER BY trade_date DESC
 `
@@ -1022,6 +1026,7 @@ func (q *Queries) TransactionsForAccounts(ctx context.Context, accountIds []uuid
 			&i.Fees,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RealizedPnl,
 		); err != nil {
 			return nil, err
 		}
@@ -1108,20 +1113,21 @@ func (q *Queries) UpdateStock(ctx context.Context, arg UpdateStockParams) (Stock
 const updateTransaction = `-- name: UpdateTransaction :one
 UPDATE transactions SET
     quantity = $2, price = $3, currency = $4, trade_date = $5, settle_date = $6,
-    fees = $7, updated_at = $8
+    fees = $7, updated_at = $8, realized_pnl = $9
 WHERE id = $1
-RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at
+RETURNING id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, settle_date, fees, created_at, updated_at, realized_pnl
 `
 
 type UpdateTransactionParams struct {
-	ID         uuid.UUID
-	Quantity   *float64
-	Price      *float64
-	Currency   string
-	TradeDate  time.Time
-	SettleDate *time.Time
-	Fees       *float64
-	UpdatedAt  *time.Time
+	ID          uuid.UUID
+	Quantity    *float64
+	Price       *float64
+	Currency    string
+	TradeDate   time.Time
+	SettleDate  *time.Time
+	Fees        *float64
+	UpdatedAt   *time.Time
+	RealizedPnl *float64
 }
 
 func (q *Queries) UpdateTransaction(ctx context.Context, arg UpdateTransactionParams) (Transaction, error) {
@@ -1134,6 +1140,7 @@ func (q *Queries) UpdateTransaction(ctx context.Context, arg UpdateTransactionPa
 		arg.SettleDate,
 		arg.Fees,
 		arg.UpdatedAt,
+		arg.RealizedPnl,
 	)
 	var i Transaction
 	err := row.Scan(
@@ -1150,6 +1157,7 @@ func (q *Queries) UpdateTransaction(ctx context.Context, arg UpdateTransactionPa
 		&i.Fees,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RealizedPnl,
 	)
 	return i, err
 }
@@ -1210,9 +1218,16 @@ func (q *Queries) UpdateValuation(ctx context.Context, arg UpdateValuationParams
 }
 
 const watchlistSymbolsByRecency = `-- name: WatchlistSymbolsByRecency :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 ORDER BY updated_at DESC, created_at DESC
+SELECT symbol FROM (
+    SELECT DISTINCT ON (symbol) symbol, updated_at, created_at
+    FROM watchlist_items WHERE user_id = $1
+    ORDER BY symbol, updated_at DESC, created_at DESC
+) w
+ORDER BY updated_at DESC, created_at DESC
 `
 
+// One row per symbol (a symbol may sit in several lists), at the position of
+// its most recently updated row.
 func (q *Queries) WatchlistSymbolsByRecency(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, watchlistSymbolsByRecency, userID)
 	if err != nil {

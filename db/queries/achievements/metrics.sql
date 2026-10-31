@@ -35,7 +35,8 @@ SELECT COUNT(*)::int AS n FROM research_notes WHERE user_id = $1 AND (btrim(COAL
 SELECT EXISTS (SELECT 1 FROM position_memos WHERE user_id = $1 AND (bookmarked = true))::int AS n;
 
 -- name: MetricWatchlistReview :one
-SELECT COUNT(*)::int AS n FROM watchlist_items WHERE user_id = $1 AND (last_reviewed_at IS NOT NULL);
+-- Distinct symbols: a symbol in two lists is one review, not two.
+SELECT COUNT(DISTINCT symbol)::int AS n FROM watchlist_items WHERE user_id = $1 AND (last_reviewed_at IS NOT NULL);
 
 -- name: MetricTargetHit :one
 SELECT COUNT(*)::int AS n FROM targets WHERE user_id = $1 AND (alert_triggered_at IS NOT NULL);

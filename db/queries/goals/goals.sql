@@ -24,7 +24,8 @@ UPDATE goals SET status = $2, status_updated_by = $3, completed_at = $4, updated
 DELETE FROM goals WHERE id = $1;
 
 -- name: CountActiveWatchlistItems :one
-SELECT count(*) FROM watchlist_items WHERE user_id = $1 AND status <> 'archived';
+-- Distinct symbols: a symbol in two lists counts once.
+SELECT count(DISTINCT symbol) FROM watchlist_items WHERE user_id = $1 AND status <> 'archived';
 
 -- name: CountBudgetSnapshots :one
 SELECT count(*) FROM budget_snapshots WHERE user_id = $1;

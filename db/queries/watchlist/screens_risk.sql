@@ -31,7 +31,9 @@ WHERE id = $1;
 DELETE FROM watchlist_screen_evaluations WHERE screen_id = $1;
 
 -- name: ScreenWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 AND watchlist_list_id = ANY(sqlc.arg(list_ids)::uuid[]);
+SELECT symbol FROM watchlist_items WHERE user_id = $1 AND watchlist_list_id = ANY(sqlc.arg(list_ids)::uuid[])
+GROUP BY symbol
+ORDER BY min(created_at), symbol;
 
 -- name: LatestScreenEvaluation :many
 SELECT * FROM watchlist_screen_evaluations

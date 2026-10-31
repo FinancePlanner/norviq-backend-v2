@@ -67,6 +67,18 @@ client release. Then archive the Vapor repo.
   verify a zero-line diff, and regenerate `docs/vapor-routes.txt` with every
   `*_ENABLED` flag on.
 
+### Schema changes after cutover
+
+v2's migrate job (the PreSync hook, which takes a `pg_dump` first) owns the
+schema now. A new change is the next numbered file in `db/migrations`, v2-only,
+with no section in `fluent_migrations.txt`. Keep it safe on a populated table
+under traffic: a nullable column with no default, `lock_timeout` around any
+`ALTER TABLE`, and `CREATE INDEX CONCURRENTLY` under `-- +goose NO TRANSACTION`
+(goose then runs each statement on its own, on one connection). Drop a
+same-named index first so a retry after a failed concurrent build does not keep
+an INVALID one. `00003_expenses_external_id.sql` is the worked example, and
+`internal/migrate/externalid_db_test.go` its test.
+
 ## Deliberate deviations from Vapor
 
 Vapor bugs are ported faithfully unless listed here. Each fix is v2-only;

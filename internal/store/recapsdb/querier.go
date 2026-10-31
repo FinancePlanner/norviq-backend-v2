@@ -36,6 +36,7 @@ type Querier interface {
 	RecapTargets(ctx context.Context, arg RecapTargetsParams) ([]RecapTargetsRow, error)
 	RecapTrades(ctx context.Context, arg RecapTradesParams) ([]RecapTradesRow, error)
 	RecapUserCreatedAt(ctx context.Context, id uuid.UUID) ([]time.Time, error)
+	// One row per symbol: adding a symbol to two lists is one addition.
 	RecapWatchlistSymbols(ctx context.Context, arg RecapWatchlistSymbolsParams) ([]string, error)
 	RecapXPPoints(ctx context.Context, arg RecapXPPointsParams) ([]int64, error)
 	SetRecapCompleted(ctx context.Context, arg SetRecapCompletedParams) error

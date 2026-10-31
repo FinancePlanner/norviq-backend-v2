@@ -1,13 +1,16 @@
 package tax
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"norviq-api/internal/apijson"
 	"norviq-api/internal/store/taxdb"
 )
 
@@ -79,5 +82,46 @@ func TestLastFixingDaySkipsWeekends(t *testing.T) {
 		if got := lastFixingDay(day(in)); !got.Equal(day(want)) {
 			t.Errorf("lastFixingDay(%s) = %s, want %s", in, got.Format("2006-01-02"), want)
 		}
+	}
+}
+
+// X3: PUT market-admission is Pro-gated like the other tax writes, and the
+// 403 comes before the attestation 422 (Vapor had no gate; a free user got
+// the 422, or classified the instrument).
+func TestMarketAdmissionRequiresPro(t *testing.T) {
+	a := newTaxApp(t)
+	free := a.seed(false)
+	path := "/v1/tax/instruments/" + apijson.FormatUUID(free.spy) + "/market-admission"
+	for _, body := range []map[string]any{{"status": "regulated"}, {"status": "unknown"}} {
+		r := a.Do(http.MethodPut, path, free.token, body)
+		if r.Status != http.StatusForbidden {
+			t.Fatalf("free %v = %d %s", body, r.Status, r.Body)
+		}
+		var out map[string]any
+		r.JSON(t, &out)
+		if out["code"] != "upgrade_required" || out["error"] != "Upgrade required. feature=tax_optimization plan=free required=pro" {
+			t.Fatalf("free %v body %v", body, out)
+		}
+	}
+	// The sibling routes give the same 403 for the same user.
+	sibling := a.Do(http.MethodPut, "/v1/tax/profile", free.token, usProfile(free))
+	gated := a.Do(http.MethodPut, path, free.token, map[string]any{"status": "regulated"})
+	if sibling.Status != gated.Status || !bytes.Equal(sibling.Body, gated.Body) {
+		t.Fatalf("profile %d %s vs market-admission %d %s", sibling.Status, sibling.Body, gated.Status, gated.Body)
+	}
+	var status *string
+	if err := a.Deps.DB.QueryRow(context.Background(), `SELECT regulated_market_status FROM instruments WHERE id = $1`, free.spy).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != nil {
+		t.Fatalf("free user changed the instrument: %v", *status)
+	}
+
+	pro := a.seed(true)
+	proPath := "/v1/tax/instruments/" + apijson.FormatUUID(pro.spy) + "/market-admission"
+	a.json(http.MethodPut, proPath, pro.token, map[string]any{"status": "regulated"}, 422)
+	out := a.json(http.MethodPut, proPath, pro.token, map[string]any{"status": "unknown"}, 200)
+	if out["marketAdmissionStatus"] != "unknown" {
+		t.Fatalf("pro save %v", out)
 	}
 }

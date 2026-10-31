@@ -139,13 +139,25 @@ func (b bulkExpenses) ExistingDedupKeys(ctx context.Context, userID uuid.UUID, f
 	return out, nil
 }
 
+func (b bulkExpenses) ExistingExternalIDs(ctx context.Context, userID uuid.UUID, ids []string) (map[string]bool, error) {
+	stored, err := b.bulk.ExistingExternalIDs(ctx, b.svc.Pool(), userID, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(stored))
+	for id := range stored {
+		out[id] = true
+	}
+	return out, nil
+}
+
 func (b bulkExpenses) Insert(ctx context.Context, userID uuid.UUID, candidates []Candidate) (InsertOutcome, error) {
 	in := make([]expenses.Candidate, len(candidates))
 	for i, c := range candidates {
 		r := c.Request
 		req := expenses.NewExpenseRequest(r.Title, r.Amount, expenses.BudgetPillar(r.Pillar), r.OccurredOn, r.CategoryID)
 		req.ForeignAmount, req.ForeignCurrency, req.ExchangeRate, req.Notes = r.ForeignAmount, r.ForeignCurrency, r.ExchangeRate, r.Notes
-		in[i] = expenses.Candidate{Reference: c.Reference, Request: req}
+		in[i] = expenses.Candidate{Reference: c.Reference, Request: req, ExternalID: r.ExternalID}
 	}
 	out, err := b.bulk.Insert(ctx, b.svc.Pool(), userID, in)
 	if err != nil {

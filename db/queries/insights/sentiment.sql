@@ -103,6 +103,9 @@ WHERE user_id = @user_id AND category = 'stock'
   AND (sqlc.narg(portfolio_list_id)::uuid IS NULL OR portfolio_list_id = sqlc.narg(portfolio_list_id));
 
 -- name: ActiveWatchlistSymbols :many
+-- One row per symbol: a symbol may sit in several of the user's lists.
 SELECT symbol FROM watchlist_items
 WHERE user_id = @user_id AND status <> 'archived'
-  AND (sqlc.narg(watchlist_list_id)::uuid IS NULL OR watchlist_list_id = sqlc.narg(watchlist_list_id));
+  AND (sqlc.narg(watchlist_list_id)::uuid IS NULL OR watchlist_list_id = sqlc.narg(watchlist_list_id))
+GROUP BY symbol
+ORDER BY min(created_at), symbol;

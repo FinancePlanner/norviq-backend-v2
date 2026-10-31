@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	// Distinct symbols: a symbol in two lists counts once.
 	CountActiveWatchlistItems(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountBudgetSnapshots(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountExpenses(ctx context.Context, userID uuid.UUID) (int64, error)

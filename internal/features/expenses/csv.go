@@ -91,7 +91,7 @@ func (c CSVService) ImportCSV(ctx context.Context, db expensesdb.DBTX, csv strin
 		rows = append(rows, CSVRowResult{Line: line, Outcome: RowImported})
 	}
 
-	seen, err := importer.ExistingDedupKeys(ctx, db, userID, OccurredOnRange(candidates))
+	seen, err := importer.ExistingKeys(ctx, db, userID, candidates)
 	if err != nil {
 		return CSVImportResult{}, err
 	}
@@ -138,6 +138,10 @@ func (c CSVService) ImportCSV(ctx context.Context, db expensesdb.DBTX, csv strin
 	for line, msg := range outcome.Failures {
 		resultByLine[line] = CSVRowResult{Line: line, Outcome: RowError, Message: strPtr(msg)}
 		failed++
+	}
+	for _, line := range outcome.Duplicates {
+		resultByLine[line] = CSVRowResult{Line: line, Outcome: RowSkippedDuplicate}
+		skipped++
 	}
 	return CSVImportResult{
 		DryRun: dryRun, Total: len(parsed), Imported: outcome.Imported, Skipped: skipped, Failed: failed, Rows: remap(),

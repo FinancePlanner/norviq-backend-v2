@@ -48,10 +48,12 @@ RETURNING *;
 DELETE FROM watchlist_items WHERE id = $1;
 
 -- name: ActiveWatchlistUserIDsForSymbol :many
-SELECT user_id FROM watchlist_items WHERE symbol = $1 AND status = 'active';
+SELECT DISTINCT user_id FROM watchlist_items WHERE symbol = $1 AND status = 'active';
 
 -- name: HoldingUserIDsForSymbol :many
 SELECT user_id FROM stocks WHERE symbol = $1;
 
 -- name: WatchlistSymbolsInLists :many
-SELECT symbol FROM watchlist_items WHERE user_id = @user_id AND watchlist_list_id = ANY(@list_ids::uuid[]);
+SELECT symbol FROM watchlist_items WHERE user_id = @user_id AND watchlist_list_id = ANY(@list_ids::uuid[])
+GROUP BY symbol
+ORDER BY min(created_at), symbol;

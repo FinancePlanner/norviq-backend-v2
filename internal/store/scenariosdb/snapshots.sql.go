@@ -129,8 +129,15 @@ func (q *Queries) OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfol
 const snapshotCashBalances = `-- name: SnapshotCashBalances :many
 SELECT cb.id, cb.account_id, cb.currency, cb.balance, cb.as_of
 FROM cash_balances cb
-WHERE cb.account_id IN (SELECT a.id FROM accounts a WHERE a.user_id = $1)
+WHERE cb.account_id IN (
+    SELECT a.id FROM accounts a WHERE a.user_id = $1 AND a.portfolio_id = $2::uuid
+)
 `
+
+type SnapshotCashBalancesParams struct {
+	UserID      uuid.UUID
+	PortfolioID uuid.UUID
+}
 
 type SnapshotCashBalancesRow struct {
 	ID        uuid.UUID
@@ -140,9 +147,11 @@ type SnapshotCashBalancesRow struct {
 	AsOf      time.Time
 }
 
-// Account.query.filter(userId) then CashBalance.query.filter(accountId ~~ ids).
-func (q *Queries) SnapshotCashBalances(ctx context.Context, userID uuid.UUID) ([]SnapshotCashBalancesRow, error) {
-	rows, err := q.db.Query(ctx, snapshotCashBalances, userID)
+// The cash of the snapshot's portfolio: its accounts' balances. Vapor read
+// every account of the user (Account.query.filter(userId)), so each
+// portfolio's snapshot counted the cash of all of them.
+func (q *Queries) SnapshotCashBalances(ctx context.Context, arg SnapshotCashBalancesParams) ([]SnapshotCashBalancesRow, error) {
+	rows, err := q.db.Query(ctx, snapshotCashBalances, arg.UserID, arg.PortfolioID)
 	if err != nil {
 		return nil, err
 	}

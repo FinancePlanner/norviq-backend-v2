@@ -25,6 +25,8 @@ const (
 	statusLeft    = "left"
 	statusPending = "pending"
 	statusExpired = "expired"
+	// statusAccepted is what AcceptInvitation stores.
+	statusAccepted = "accepted"
 
 	// maxJointEditors is "A joint portfolio supports at most five editors."
 	maxJointEditors = 5
@@ -343,6 +345,12 @@ func (h *handlers) revokeInvitation(c *echo.Context) error {
 	}
 	if len(found) == 0 {
 		return httpx.NotFound("Invitation not found.")
+	}
+	// Vapor flipped an accepted invitation to revoked and answered 204 while
+	// the membership it created stayed active, so the owner believed access
+	// was gone. Access is the membership's: point at removing the member.
+	if found[0].Status == statusAccepted {
+		return httpx.Conflict("This invitation was accepted; remove the member instead.")
 	}
 	if err := q.SetInvitationStatus(ctx, portfoliomgmtdb.SetInvitationStatusParams{ID: invitationID, Status: statusRevoked, UpdatedAt: ptr(portfolios.Now())}); err != nil {
 		return err

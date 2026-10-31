@@ -42,9 +42,12 @@ WHERE a.user_id = sqlc.arg(user_id) AND a.broker <> 'pilot'
   AND t.type IN ('BUY', 'SELL', 'buy', 'sell');
 
 -- name: RecapWatchlistSymbols :many
+-- One row per symbol: adding a symbol to two lists is one addition.
 SELECT symbol FROM watchlist_items
 WHERE user_id = sqlc.arg(user_id) AND created_at >= sqlc.arg(start_at) AND created_at < sqlc.arg(end_at)
-  AND (cardinality(sqlc.arg(excluded)::uuid[]) = 0 OR watchlist_list_id <> ALL(sqlc.arg(excluded)::uuid[]));
+  AND (cardinality(sqlc.arg(excluded)::uuid[]) = 0 OR watchlist_list_id <> ALL(sqlc.arg(excluded)::uuid[]))
+GROUP BY symbol
+ORDER BY min(created_at), symbol;
 
 -- name: RecapNoteSymbols :many
 SELECT symbol FROM research_notes

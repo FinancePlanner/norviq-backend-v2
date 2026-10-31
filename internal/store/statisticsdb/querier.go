@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	LatestQuotes(ctx context.Context, symbols []string) ([]LatestQuotesRow, error)
+	// One row per symbol: a symbol may sit in several of the user's lists.
 	ListActiveWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ListResearchNotes(ctx context.Context, userID uuid.UUID) ([]ListResearchNotesRow, error)
 	ListStocks(ctx context.Context, userID uuid.UUID) ([]ListStocksRow, error)

@@ -34,13 +34,15 @@ LIMIT 10;
 SELECT symbol FROM stocks WHERE user_id = @user_id;
 
 -- name: TrackedWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE user_id = @user_id AND status <> 'archived';
+SELECT DISTINCT symbol FROM watchlist_items WHERE user_id = @user_id AND status <> 'archived';
 
 -- name: StockOwnersForSymbols :many
 SELECT symbol, user_id FROM stocks WHERE symbol = ANY(@symbols::text[]);
 
 -- name: WatchlistOwnersForSymbols :many
-SELECT symbol, user_id FROM watchlist_items
+-- One row per (symbol, user): a symbol in two of a user's lists must not
+-- notify them twice.
+SELECT DISTINCT symbol, user_id FROM watchlist_items
 WHERE status <> 'archived' AND symbol = ANY(@symbols::text[]);
 
 -- name: GetNewsTickerPreference :one

@@ -68,11 +68,12 @@ func (q *Queries) CashBalancesByAccounts(ctx context.Context, accountIds []uuid.
 }
 
 const countWatchlistItems = `-- name: CountWatchlistItems :one
-SELECT count(*)::bigint
+SELECT count(DISTINCT symbol)::bigint
 FROM watchlist_items
 WHERE user_id = $1
 `
 
+// Distinct symbols: a symbol in two lists is one watched stock.
 func (q *Queries) CountWatchlistItems(ctx context.Context, userID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countWatchlistItems, userID)
 	var column_1 int64

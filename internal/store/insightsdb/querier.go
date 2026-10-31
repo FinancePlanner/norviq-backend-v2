@@ -10,6 +10,7 @@ import (
 )
 
 type Querier interface {
+	// One row per symbol: a symbol may sit in several of the user's lists.
 	ActiveWatchlistSymbols(ctx context.Context, arg ActiveWatchlistSymbolsParams) ([]string, error)
 	// Union of equity holdings and non-archived watchlist symbols, ranked by
 	// how many distinct users track each symbol (Vapor's raw SQL, verbatim).

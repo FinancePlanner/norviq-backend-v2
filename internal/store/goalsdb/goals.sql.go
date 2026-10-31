@@ -13,9 +13,10 @@ import (
 )
 
 const countActiveWatchlistItems = `-- name: CountActiveWatchlistItems :one
-SELECT count(*) FROM watchlist_items WHERE user_id = $1 AND status <> 'archived'
+SELECT count(DISTINCT symbol) FROM watchlist_items WHERE user_id = $1 AND status <> 'archived'
 `
 
+// Distinct symbols: a symbol in two lists counts once.
 func (q *Queries) CountActiveWatchlistItems(ctx context.Context, userID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveWatchlistItems, userID)
 	var count int64

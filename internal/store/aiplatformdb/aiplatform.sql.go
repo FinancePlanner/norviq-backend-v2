@@ -303,7 +303,10 @@ func (q *Queries) UpdateAICredential(ctx context.Context, arg UpdateAICredential
 }
 
 const watchlistSymbolsForUser = `-- name: WatchlistSymbolsForUser :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 LIMIT $2
+SELECT symbol FROM watchlist_items WHERE user_id = $1
+GROUP BY symbol
+ORDER BY min(created_at), symbol
+LIMIT $2
 `
 
 type WatchlistSymbolsForUserParams struct {
@@ -311,6 +314,7 @@ type WatchlistSymbolsForUserParams struct {
 	Limit  int32
 }
 
+// One row per symbol: a symbol may sit in several of the user's lists.
 func (q *Queries) WatchlistSymbolsForUser(ctx context.Context, arg WatchlistSymbolsForUserParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, watchlistSymbolsForUser, arg.UserID, arg.Limit)
 	if err != nil {

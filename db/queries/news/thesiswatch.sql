@@ -39,7 +39,7 @@ LIMIT 500;
 SELECT symbol, shares, buy_price FROM stocks WHERE user_id = @user_id;
 
 -- name: ActiveWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE user_id = @user_id AND status = 'active';
+SELECT DISTINCT symbol FROM watchlist_items WHERE user_id = @user_id AND status = 'active';
 
 -- name: ProfileIndustries :many
 SELECT symbol, finnhub_industry FROM profile_cache WHERE symbol = ANY(@symbols::text[]);
@@ -84,7 +84,7 @@ SELECT * FROM thesis_watch_notification_preferences WHERE enabled = true;
 SELECT symbol FROM stocks;
 
 -- name: AllActiveWatchlistSymbols :many
-SELECT symbol FROM watchlist_items WHERE status = 'active';
+SELECT DISTINCT symbol FROM watchlist_items WHERE status = 'active';
 
 -- name: CountThesisNotificationsSince :one
 SELECT count(*) FROM notification_events

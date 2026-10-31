@@ -67,7 +67,14 @@ DELETE FROM stocks WHERE id = $1;
 SELECT symbol FROM stocks WHERE user_id = $1 ORDER BY updated_at DESC, created_at DESC;
 
 -- name: WatchlistSymbolsByRecency :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 ORDER BY updated_at DESC, created_at DESC;
+-- One row per symbol (a symbol may sit in several lists), at the position of
+-- its most recently updated row.
+SELECT symbol FROM (
+    SELECT DISTINCT ON (symbol) symbol, updated_at, created_at
+    FROM watchlist_items WHERE user_id = $1
+    ORDER BY symbol, updated_at DESC, created_at DESC
+) w
+ORDER BY updated_at DESC, created_at DESC;
 
 -- name: GetValuation :many
 SELECT * FROM stock_valuations WHERE user_id = $1 AND symbol = $2 LIMIT 1;

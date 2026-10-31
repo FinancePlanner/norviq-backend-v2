@@ -1210,9 +1210,16 @@ func (q *Queries) UpdateValuation(ctx context.Context, arg UpdateValuationParams
 }
 
 const watchlistSymbolsByRecency = `-- name: WatchlistSymbolsByRecency :many
-SELECT symbol FROM watchlist_items WHERE user_id = $1 ORDER BY updated_at DESC, created_at DESC
+SELECT symbol FROM (
+    SELECT DISTINCT ON (symbol) symbol, updated_at, created_at
+    FROM watchlist_items WHERE user_id = $1
+    ORDER BY symbol, updated_at DESC, created_at DESC
+) w
+ORDER BY updated_at DESC, created_at DESC
 `
 
+// One row per symbol (a symbol may sit in several lists), at the position of
+// its most recently updated row.
 func (q *Queries) WatchlistSymbolsByRecency(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, watchlistSymbolsByRecency, userID)
 	if err != nil {

@@ -52,8 +52,11 @@ const listActiveWatchlistSymbols = `-- name: ListActiveWatchlistSymbols :many
 SELECT symbol
 FROM watchlist_items
 WHERE user_id = $1 AND status <> 'archived'
+GROUP BY symbol
+ORDER BY min(created_at), symbol
 `
 
+// One row per symbol: a symbol may sit in several of the user's lists.
 func (q *Queries) ListActiveWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, listActiveWatchlistSymbols, userID)
 	if err != nil {

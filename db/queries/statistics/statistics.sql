@@ -4,9 +4,12 @@ FROM stocks
 WHERE user_id = $1;
 
 -- name: ListActiveWatchlistSymbols :many
+-- One row per symbol: a symbol may sit in several of the user's lists.
 SELECT symbol
 FROM watchlist_items
-WHERE user_id = $1 AND status <> 'archived';
+WHERE user_id = $1 AND status <> 'archived'
+GROUP BY symbol
+ORDER BY min(created_at), symbol;
 
 -- name: ListResearchNotes :many
 SELECT symbol, title, thesis, risks, catalysts, created_at, updated_at

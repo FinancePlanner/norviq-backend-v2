@@ -505,6 +505,8 @@ func (q *Queries) ScreenEvaluationHistory(ctx context.Context, arg ScreenEvaluat
 
 const screenWatchlistSymbols = `-- name: ScreenWatchlistSymbols :many
 SELECT symbol FROM watchlist_items WHERE user_id = $1 AND watchlist_list_id = ANY($2::uuid[])
+GROUP BY symbol
+ORDER BY min(created_at), symbol
 `
 
 type ScreenWatchlistSymbolsParams struct {

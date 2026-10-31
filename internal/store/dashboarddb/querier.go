@@ -16,6 +16,7 @@ type Querier interface {
 	// InsightsService reads why-moved makes).
 	AccountIDsByUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	CashBalancesByAccounts(ctx context.Context, accountIds []uuid.UUID) ([]float64, error)
+	// Distinct symbols: a symbol in two lists is one watched stock.
 	CountWatchlistItems(ctx context.Context, userID uuid.UUID) (int64, error)
 	// DatabaseInsightsRepository.topicCounts reads every topic in the window
 	// and counts them in Swift.

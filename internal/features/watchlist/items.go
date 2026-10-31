@@ -208,7 +208,7 @@ func (h *handlers) upsert(ctx context.Context, p itemRequest, userID uuid.UUID) 
 		Note: note, Status: status, NextReviewAt: nextReviewAt, Now: h.now(),
 	})
 	if err != nil {
-		return upsertResult{}, crossListConflict(err)
+		return upsertResult{}, listSymbolConflict(err)
 	}
 	// try? in Swift: a failed sync does not fail the request.
 	_ = h.ent.SyncResourceCount(ctx, entitlements.FeatureWatchlistItems, userID, int(count)+1)

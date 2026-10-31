@@ -17,6 +17,8 @@ const activeWatchlistSymbols = `-- name: ActiveWatchlistSymbols :many
 SELECT symbol FROM watchlist_items
 WHERE user_id = $1 AND status <> 'archived'
   AND ($2::uuid IS NULL OR watchlist_list_id = $2)
+GROUP BY symbol
+ORDER BY min(created_at), symbol
 `
 
 type ActiveWatchlistSymbolsParams struct {
@@ -24,6 +26,7 @@ type ActiveWatchlistSymbolsParams struct {
 	WatchlistListID *uuid.UUID
 }
 
+// One row per symbol: a symbol may sit in several of the user's lists.
 func (q *Queries) ActiveWatchlistSymbols(ctx context.Context, arg ActiveWatchlistSymbolsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, activeWatchlistSymbols, arg.UserID, arg.WatchlistListID)
 	if err != nil {

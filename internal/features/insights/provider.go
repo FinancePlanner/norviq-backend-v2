@@ -131,8 +131,10 @@ type validator interface{ validate() error }
 
 // Provider is the InsightsProvider protocol's requirements. Swift's
 // protocol extension members (supportedSentimentSources, fetchSymbolPosts)
-// were not requirements, so every call through `any InsightsProvider`
-// dispatched statically to the extension's defaults; see fetchSymbolPosts.
+// were not requirements, so in Vapor every call through `any
+// InsightsProvider` dispatched statically to the extension's defaults and
+// the Direct and Fallback overrides never ran. Here a provider overrides
+// them by implementing symbolPostProvider; see fetchSymbolPosts.
 type Provider interface {
 	Enabled() bool
 	// Label is providerLabel: the Swift type name, used for logs and
@@ -145,13 +147,38 @@ type Provider interface {
 	FetchTickerPosts(ctx context.Context, symbol string, days, limit int) (hermesTickerPostsResponse, error)
 }
 
-// fetchSymbolPosts is the InsightsProvider extension's default
-// fetchSymbolPosts with the extension's supportedSentimentSources ([.x]).
-// Vapor's aggregation service called it on `any InsightsProvider`, so this
-// default ran for every provider and chain, never the Direct/DeepAPI/
-// Fallback overrides: only tiers whose sources include x (the user tier)
-// fetch anything, one fetchTickerPosts per symbol, filed under source x.
-func fetchSymbolPosts(ctx context.Context, p Provider, logger *slog.Logger, symbols, sources []string, days, limit int, now func() time.Time) []symbolPostBatch {
+// symbolPostProvider is a provider that overrides the InsightsProvider
+// extension's supportedSentimentSources and fetchSymbolPosts (Direct and
+// Fallback). Every other provider gets the defaults: source x only, one
+// FetchTickerPosts per symbol.
+type symbolPostProvider interface {
+	sentimentSources() []string
+	symbolPosts(ctx context.Context, logger *slog.Logger, symbols, sources []string, days, limit int, now func() time.Time) ([]symbolPostBatch, error)
+}
+
+// sentimentSources is p.supportedSentimentSources.
+func sentimentSources(p Provider) []string {
+	if sp, ok := p.(symbolPostProvider); ok {
+		return sp.sentimentSources()
+	}
+	return []string{SourceX}
+}
+
+// fetchSymbolPosts is p.fetchSymbolPosts, dispatched dynamically. Vapor's
+// aggregation reached only the extension default, so every tier whose
+// sources leave out x (sp500 and trending) fetched nothing.
+func fetchSymbolPosts(ctx context.Context, p Provider, logger *slog.Logger, symbols, sources []string, days, limit int, now func() time.Time) ([]symbolPostBatch, error) {
+	if sp, ok := p.(symbolPostProvider); ok {
+		return sp.symbolPosts(ctx, logger, symbols, sources, days, limit, now)
+	}
+	return defaultFetchSymbolPosts(ctx, p, logger, symbols, sources, days, limit, now), nil
+}
+
+// defaultFetchSymbolPosts is the InsightsProvider extension's default
+// fetchSymbolPosts with the default supportedSentimentSources ([.x]): one
+// fetchTickerPosts per symbol, filed under source x. A failing symbol is
+// logged and skipped.
+func defaultFetchSymbolPosts(ctx context.Context, p Provider, logger *slog.Logger, symbols, sources []string, days, limit int, now func() time.Time) []symbolPostBatch {
 	usable := intersect(sources, []string{SourceX})
 	if len(usable) == 0 {
 		return []symbolPostBatch{}
@@ -471,14 +498,68 @@ func (f FallbackProvider) FetchTickerPosts(ctx context.Context, symbol string, d
 	})
 }
 
+// sentimentSources is FallbackInsightsProvider.supportedSentimentSources:
+// the union, in chain order, of what every provider not in cooldown serves.
+func (f FallbackProvider) sentimentSources() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range f.Providers {
+		if f.Cooldowns.IsCoolingDown(p.Label()) {
+			continue
+		}
+		for _, s := range sentimentSources(p) {
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// symbolPosts is FallbackInsightsProvider.fetchSymbolPosts: each provider's
+// own fetchSymbolPosts in turn, and the first answer with at least one post
+// wins, so a provider that serves none of the requested sources (Hermes for
+// the sp500 tier) or whose scraper went quiet falls through to the next.
+func (f FallbackProvider) symbolPosts(ctx context.Context, logger *slog.Logger, symbols, sources []string, days, limit int, now func() time.Time) ([]symbolPostBatch, error) {
+	usable := func(batches []symbolPostBatch) bool {
+		for _, b := range batches {
+			if len(b.Posts) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	return firstUsable(f, "symbol-posts", usable, func(p Provider) ([]symbolPostBatch, error) {
+		return fetchSymbolPosts(ctx, p, logger, symbols, sources, days, limit, now)
+	})
+}
+
+// errNotImplemented reports a provider's 501: it does not serve that call
+// at all (the Direct provider's topic endpoints), which is not a failure of
+// the upstream.
+func errNotImplemented(err error) bool {
+	var he *httpx.Error
+	return errors.As(err, &he) && he.Status == http.StatusNotImplemented
+}
+
 // firstSuccess runs op against each provider in turn; the first success
 // wins, a credit-exhaustion error starts that provider's cooldown, and when
-// every provider failed the last error is returned. (Swift's isUsable hook
-// only ever ran for fetchSymbolPosts, which no caller reached; see
-// fetchSymbolPosts.)
+// every provider failed the last error is returned.
 func firstSuccess[T any](f FallbackProvider, label string, op func(Provider) (T, error)) (T, error) {
+	return firstUsable(f, label, nil, op)
+}
+
+// firstUsable is FallbackInsightsProvider.firstSuccess(_:isUsable:_:). A
+// success that isUsable rejects falls through, and the last such answer
+// outranks any error. When every provider failed, the last error is
+// returned, except that a 501 never hides an earlier real failure: the
+// Direct provider sits last and answers 501 to every topic call, which
+// used to replace whatever had actually gone wrong upstream.
+func firstUsable[T any](f FallbackProvider, label string, isUsable func(T) bool, op func(Provider) (T, error)) (T, error) {
 	var zero T
 	var lastErr error
+	var lastUnusable *T
 	skipped := 0
 	for i, p := range f.Providers {
 		name := p.Label()
@@ -489,9 +570,16 @@ func firstSuccess[T any](f FallbackProvider, label string, op func(Provider) (T,
 		v, err := op(p)
 		if err == nil {
 			f.Cooldowns.Clear(name)
+			if isUsable != nil && !isUsable(v) {
+				lastUnusable = &v
+				f.Logger.Warn(fmt.Sprintf("Insights provider %s returned nothing usable for %s, falling through.", name, label))
+				continue
+			}
 			return v, nil
 		}
-		lastErr = err
+		if lastErr == nil || !errNotImplemented(err) || errNotImplemented(lastErr) {
+			lastErr = err
+		}
 		var credits *creditsExhaustedError
 		if errors.As(err, &credits) {
 			until := f.Cooldowns.BeginCooldown(name)
@@ -499,6 +587,10 @@ func firstSuccess[T any](f FallbackProvider, label string, op func(Provider) (T,
 			continue
 		}
 		f.Logger.Warn(fmt.Sprintf("Insights provider %d/%d failed for %s, falling through: %s", i+1, len(f.Providers), label, describe(err)))
+	}
+	if lastUnusable != nil {
+		f.Logger.Warn("Every insights provider returned nothing usable for " + label + ".")
+		return *lastUnusable, nil
 	}
 	if lastErr != nil {
 		return zero, lastErr

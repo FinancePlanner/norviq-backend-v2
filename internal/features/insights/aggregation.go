@@ -75,7 +75,12 @@ func (a *Aggregator) RunDailyAggregation(ctx context.Context) (SentimentSyncSumm
 			chunks = [][]string{symbols}
 		}
 		for _, chunk := range chunks {
-			batches := fetchSymbolPosts(ctx, provider, a.logger, chunk, tierSources(tier), a.windowDays, a.postsPerSymbol, a.now)
+			batches, err := fetchSymbolPosts(ctx, provider, a.logger, chunk, tierSources(tier), a.windowDays, a.postsPerSymbol, a.now)
+			if err != nil {
+				summary.SymbolsFailed += len(chunk)
+				a.logger.Warn(fmt.Sprintf("sentiment.aggregate batch failed tier=%s count=%d error=%s", tier, len(chunk), describe(err)))
+				continue
+			}
 			for _, batch := range batches {
 				inserted, row, err := a.persist(ctx, batch, asOfDate, capturedAt, since)
 				if err != nil {

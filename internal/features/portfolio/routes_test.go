@@ -625,13 +625,21 @@ func TestShareLinks(t *testing.T) {
 		t.Fatal("slug reused")
 	}
 
-	// A specific portfolio: scope echoes the path; listing uses uppercase.
+	// A specific portfolio: the scope is the canonical uppercase id, as in
+	// the listing (Vapor echoed the raw lowercase path).
 	list := h.list(user, "Main", true)
 	lower := list.String()
 	var one shareLink
 	h.Do(http.MethodPost, "/v1/portfolio/share-links/"+lower, tok, nil).JSON(t, &one)
-	if one.Scope != lower {
+	if one.Scope != apijson.FormatUUID(list) {
 		t.Fatalf("scope %q", one.Scope)
+	}
+	var st struct {
+		Link *shareLink `json:"link"`
+	}
+	h.Do(http.MethodGet, "/v1/portfolio/share-links/"+lower, tok, nil).JSON(t, &st)
+	if st.Link == nil || st.Link.Slug != one.Slug || st.Link.Scope != apijson.FormatUUID(list) {
+		t.Fatalf("status %+v", st.Link)
 	}
 	otherUser := h.CreateUser("share-other@example.com")
 	h.Do(http.MethodPost, "/v1/portfolio/share-links/all", h.Token(otherUser), nil)
@@ -650,4 +658,40 @@ func TestShareLinks(t *testing.T) {
 	h.exec(`INSERT INTO portfolio_memberships (id, portfolio_id, user_id, role, status, created_at) VALUES ($1, $2, $3, 'editor', 'active', now())`, uuid.New(), list, otherUser)
 	expectError(t, h.Do(http.MethodDelete, "/v1/portfolio/share-links/"+lower, h.Token(otherUser), nil), 403, "Only the portfolio owner can perform this action.")
 	ok(t, h.Do(http.MethodGet, "/v1/portfolio/share-links/all", "", nil), 401)
+}
+
+// Vapor's /v1/lots ignored portfolioId and always returned every account's
+// lots; v2 applies the filter (and its access check) when one is sent.
+func TestLotsApplyPortfolioFilter(t *testing.T) {
+	h := newHarness(t)
+	user := h.CreateUser("lots-filter@example.com")
+	main := h.list(user, "Main", true)
+	side := h.list(user, "Side", false)
+	inst := uuid.New()
+	h.exec(`INSERT INTO instruments (id, conid, symbol, exchange, currency, created_at) VALUES ($1, 'lf1', 'AAPL', 'NASDAQ', 'USD', now())`, inst)
+	for _, list := range []uuid.UUID{main, side} {
+		acct := h.account(user, &list, "ibkr")
+		h.exec(`INSERT INTO lots (id, account_id, instrument_id, open_date, open_quantity, remaining_quantity, open_price, currency, status, created_at)
+			VALUES ($1, $2, $3, '2026-01-10', 1, 1, 10, 'USD', 'open', now())`, uuid.New(), acct, inst)
+	}
+	tok := h.Token(user)
+	var lots []map[string]any
+	h.Do(http.MethodGet, "/v1/lots", tok, nil).JSON(t, &lots)
+	if len(lots) != 2 {
+		t.Fatalf("unfiltered %d", len(lots))
+	}
+	for _, q := range []string{"portfolioId=", "portfolioListId="} {
+		r := h.Do(http.MethodGet, "/v1/lots?"+q+side.String(), tok, nil)
+		ok(t, r, 200)
+		lots = nil
+		r.JSON(t, &lots)
+		if len(lots) != 1 {
+			t.Fatalf("%s: %s", q, r.Body)
+		}
+	}
+	expectError(t, h.Do(http.MethodGet, "/v1/lots?portfolioId=nope", tok, nil), 400, "Invalid portfolio ID.")
+	stranger := h.CreateUser("lots-stranger@example.com")
+	if r := h.Do(http.MethodGet, "/v1/lots?portfolioId="+side.String(), h.Token(stranger), nil); r.Status != 404 && r.Status != 403 {
+		t.Fatalf("stranger %d %s", r.Status, r.Body)
+	}
 }

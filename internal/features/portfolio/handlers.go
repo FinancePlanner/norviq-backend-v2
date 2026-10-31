@@ -404,13 +404,30 @@ func (h *handlers) performance(c *echo.Context) error {
 
 // MARK: - lots
 
+// lotAccountIDs is the accounts /v1/lots reads. Vapor ignored the portfolio
+// filter and always read every account of the caller; v2 still does when no
+// portfolioId (or portfolioListId) is sent, and otherwise reads the named
+// portfolio's accounts after the usual access check.
+func (h *handlers) lotAccountIDs(c *echo.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	ctx := c.Request().Context()
+	q := portfoliocoredb.New(h.d.DB)
+	if httpx.QueryString(c, "portfolioId") == nil && httpx.QueryString(c, "portfolioListId") == nil {
+		return q.AccountIDsForUser(ctx, userID)
+	}
+	filter, err := h.resolveFilter(c, userID)
+	if err != nil {
+		return nil, err
+	}
+	return q.AccountIDsForUserPortfolio(ctx, portfoliocoredb.AccountIDsForUserPortfolioParams{UserID: filter.DataOwnerUserID, PortfolioID: filter.PortfolioID})
+}
+
 func (h *handlers) lots(c *echo.Context) error {
 	s, err := auth.Require(c)
 	if err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
-	accountIDs, err := portfoliocoredb.New(h.d.DB).AccountIDsForUser(ctx, s.UserID)
+	accountIDs, err := h.lotAccountIDs(c, s.UserID)
 	if err != nil {
 		return err
 	}

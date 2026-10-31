@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"time"
 
@@ -698,3 +699,6 @@ func (h *handlers) sell(ctx context.Context, id uuid.UUID, p sellStockRequest, u
 	}
 	return stockResponse(*stock), nil
 }
+
+// emptyNotFound is `Response(status: .notFound)`: a 404 with no body.
+func emptyNotFound(c *echo.Context) error { return c.NoContent(http.StatusNotFound) }

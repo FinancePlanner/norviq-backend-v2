@@ -359,9 +359,9 @@ func TestValuationIsUserScopedAndPremium(t *testing.T) {
 	if r := e.app.Do("POST", "/v1/stocks/symbol/ZETA/valuation", owner, valuationBody("ZETA", &rationale, 22, 30)); r.Status != 201 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	// A missing stock or valuation on GET is a 404 with a reason (Vapor's
-	// had no body).
-	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || reason(t, r) != "Stock not found." {
+	// A missing stock or valuation on GET is a bare 404 (iOS reads it as
+	// "no valuation yet").
+	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || len(r.Body) != 0 {
 		t.Fatalf("%d %q", r.Status, r.Body)
 	}
 	r := e.app.Do("POST", "/v1/stocks/symbol/ZETA/valuation", other, valuationBody("ZETA", nil, 22, 30))
@@ -372,7 +372,7 @@ func TestValuationIsUserScopedAndPremium(t *testing.T) {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	e.createStock(t, other, stockBody("ZETA", 1, 15, "2024-01-01"))
-	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || reason(t, r) != "Stock valuation not found." {
+	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", other, nil); r.Status != 404 || len(r.Body) != 0 {
 		t.Fatalf("%d %q", r.Status, r.Body)
 	}
 	if r := e.app.Do("GET", "/v1/stocks/symbol/ZETA/valuation", free, nil); r.Status < 400 || r.Status == 404 {

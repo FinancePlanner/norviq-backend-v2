@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -339,8 +340,10 @@ func TestAggregationIngestsOnlyUserTier(t *testing.T) {
 	if r.Status != 200 {
 		t.Fatalf("sync %d %s", r.Status, r.Body)
 	}
-	// The extension-default fetchSymbolPosts: only the user tier (AAPL)
-	// is fetched; the sp500 tier (MSFT) is considered but never fetched.
+	// An x-only provider (the extension-default fetchSymbolPosts) serves
+	// only the user tier (AAPL); the sp500 tier (MSFT) asks for the cheap
+	// sources, which it does not serve, so MSFT is considered but not
+	// fetched. Direct and Fallback: TestFallbackSymbolPostsDispatch.
 	if strings.Join(prov.calls, ",") != "AAPL" || sum.SymbolsConsidered != 2 || sum.SymbolsIngested != 1 ||
 		sum.PostsFetched != 3 || sum.PostsInserted != 3 || sum.ThemesGenerated != 1 {
 		t.Fatalf("calls %v summary %+v", prov.calls, sum)
@@ -498,5 +501,44 @@ func TestHermesProviderErrors(t *testing.T) {
 	}
 	if _, err := h.FetchEvents(context.Background(), 7, 10); err == nil || err.Error() != "Hermes request failed for /finance/events with status 418." {
 		t.Fatalf("418: %v", err)
+	}
+}
+
+// With only the Direct provider answering (staging: no Hermes, DeepAPI out
+// of credit), the Hermes sync used to fail every tick on Direct's 501 for
+// events, so ticker posts never synced. The topic steps now count as nothing
+// synced and the run carries on.
+func TestHermesSyncSkipsStepsDirectDoesNotServe(t *testing.T) {
+	srv, _ := stocktwitsRedditStub(t)
+	s := testSettings()
+	s.PinnedTickers = []string{"TSLA"}
+	credits := fixedProvider{label: "DeepAPIInsightsProvider", err: newCreditsExhausted("DeepAPI", "out of credits"), calls: new(int)}
+	chain := FallbackProvider{
+		Providers: []Provider{credits, directFor(srv, time.Now())},
+		Logger:    slog.New(slog.DiscardHandler), Cooldowns: NewCooldownRegistry(time.Hour),
+	}
+	chain.Cooldowns.BeginCooldown("DeepAPIInsightsProvider")
+	app := testutil.NewApp(t, []server.Feature{Feature{Options: &Options{Settings: s, Provider: chain, Quotes: stubQuotes{}, NoThemes: true}}})
+	admin := app.CreateUser("direct-sync-admin@example.com")
+	app.Deps.Admin.IDs[admin] = struct{}{}
+	r := app.Do("POST", "/v1/insights/sync", app.Token(admin), nil)
+	if r.Status != 200 {
+		t.Fatalf("sync %d %s", r.Status, r.Body)
+	}
+	var sum SyncSummary
+	r.JSON(t, &sum)
+	if sum.EventsInserted != 0 || sum.SnapshotsUpserted != 0 || sum.NetWorthInserted != 0 ||
+		sum.TickerPostsFetched != 2 || sum.TickerPostsInserted != 2 || sum.TickerSymbolsFailed != 0 {
+		t.Fatalf("summary %+v", sum)
+	}
+
+	// A real failure (here the first provider's events error) still fails
+	// the run.
+	down := fixedProvider{label: "A", err: errors.New("hermes down"), calls: new(int)}
+	svc := NewService(app.Deps.DB, app.Deps.Logger, FallbackProvider{
+		Providers: []Provider{down, directFor(srv, time.Now())}, Logger: app.Deps.Logger, Cooldowns: NewCooldownRegistry(time.Hour),
+	}, 25, []string{"TSLA"}, time.Now)
+	if _, err := svc.SyncFromHermes(context.Background()); err == nil || errNotImplemented(err) {
+		t.Fatalf("real failure %v", err)
 	}
 }

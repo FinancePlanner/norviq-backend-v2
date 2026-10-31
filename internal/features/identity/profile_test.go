@@ -103,6 +103,10 @@ func TestPasswordChange(t *testing.T) {
 	var caller AuthResponse
 	fresh.JSON(t, &caller)
 	expect(t, h.Do("PATCH", "/v1/users/password", caller.Token, map[string]any{"currentPassword": "Wr0ng!pass", "newPassword": "N3w!Password"}), 400, "INVALID_CURRENT_PASSWORD")
+	// The new password must meet the password rules (Vapor took anything).
+	expect(t, h.Do("PATCH", "/v1/users/password", caller.Token, map[string]any{"currentPassword": goodPassword, "newPassword": "short"}), 400, "Password must be at least 8 characters long")
+	expect(t, h.Do("PATCH", "/v1/users/password", caller.Token, map[string]any{"currentPassword": goodPassword, "newPassword": "alllowercase1!"}), 400, "Password must contain at least one uppercase letter")
+	expect(t, h.Do("POST", "/v1/auth/login", "", map[string]any{"email": "changer@example.com", "password": goodPassword}), 200, "")
 	r := h.Do("PATCH", "/v1/users/password", caller.Token, map[string]any{"currentPassword": goodPassword, "newPassword": "N3w!Password", "refreshToken": caller.RefreshToken})
 	if r.Status != 200 || string(r.Body) != `{"message":"Password updated successfully","success":true}` {
 		t.Fatalf("%d %s", r.Status, r.Body)

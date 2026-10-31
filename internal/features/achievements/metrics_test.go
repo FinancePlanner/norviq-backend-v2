@@ -179,9 +179,18 @@ func TestDiversified(t *testing.T) {
 	if got := e.measure(u, "craft.diversified")["craft.diversified"]; got != 6 {
 		t.Fatalf("sectors %d", got)
 	}
-	// Swift's quirk, ported: "retail" contains "ai", so it reads as Technology.
-	if inferSector("WMT", []achievementsdb.StatsResearchNotesRow{{Thesis: "Retail giant"}}) != "Technology" {
-		t.Fatal("ai substring quirk")
+	// "ai" counts only as a word: "retail" is Consumer, not Technology
+	// (Vapor matched the substring).
+	for thesis, want := range map[string]string{
+		"Retail giant":               "Consumer",
+		"They maintain margins":      "Unknown",
+		"An AI-first platform":       "Technology",
+		"Betting on AI.":             "Technology",
+		"Retail leader, AI tailwind": "Technology",
+	} {
+		if got := inferSector("WMT", []achievementsdb.StatsResearchNotesRow{{Thesis: thesis}}); got != want {
+			t.Fatalf("%q: %s, want %s", thesis, got, want)
+		}
 	}
 	// A zero latest quote takes a sector's value to 0: it stops counting.
 	e.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'CAT', 'USD', 0, now(), now())`, uuid.New())

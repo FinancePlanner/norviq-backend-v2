@@ -80,7 +80,10 @@ func unlockTitle(u *Unlock) string {
 
 // NotifyUnlocks is AchievementNotifier.notifyUnlocks: pushes the live and
 // sweep unlocks among unlocks (one push per evaluation) and stamps their
-// notified_at. Nothing without a capable device. Never fails (logged).
+// notified_at once a device took the push. Nothing without a capable
+// device. Never fails (logged). Vapor stamped notified_at whatever the send
+// returned, so an unlock whose push reached no device (APNS unconfigured or
+// every device rejected) read as notified.
 func (s *Service) NotifyUnlocks(ctx context.Context, unlocks []Unlock, userID uuid.UUID) {
 	var news []Unlock
 	for i := range unlocks {
@@ -100,7 +103,10 @@ func (s *Service) NotifyUnlocks(ctx context.Context, unlocks []Unlock, userID uu
 	if len(devices) == 0 {
 		return
 	}
-	_ = s.Push.Sender.Send(ctx, achievementPush(kindAchievementUnlocked, title, body), devices)
+	if sent := s.Push.Sender.Send(ctx, achievementPush(kindAchievementUnlocked, title, body), devices); sent.Delivered == 0 {
+		s.Logger.Warn("achievements.push undelivered", "devices", len(devices), "failed", sent.Failed)
+		return
+	}
 	ids := make([]uuid.UUID, len(news))
 	for i := range news {
 		ids[i] = news[i].ID

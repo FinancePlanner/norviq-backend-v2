@@ -189,9 +189,11 @@ func userParameter(c *echo.Context) (uuid.UUID, error) {
 }
 
 // setSuspended is SocialModerationController.setSuspended: suspending also
-// ends the user's friendships and pending requests. A user without a
-// settings row gets one with the defaults, in either direction, as Fluent's
-// `first() ?? SocialSettingsRecord(userId:)` followed by save did.
+// ends the user's friendships and pending requests. Suspending a user
+// without a settings row creates one with the defaults; unsuspending one
+// writes nothing, as there is nothing to lift. (Vapor's `first() ??
+// SocialSettingsRecord(userId:)` followed by save inserted a default row in
+// both directions.)
 func (h *handler) setSuspended(ctx context.Context, userID uuid.UUID, suspended bool) error {
 	rows, err := h.q.UserForModeration(ctx, userID)
 	if err != nil {
@@ -209,18 +211,17 @@ func (h *handler) setSuspended(ctx context.Context, userID uuid.UUID, suspended 
 		if err != nil {
 			return err
 		}
+		if len(existing) == 0 && !suspended {
+			return nil
+		}
 		if len(existing) == 0 {
-			var suspendedAt *time.Time
-			if suspended {
-				suspendedAt = &now
-			}
 			d := social.DefaultPrivacy
 			if err := q.InsertSocialSettings(ctx, admindb.InsertSocialSettingsParams{
 				ID: uuid.New(), UserID: userID, SearchVisibility: d.SearchVisibility,
 				DiscoverableByContacts: d.DiscoverableByContacts, DiscoverableByX: d.DiscoverableByX,
 				DiscoverableByFacebook: d.DiscoverableByFacebook, ShowReturnPercent: d.ShowReturnPercent,
 				ShowStreaks: d.ShowStreaks, ShowXp: d.ShowXP, LeaderboardOptIn: d.LeaderboardOptIn,
-				ShowAchievements: d.ShowAchievements, SuspendedAt: suspendedAt, CreatedAt: now,
+				ShowAchievements: d.ShowAchievements, SuspendedAt: &now, CreatedAt: now,
 			}); err != nil {
 				return err
 			}

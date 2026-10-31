@@ -303,6 +303,11 @@ func (s *service) updatePassword(c *echo.Context) error {
 	if !ok {
 		return httpx.BadRequest("INVALID_CURRENT_PASSWORD")
 	}
+	// The same rules as registration, set-password and reset. Vapor skipped
+	// them here, so a signed-in user could change to any password at all.
+	if err := validatePassword(*p.NewPassword); err != nil {
+		return err
+	}
 	hash, err := users.HashPassword(*p.NewPassword)
 	if err != nil {
 		return err

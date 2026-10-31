@@ -330,15 +330,19 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// GET /v1/api/v3/export — limit/offset default to 20/0 when absent or
-// malformed.
+// GET /v1/api/v3/export — limit/offset default to 20/0 when absent,
+// malformed or negative. (A negative value reached Postgres in Vapor, whose
+// "LIMIT must not be negative" was a 500.)
 func (h *handler) list(c *echo.Context) error {
 	s, err := auth.Require(c)
 	if err != nil {
 		return err
 	}
 	limit := httpx.IntOr(httpx.QueryOptionalInt(c, "limit"), 20)
-	offset := httpx.IntOr(httpx.QueryOptionalInt(c, "offset"), 0)
+	if limit < 0 {
+		limit = 20
+	}
+	offset := max(httpx.IntOr(httpx.QueryOptionalInt(c, "offset"), 0), 0)
 	rows, err := h.q.ListExports(c.Request().Context(), dataexportdb.ListExportsParams{
 		UserID: s.UserID, RowLimit: int64(limit), RowOffset: int64(offset),
 	})
@@ -375,9 +379,11 @@ func (h *handler) get(c *echo.Context) error {
 		return httpx.NotFound("Export not found")
 	}
 	e := rows[0]
+	// downloadURL is the file route below. Vapor sent /exports/<user>/<file>,
+	// a path nothing serves.
 	var download *string
 	if e.FilePath != nil && e.Status == "ready" {
-		u := "/exports/" + apijson.FormatUUID(s.UserID) + "/" + apijson.FormatUUID(e.ID) + "." + e.Format
+		u := "/v1/api/v3/export/file/" + apijson.FormatUUID(s.UserID) + "/" + apijson.FormatUUID(e.ID) + "." + e.Format
 		download = &u
 	}
 	var filters map[string]string

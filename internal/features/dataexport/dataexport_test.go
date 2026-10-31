@@ -90,12 +90,13 @@ func TestExportCSVAndJSONDownload(t *testing.T) {
 	}
 	r.JSON(t, &detail)
 	user := strings.ToUpper(e.user.String())
-	if detail.Status != "ready" || detail.DownloadURL != "/exports/"+user+"/"+csvID+".csv" ||
+	if detail.Status != "ready" || detail.DownloadURL != "/v1/api/v3/export/file/"+user+"/"+csvID+".csv" ||
 		detail.FilePath != filepath.Join(e.dir, user, csvID+".csv") || detail.ExpiresAt == "" || detail.Filters != nil {
 		t.Fatalf("detail %s", r.Body)
 	}
 
-	r = e.app.Do(http.MethodGet, "/v1/api/v3/export/file/"+user+"/"+csvID+".csv", e.tok, nil)
+	// downloadURL is the route that serves the file.
+	r = e.app.Do(http.MethodGet, detail.DownloadURL, e.tok, nil)
 	wantCSV := "\ufeffid,symbol,note,status,watchlistListId,lastReviewedAt,nextReviewAt,createdAt\n" +
 		`"AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE","AAPL","say ""hi"", a/b","watching","11111111-2222-4333-8444-555555555555","","","2026-10-01T12:30:45Z"` + "\n"
 	if r.Status != http.StatusOK || string(r.Body) != wantCSV {
@@ -142,6 +143,12 @@ func TestExportCSVAndJSONDownload(t *testing.T) {
 	r.JSON(t, &list)
 	if len(list.Items) != 1 || list.Items[0].ID != csvID {
 		t.Fatalf("list offset %s", r.Body)
+	}
+	// Negative values take the defaults (a 500 in Vapor).
+	r = e.app.Do(http.MethodGet, "/v1/api/v3/export?limit=-1&offset=-5", e.tok, nil)
+	r.JSON(t, &list)
+	if r.Status != http.StatusOK || len(list.Items) != 2 {
+		t.Fatalf("negative %d %s", r.Status, r.Body)
 	}
 }
 

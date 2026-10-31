@@ -306,13 +306,14 @@ func TestSocialModeration(t *testing.T) {
 	if r := e.app.Do(http.MethodPost, "/v1/admin/social/users/"+system.String()+"/suspend", e.adminToken, nil); r.Status != 400 || reason(t, r) != "That account can't be suspended." {
 		t.Fatalf("system: %d %s", r.Status, r.Body)
 	}
-	// Unsuspending a user with no settings row creates one with defaults.
+	// Unsuspending a user with no settings row writes nothing (Vapor
+	// inserted a default row).
 	if r := e.app.Do(http.MethodDelete, "/v1/admin/social/users/"+friend.String()+"/suspend", e.adminToken, nil); r.Status != http.StatusNoContent {
 		t.Fatalf("unsuspend fresh: %d", r.Status)
 	}
 	var rows int
-	_ = e.app.Deps.DB.QueryRow(ctx, `SELECT count(*) FROM social_settings WHERE user_id = $1 AND suspended_at IS NULL`, friend).Scan(&rows)
-	if rows != 1 {
+	_ = e.app.Deps.DB.QueryRow(ctx, `SELECT count(*) FROM social_settings WHERE user_id = $1`, friend).Scan(&rows)
+	if rows != 0 {
 		t.Fatalf("settings rows %d", rows)
 	}
 }

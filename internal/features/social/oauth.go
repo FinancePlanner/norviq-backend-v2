@@ -200,7 +200,10 @@ func (h *handlers) startFlow(ctx context.Context, provider, purpose, redirect st
 }
 
 // consumeFlow checks a flow the way the import exchanges do and marks it
-// used. invalid is the provider's "flow is invalid or expired" reason.
+// used. invalid is the provider's "flow is invalid or expired" reason. An
+// empty code is the 400 the exchange gives, checked after the flow (so the
+// statuses are unchanged) but before the flow is spent: Vapor marked it used
+// first, so a request without a code burned a flow the user could retry.
 func (h *handlers) consumeFlow(ctx context.Context, in exchangeBody, provider, purpose string, userID uuid.UUID, invalid string) (socialdb.OauthFlow, string, error) {
 	redirect, err := normalizedRedirectURI(in.redirectURI)
 	if err != nil {
@@ -221,6 +224,9 @@ func (h *handlers) consumeFlow(ctx context.Context, in exchangeBody, provider, p
 	}
 	if flow.RedirectUri != redirect {
 		return flow, "", httpx.Abort(http.StatusUnauthorized, "OAuth redirect URI mismatch")
+	}
+	if strings.TrimSpace(in.code) == "" {
+		return flow, "", httpx.BadRequest("OAuth authorization code is required")
 	}
 	if err := q.MarkImportFlowUsed(ctx, socialdb.MarkImportFlowUsedParams{UsedAt: &now, ID: flow.ID}); err != nil {
 		return flow, "", err

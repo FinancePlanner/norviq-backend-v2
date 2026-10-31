@@ -17,6 +17,7 @@ type Querier interface {
 	ActiveMembershipByID(ctx context.Context, arg ActiveMembershipByIDParams) ([]PortfolioMembership, error)
 	ActiveMembershipForUser(ctx context.Context, arg ActiveMembershipForUserParams) ([]PortfolioMembership, error)
 	ActiveMembershipPortfolioIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	// Join order (Vapor's query had no ORDER BY).
 	ActiveMemberships(ctx context.Context, portfolioID uuid.UUID) ([]PortfolioMembership, error)
 	ArchivePortfolioList(ctx context.Context, arg ArchivePortfolioListParams) (PortfolioList, error)
 	CashPositionByID(ctx context.Context, arg CashPositionByIDParams) ([]PortfolioCashPosition, error)

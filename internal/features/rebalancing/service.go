@@ -38,8 +38,8 @@ func (s *Service) access(ctx context.Context, portfolioID, userID uuid.UUID, edi
 func errModelNotFound() *httpx.Error { return httpx.NotFound("Allocation model not found.") }
 func errPlanNotFound() *httpx.Error  { return httpx.NotFound("Rebalancing plan not found.") }
 
-// mapEngineError is RebalancingService.mapEngineError.
-func mapEngineError(err error) error {
+// MapEngineError is RebalancingService.mapEngineError.
+func MapEngineError(err error) error {
 	var e *EngineError
 	if !errors.As(err, &e) {
 		return httpx.Abort(http.StatusInternalServerError, "Rebalancing calculation failed.")
@@ -145,7 +145,7 @@ func (s *Service) validate(p AllocationModelUpsertRequest, portfolioID uuid.UUID
 		Buckets:                           p.Buckets,
 	}
 	if err := s.Engine.Validate(m); err != nil {
-		return mapEngineError(err)
+		return MapEngineError(err)
 	}
 	return nil
 }
@@ -168,34 +168,43 @@ func (s *Service) CreateModel(ctx context.Context, portfolioID, userID uuid.UUID
 	}
 	recordID := uuid.New()
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		q := s.q(tx)
-		now := portfolios.Now()
-		if p.Activate {
-			if err := q.DeactivateModels(ctx, rebalancingdb.DeactivateModelsParams{Now: &now, PortfolioID: portfolioID}); err != nil {
-				return err
-			}
-		}
-		now = portfolios.Now()
-		if err := q.InsertModel(ctx, rebalancingdb.InsertModelParams{
-			ID: recordID, PortfolioID: portfolioID, CreatedByUserID: userID,
-			Name: NormalizedName(p.Name), GroupingMode: p.GroupingMode, IsActive: p.Activate, Revision: 1,
-			BaseCurrency:              ac.Portfolio.BaseCurrency,
-			DefaultTargetThresholdBps: int64(p.DefaultTargetThresholdBasisPoints),
-			TotalThresholdBps:         int64(p.TotalThresholdBasisPoints),
-			FractionalSharesEnabled:   p.FractionalSharesEnabled,
-			QuantityIncrement:         quantityIncrement(p),
-			MinimumTradeAmount:        p.MinimumTradeAmount,
-			FlatFee:                   p.FlatFee,
-			VariableFeeBps:            int64(p.VariableFeeBasisPoints),
-			Now:                       &now,
-		}); err != nil {
-			return err
-		}
-		return s.replaceTargets(ctx, q, recordID, p.Buckets)
+		return s.insertModel(ctx, s.q(tx), recordID, portfolioID, userID, ac.Portfolio.BaseCurrency, p)
 	})
 	if err != nil {
 		return AllocationModel{}, err
 	}
+	return s.loadCreated(ctx, recordID)
+}
+
+// insertModel writes a validated model and its targets (CreateModel's body,
+// shared with CopyModel's single transaction).
+func (s *Service) insertModel(ctx context.Context, q *rebalancingdb.Queries, recordID, portfolioID, userID uuid.UUID, baseCurrency string, p AllocationModelUpsertRequest) error {
+	now := portfolios.Now()
+	if p.Activate {
+		if err := q.DeactivateModels(ctx, rebalancingdb.DeactivateModelsParams{Now: &now, PortfolioID: portfolioID}); err != nil {
+			return err
+		}
+	}
+	now = portfolios.Now()
+	if err := q.InsertModel(ctx, rebalancingdb.InsertModelParams{
+		ID: recordID, PortfolioID: portfolioID, CreatedByUserID: userID,
+		Name: NormalizedName(p.Name), GroupingMode: p.GroupingMode, IsActive: p.Activate, Revision: 1,
+		BaseCurrency:              baseCurrency,
+		DefaultTargetThresholdBps: int64(p.DefaultTargetThresholdBasisPoints),
+		TotalThresholdBps:         int64(p.TotalThresholdBasisPoints),
+		FractionalSharesEnabled:   p.FractionalSharesEnabled,
+		QuantityIncrement:         quantityIncrement(p),
+		MinimumTradeAmount:        p.MinimumTradeAmount,
+		FlatFee:                   p.FlatFee,
+		VariableFeeBps:            int64(p.VariableFeeBasisPoints),
+		Now:                       &now,
+	}); err != nil {
+		return err
+	}
+	return s.replaceTargets(ctx, q, recordID, p.Buckets)
+}
+
+func (s *Service) loadCreated(ctx context.Context, recordID uuid.UUID) (AllocationModel, error) {
 	rec, err := first(s.q(s.DB).GetModel(ctx, recordID))
 	if err != nil {
 		return AllocationModel{}, err
@@ -224,7 +233,12 @@ func (s *Service) UpdateModel(ctx context.Context, portfolioID, modelID, userID 
 		if rec == nil {
 			return errModelNotFound()
 		}
-		if p.ExpectedRevision == nil || int64(*p.ExpectedRevision) != rec.Revision {
+		// Vapor answered a missing revision with the same 409 as a stale one,
+		// which no reload can clear.
+		if p.ExpectedRevision == nil {
+			return httpx.BadRequest("expectedRevision is required to update an allocation model.")
+		}
+		if int64(*p.ExpectedRevision) != rec.Revision {
 			return httpx.Conflict("Allocation model changed. Reload before saving.")
 		}
 		now := portfolios.Now()
@@ -308,8 +322,9 @@ func (s *Service) ActivateModel(ctx context.Context, portfolioID, modelID, userI
 	return s.reload(ctx, modelID)
 }
 
-// CopyModel is POST .../rebalancing/models/:modelId/copy. Not transactional
-// across destinations, as in Swift: a later failure keeps earlier copies.
+// CopyModel is POST .../rebalancing/models/:modelId/copy. Every destination
+// is checked first and all copies are written in one transaction (Swift
+// copied one by one, so a later failure kept the earlier copies).
 func (s *Service) CopyModel(ctx context.Context, portfolioID, modelID, userID uuid.UUID, p BulkCopyRequest) (BulkCopyResult, error) {
 	if _, err := s.access(ctx, portfolioID, userID, false); err != nil {
 		return BulkCopyResult{}, err
@@ -338,7 +353,23 @@ func (s *Service) CopyModel(ctx context.Context, portfolioID, modelID, userID uu
 	if len(ids) == 0 || len(seen) != len(ids) {
 		return BulkCopyResult{}, httpx.BadRequest("Destination portfolios must be unique and non-empty.")
 	}
+	copyReq := AllocationModelUpsertRequest{
+		Name: source.Name, GroupingMode: source.GroupingMode, Activate: p.Activate,
+		DefaultTargetThresholdBasisPoints: source.DefaultTargetThresholdBasisPoints,
+		TotalThresholdBasisPoints:         source.TotalThresholdBasisPoints,
+		FractionalSharesEnabled:           source.FractionalSharesEnabled,
+		QuantityIncrement:                 source.QuantityIncrement,
+		MinimumTradeAmount:                source.MinimumTradeAmount,
+		FlatFee:                           source.FlatFee,
+		VariableFeeBasisPoints:            source.VariableFeeBasisPoints,
+		Buckets:                           source.Buckets,
+	}
 	result := BulkCopyResult{Models: []AllocationModel{}, Warnings: []ValuationWarning{}}
+	type copyTarget struct {
+		portfolioID, recordID uuid.UUID
+		baseCurrency          string
+	}
+	targets := make([]copyTarget, 0, len(ids))
 	for _, dest := range ids {
 		if dest == portfolioID {
 			return BulkCopyResult{}, httpx.BadRequest("The source portfolio cannot be a copy destination.")
@@ -347,23 +378,31 @@ func (s *Service) CopyModel(ctx context.Context, portfolioID, modelID, userID uu
 		if err != nil {
 			return BulkCopyResult{}, err
 		}
+		if err := s.validate(copyReq, dest, ac.Portfolio.BaseCurrency); err != nil {
+			return BulkCopyResult{}, err
+		}
 		if ac.Portfolio.BaseCurrency != source.BaseCurrency {
 			result.Warnings = append(result.Warnings, ValuationWarning{
 				Code:    "base_currency_changed",
 				Message: ac.Portfolio.Name + " uses " + ac.Portfolio.BaseCurrency + "; target percentages were copied without currency amounts.",
 			})
 		}
-		created, err := s.CreateModel(ctx, dest, userID, AllocationModelUpsertRequest{
-			Name: source.Name, GroupingMode: source.GroupingMode, Activate: p.Activate,
-			DefaultTargetThresholdBasisPoints: source.DefaultTargetThresholdBasisPoints,
-			TotalThresholdBasisPoints:         source.TotalThresholdBasisPoints,
-			FractionalSharesEnabled:           source.FractionalSharesEnabled,
-			QuantityIncrement:                 source.QuantityIncrement,
-			MinimumTradeAmount:                source.MinimumTradeAmount,
-			FlatFee:                           source.FlatFee,
-			VariableFeeBasisPoints:            source.VariableFeeBasisPoints,
-			Buckets:                           source.Buckets,
-		})
+		targets = append(targets, copyTarget{portfolioID: dest, recordID: uuid.New(), baseCurrency: ac.Portfolio.BaseCurrency})
+	}
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := s.q(tx)
+		for _, t := range targets {
+			if err := s.insertModel(ctx, q, t.recordID, t.portfolioID, userID, t.baseCurrency, copyReq); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return BulkCopyResult{}, err
+	}
+	for _, t := range targets {
+		created, err := s.loadCreated(ctx, t.recordID)
 		if err != nil {
 			return BulkCopyResult{}, err
 		}
@@ -402,8 +441,12 @@ func (s *Service) Overview(ctx context.Context, portfolioID, userID uuid.UUID) (
 	if err != nil {
 		return Overview{}, err
 	}
-	// Engine errors here are not mapped (Swift let them surface as 500s).
-	return s.Engine.Overview(apijson.FormatUUID(portfolioID), model, snap, int(count))
+	// Swift let engine errors surface as 500s; v2 maps them as simulate does.
+	out, err := s.Engine.Overview(apijson.FormatUUID(portfolioID), model, snap, int(count))
+	if err != nil {
+		return Overview{}, MapEngineError(err)
+	}
+	return out, nil
 }
 
 // Simulate is POST .../rebalancing/simulate.
@@ -436,7 +479,7 @@ func (s *Service) Simulate(ctx context.Context, portfolioID, userID uuid.UUID, p
 	}
 	sim, err := s.Engine.Simulate(apijson.FormatUUID(portfolioID), model, p, snap)
 	if err != nil {
-		return Simulation{}, mapEngineError(err)
+		return Simulation{}, MapEngineError(err)
 	}
 	return sim, nil
 }

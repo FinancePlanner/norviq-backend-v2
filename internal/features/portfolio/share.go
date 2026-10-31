@@ -87,7 +87,9 @@ func (h *handlers) resolveOwnerScope(c *echo.Context) (ownerScope, error) {
 	if err != nil {
 		return ownerScope{}, err
 	}
-	return ownerScope{userID: s.UserID, listID: f.PortfolioID, scope: scope}, nil
+	// Vapor echoed the raw path segment (a lowercase id came back lowercase);
+	// v2 answers with the canonical id, as the list of links does.
+	return ownerScope{userID: s.UserID, listID: f.PortfolioID, scope: apijson.FormatUUID(*f.PortfolioID)}, nil
 }
 
 func (h *handlers) activeLink(c *echo.Context, o ownerScope) (*portfoliodb.PortfolioShareLink, error) {

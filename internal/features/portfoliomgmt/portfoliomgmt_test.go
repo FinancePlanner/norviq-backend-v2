@@ -218,6 +218,16 @@ func TestListCreatesFreshDefaultBesidePilotList(t *testing.T) {
 		t.Fatalf("items %+v", page.Items)
 	}
 
+	// A membership row on a list the caller owns listed it twice in Vapor.
+	e.exec(`INSERT INTO portfolio_memberships (id, portfolio_id, user_id, role, status, created_at) VALUES ($1, $2, $3, 'editor', 'active', now())`,
+		uuid.New(), uuid.MustParse(first.ID), userID)
+	page.Items = nil
+	r = e.do(http.MethodGet, "/v1/portfolios", token, nil)
+	r.JSON(t, &page)
+	if len(page.Items) != 2 || page.Items[0].ID != first.ID || page.Items[1].ID != up(shared) {
+		t.Fatalf("deduplicated items %+v", page.Items)
+	}
+
 	expectStatus(t, e.do(http.MethodGet, "/v1/portfolios", "", nil), http.StatusUnauthorized)
 }
 
@@ -460,8 +470,12 @@ func TestCreateWithSourceAndClone(t *testing.T) {
 	var cmp struct {
 		Left struct {
 			TotalValue   float64 `json:"totalValue"`
+			CashBalance  float64 `json:"cashBalance"`
 			HoldingCount int     `json:"holdingCount"`
 		} `json:"left"`
+		Right struct {
+			CashBalance float64 `json:"cashBalance"`
+		} `json:"right"`
 		Holdings []struct {
 			Symbol            string  `json:"symbol"`
 			LeftWeightPercent float64 `json:"leftWeightPercent"`
@@ -470,6 +484,10 @@ func TestCreateWithSourceAndClone(t *testing.T) {
 	r.JSON(t, &cmp)
 	if cmp.Left.TotalValue != 50 || cmp.Left.HoldingCount != 2 || len(cmp.Holdings) != 2 || cmp.Holdings[0].Symbol != "AAPL" || cmp.Holdings[0].LeftWeightPercent != 40 {
 		t.Fatalf("compare %s", r.Body)
+	}
+	// Vapor sent cashBalance 0 on both sides; each side's cash position is 7.
+	if cmp.Left.CashBalance != 7 || cmp.Right.CashBalance != 7 {
+		t.Fatalf("compare cash %s", r.Body)
 	}
 	expectReason(t, e.do(http.MethodGet, "/v1/portfolios/compare?left="+source.String(), token, nil), http.StatusBadRequest,
 		"No value found (expected type 'String') at path 'right'. No String was found at 'right'.")
@@ -678,4 +696,36 @@ func TestInvitationsAndMembers(t *testing.T) {
 	}
 	expectReason(t, e.do(http.MethodPost, base+"/invitations", ownerToken, map[string]any{"email": "mgmt-capz@example.com", "role": "editor"}), http.StatusConflict,
 		"A joint portfolio supports at most five editors.")
+}
+
+// Vapor's member query had no ORDER BY; members follow the owner in join
+// order.
+func TestMembersInJoinOrder(t *testing.T) {
+	e := newEnv(t)
+	ownerID, ownerToken := e.user("mgmt-order-owner@example.com")
+	list := e.list(ownerID, "Joint", true, "")
+	var want []string
+	for i, email := range []string{"order-c@example.com", "order-a@example.com", "order-b@example.com"} {
+		member, _ := e.user(email)
+		id := uuid.New()
+		// Inserted newest first, so an unordered scan returns them backwards.
+		e.exec(`INSERT INTO portfolio_memberships (id, portfolio_id, user_id, role, status, joined_at, created_at)
+			VALUES ($1, $2, $3, 'editor', 'active', now() - make_interval(days => $4), now())`, id, list, member, 4+i*3)
+		want = append([]string{up(id)}, want...)
+	}
+	r := e.do(http.MethodGet, "/v1/portfolios/"+list.String()+"/members", ownerToken, nil)
+	expectStatus(t, r, http.StatusOK)
+	var members []struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	}
+	r.JSON(t, &members)
+	if len(members) != 4 || members[0].Role != "owner" {
+		t.Fatalf("%s", r.Body)
+	}
+	for i, id := range want {
+		if members[i+1].ID != id {
+			t.Fatalf("position %d: %s", i+1, r.Body)
+		}
+	}
 }

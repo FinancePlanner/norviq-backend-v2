@@ -30,6 +30,25 @@ Fixes are v2-only; Vapor is archived.
 | scenarios | Worker that lost its lease marked another worker's run failed → leaves it alone | 6fc73f5 |
 | scenarios | Goal probability after a cancel divided by requested paths → completed paths | 44bf5b4 |
 | scenarios | Processor read `catalog_id` before `catalogId`, unlike the validator → same order | 44bf5b4 |
+| stocks | Bulk create skipped the symbol check (a blank symbol was stored) and the holdings limit → both checked per item (`Abort.400` / `Abort.403` in that item's `error`); holdings count synced | 6cf7429 |
+| stocks | Update that merges into the same symbol in another list left the holdings count stale → synced | 6cf7429 |
+| stocks | `limit=200` never returned `X-Next-Cursor` → returned whenever more rows exist | 6cf7429 |
+| stocks | `buyDate` 2025-02-30 rolled over to 03-02 → 400 "Invalid buyDate. Expected YYYY-MM-DD." | 6cf7429 |
+| stocks | Sell hitting a `LedgerTradeError` (concurrent sell): 500 → 404 "Stock not found." / 400 "Cannot sell more shares than owned." | 6cf7429 |
+| stocks, pilots | Ledger cash row `first()` had no ORDER BY (rows are per `as_of`) → latest `as_of` | 375969c |
+| rebalancing | Lowercase `modelId` on simulate/plans: 409 stale model → matches its model | ae9566f |
+| rebalancing | `updateModel` without `expectedRevision`: 409 no reload clears → 400 "expectedRevision is required to update an allocation model." | ae9566f |
+| rebalancing | Engine errors in the overview: 500 → mapped 4xx, as simulate | ae9566f |
+| rebalancing | `copyModel` copied destination by destination (a later 403/404 kept earlier copies) → all destinations checked first, one transaction | ae9566f |
+| simulations | fromScratch with a valid but unknown `sourcePortfolioId`: 500 (FK) → 404; a source the caller can't read is no longer stored | 86810b6 |
+| simulations | Engine errors in compute and preview: 500 → mapped 4xx | 86810b6 |
+| simulations | Create/update saved the record before its legs → one transaction | 86810b6 |
+| simulations | List cursor decoded by truncating float seconds, skipping rows that share the anchor's `created_at` → exact microsecond | 86810b6 |
+| portfolio | `/v1/lots` ignored `portfolioId`/`portfolioListId` → filtered after the access check (no filter: all the caller's accounts, as before) | d67d0f4 |
+| portfolio | Share-link status/create echoed the raw `:scope` (lowercase stayed lowercase) → canonical uppercase id, as the list | d67d0f4 |
+| portfoliomgmt | GET /v1/portfolios listed a portfolio twice for an owner who is also a member → once | 8569843 |
+| portfoliomgmt | Compare `cashBalance` always 0 → each portfolio's cash, as /v1/portfolio/summary | 8569843 |
+| portfoliomgmt | Members list had no ORDER BY → owner, then join order | 8569843 |
 
 ## KEEP
 
@@ -43,6 +62,14 @@ Fixes are v2-only; Vapor is archived.
 - goalplanning draft payload only ever holds plain values; nothing is lost.
 - scenarios Monte Carlo default distribution: `normal` is what runs and what
   results report.
+- Stock valuation GET answers a missing stock or valuation with a bare 404:
+  iOS reads a bodiless 404 as "no valuation yet", while a 404 whose reason is
+  not "...valuation not found" (e.g. "Stock not found.") is shown as an error
+  on the screen of every stock the user does not hold.
+- Rebalancing `updatePreferences` needs only read access to the portfolio
+  (the route still needs `planning:write`): the row is the caller's own push
+  opt-in, and drift alerts are per user, so a read-only member choosing
+  whether to be pushed is correct.
 
 ## DECIDE
 
@@ -65,21 +92,19 @@ Fixes are v2-only; Vapor is archived.
   budget/expense row's `created_at`.
 - **`goals.completed_at`** has no time zone (stores UTC, read as UTC). Keep, or
   migrate to `timestamptz`.
+- **Revoking an accepted invitation** (`DELETE .../invitations/:id`) flips it
+  to `revoked` and answers 204, but the membership stays active. (a) 409
+  "This invitation was accepted; remove the member instead."; (b) also revoke
+  the membership it created (same effect as `DELETE .../members/:id`); (c)
+  keep. Membership change, so left to the owner.
+- **`isDefault` on POST /v1/portfolios** is "no unarchived owned list"
+  (`count == 0`). A user whose only default is archived (legacy data; archive
+  now refuses the default) or two racing creates get a second default, and
+  `DefaultPortfolioList` then picks one arbitrarily. (a) default only when the
+  user has no default list at all, archived included; (b) keep the rule but
+  demote other defaults in the same transaction; (c) keep. Touches the
+  default-list rules (pilot follows demote too), so left to the owner.
 
 ## TODO (still Vapor behaviour)
 
-- Stocks: bulk create skips symbol validation and the holdings limit;
-  `limit=200` never returns `X-Next-Cursor`; `buyDate` 2025-02-30 rolls over to
-  03-02; merge-on-update doesn't sync the holdings count; valuation GET 404 has
-  an empty body; cash-row `first()` has no ORDER BY; `LedgerTradeError` → 500.
-- Rebalancing: lowercase `modelId` → 409; `updateModel` without
-  `expectedRevision` → 409; fromScratch with a valid but unknown
-  `sourcePortfolioId` → 500; engine errors in overview, simulation compute and
-  preview → 500; `updatePreferences` needs only read scope; copyModel and
-  simulation create/update are not transactional; simulation list cursor goes
-  through a float.
-- Portfolio core: `/v1/lots` ignores the portfolio filters; GET /v1/portfolios
-  lists a portfolio twice for an owner who is also a member; compare
-  `cashBalance` always 0; members list has no ORDER BY; revoking an accepted
-  invitation keeps the membership; `isDefault` on create can make a second
-  default; share status/create echo the raw `:scope`.
+None.

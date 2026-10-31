@@ -272,9 +272,13 @@ func TestUpdateActivateAndAlerts(t *testing.T) {
 		t.Fatalf("alert %s %v %v", status, key, err)
 	}
 
-	// Missing and stale expectedRevision both conflict.
+	// A missing expectedRevision is a 400 (Vapor: the stale-model 409, which
+	// no reload clears); a stale one is a 409.
 	r = e.app.Do("PUT", e.base+"/models/"+a.ID, e.token, modelBody("A2", false, nil))
-	expect(t, r, http.StatusConflict)
+	expect(t, r, http.StatusBadRequest)
+	if reason(t, r) != "expectedRevision is required to update an allocation model." {
+		t.Fatal(string(r.Body))
+	}
 	one := 1
 	r = e.app.Do("PUT", e.base+"/models/"+a.ID, e.token, modelBody("A2", false, &one))
 	expect(t, r, http.StatusConflict)
@@ -434,4 +438,73 @@ func TestDisabledRoutes404(t *testing.T) {
 	e := newEnv(t, fakeMarket{})
 	r := e.app.Do("GET", e.base+"/models", e.token, nil)
 	expect(t, r, http.StatusNotFound)
+}
+
+// ---- Vapor bugs fixed in v2 ------------------------------------------------------------
+
+// Vapor compared modelId to the uppercase stored id as a string, so a
+// lowercase id was a stale-model 409.
+func TestSimulateAcceptsLowercaseModelID(t *testing.T) {
+	e := newEnv(t, fakeMarket{prices: map[string]float64{"AAA": 10}})
+	e.addStock(t, "aaa", 10, 5)
+	e.addCash(t, "usd", 100)
+	r := e.app.Do("POST", e.base+"/models", e.token, modelBody("60/40", true, nil))
+	expect(t, r, http.StatusCreated)
+	var m rebalancing.AllocationModel
+	r.JSON(t, &m)
+	sim := map[string]any{"modelId": strings.ToLower(m.ID), "modelRevision": 1, "cashFlow": 0, "overrides": []any{}}
+	r = e.app.Do("POST", e.base+"/simulate", e.token, sim)
+	expect(t, r, http.StatusOK)
+	var s rebalancing.Simulation
+	r.JSON(t, &s)
+	if s.ModelID != m.ID {
+		t.Fatalf("simulation model %q", s.ModelID)
+	}
+	r = e.app.Do("POST", e.base+"/plans", e.token, map[string]any{"simulation": sim})
+	expect(t, r, http.StatusCreated)
+}
+
+// Vapor let engine errors in the overview escape as 500s.
+func TestOverviewMapsEngineErrors(t *testing.T) {
+	e := newEnv(t, fakeMarket{prices: map[string]float64{"AAA": 10}})
+	e.addStock(t, "aaa", -3, 5)
+	r := e.app.Do("POST", e.base+"/models", e.token, modelBody("60/40", true, nil))
+	expect(t, r, http.StatusCreated)
+	r = e.app.Do("GET", e.base+"/overview", e.token, nil)
+	expect(t, r, http.StatusUnprocessableEntity)
+}
+
+// Vapor copied destination by destination, so one it could not write left
+// the earlier copies behind.
+func TestCopyModelIsAllOrNothing(t *testing.T) {
+	e := newEnv(t, fakeMarket{})
+	mine := e.addPortfolio(t, e.user, "Second", "USD")
+	stranger := e.app.CreateUser(uuid.NewString() + "@example.com")
+	theirs := e.addPortfolio(t, stranger, "Theirs", "USD")
+	r := e.app.Do("POST", e.base+"/models", e.token, modelBody("A", true, nil))
+	expect(t, r, http.StatusCreated)
+	var a rebalancing.AllocationModel
+	r.JSON(t, &a)
+	copyPath := e.base + "/models/" + a.ID + "/copy"
+	r = e.app.Do("POST", copyPath, e.token, map[string]any{
+		"destinationPortfolioIds": []string{apijson.FormatUUID(mine), apijson.FormatUUID(theirs)}, "activate": true,
+	})
+	if r.Status < 400 || r.Status >= 500 {
+		t.Fatalf("copy %d %s", r.Status, r.Body)
+	}
+	var n int
+	if err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM allocation_models WHERE portfolio_id = $1`, mine).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("partial copy left %d models (%v)", n, err)
+	}
+	third := e.addPortfolio(t, e.user, "Third", "USD")
+	r = e.app.Do("POST", copyPath, e.token, map[string]any{
+		"destinationPortfolioIds": []string{apijson.FormatUUID(mine), apijson.FormatUUID(third)}, "activate": true,
+	})
+	expect(t, r, http.StatusOK)
+	var res rebalancing.BulkCopyResult
+	r.JSON(t, &res)
+	if len(res.Models) != 2 || res.Models[0].PortfolioID != apijson.FormatUUID(mine) || res.Models[1].PortfolioID != apijson.FormatUUID(third) ||
+		!res.Models[0].IsActive || res.Models[0].Name != "A" || len(res.Models[1].Buckets) != 2 {
+		t.Fatalf("copy %+v", res)
+	}
 }

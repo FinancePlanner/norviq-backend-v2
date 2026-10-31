@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +270,99 @@ func TestListPaging(t *testing.T) {
 	r.JSON(t, &next)
 	if len(next.Items) != 3 {
 		t.Fatalf("%d", len(next.Items))
+	}
+}
+
+// ---- Vapor bugs fixed in v2 ------------------------------------------------------------
+
+// Vapor stored a fromScratch simulation's sourcePortfolioId unchecked: an id
+// naming no portfolio broke the foreign key (500), and one the caller could
+// not read was saved anyway.
+func TestFromScratchSourceMustBeReadable(t *testing.T) {
+	app := newApp(t, nil)
+	ownerID, owner := user(t, app)
+	_, stranger := user(t, app)
+	pid := uuid.New()
+	if _, err := app.Deps.DB.Exec(context.Background(), `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Real', now())`, pid, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	b := upsert([]leg{{"AAPL", 5000}}, nil)
+	b["sourcePortfolioId"] = apijson.FormatUUID(uuid.New())
+	expect(t, app.Do("POST", "/v1/portfolio/simulations", owner, b), http.StatusNotFound)
+	b["sourcePortfolioId"] = apijson.FormatUUID(pid)
+	expect(t, app.Do("POST", "/v1/portfolio/simulations", stranger, b), http.StatusNotFound)
+	var n int
+	if err := app.Deps.DB.QueryRow(context.Background(), `SELECT count(*) FROM portfolio_simulations`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("stored %d (%v)", n, err)
+	}
+	created := create(t, app, owner, b)
+	if created.SourcePortfolioID == nil || *created.SourcePortfolioID != apijson.FormatUUID(pid) {
+		t.Fatalf("%+v", created)
+	}
+	one := 1
+	u := upsert([]leg{{"AAPL", 5000}}, &one)
+	u["sourcePortfolioId"] = apijson.FormatUUID(uuid.New())
+	expect(t, app.Do("PUT", "/v1/portfolio/simulations/"+created.ID, owner, u), http.StatusNotFound)
+	// No source at all is still fine.
+	create(t, app, owner, upsert([]leg{{"AAPL", 5000}}, nil))
+}
+
+// Vapor let engine errors in compute and preview escape as 500s.
+func TestComputeMapsEngineErrors(t *testing.T) {
+	app := newApp(t, fakeMarket{"AAPL": 100})
+	ownerID, owner := user(t, app)
+	pid := uuid.New()
+	if _, err := app.Deps.DB.Exec(context.Background(), `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Real', now())`, pid, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Deps.DB.Exec(context.Background(), `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id) VALUES ($1, $2, 'AAPL', -2, 50, current_date, now(), $3)`, uuid.New(), ownerID, pid); err != nil {
+		t.Fatal(err)
+	}
+	b := upsert([]leg{{"AAPL", 5000}}, nil)
+	b["mode"] = "cloneCurrentPortfolio"
+	b["sourcePortfolioId"] = apijson.FormatUUID(pid)
+	created := create(t, app, owner, b)
+	expect(t, app.Do("POST", "/v1/portfolio/simulations/"+created.ID+"/compute", owner, nil), http.StatusUnprocessableEntity)
+	expect(t, app.Do("POST", "/v1/portfolio/simulations/preview", owner, b), http.StatusUnprocessableEntity)
+}
+
+// Vapor decoded the list cursor's float seconds by truncation, so the anchor
+// often fell a microsecond early and the next page skipped every row that
+// shared the anchor's created_at. Rows created in the same microsecond (three
+// per timestamp here) now page without gaps.
+func TestListPagingMicrosecondAnchors(t *testing.T) {
+	app := newApp(t, nil)
+	userID, tok := user(t, app)
+	base := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	want := 30
+	for i := range want {
+		at := base.Add(time.Duration((i/3+1)*7919) * time.Microsecond)
+		if _, err := app.Deps.DB.Exec(context.Background(), `INSERT INTO portfolio_simulations
+			(id, user_id, mode, name, base_currency, target_capital, fractional_shares_enabled, quantity_increment,
+			 minimum_trade_amount, flat_fee, variable_fee_bps, revision, share_enabled, share_show_capital, created_at, updated_at)
+			VALUES ($1, $2, 'fromScratch', 'S', 'USD', 1000, false, 1, 1, 0, 0, 1, false, true, $3, $3)`, uuid.New(), userID, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	path := "/v1/portfolio/simulations?limit=4"
+	for range want {
+		r := app.Do("GET", path, tok, nil)
+		expect(t, r, http.StatusOK)
+		var page simulations.ListResponse
+		r.JSON(t, &page)
+		for _, s := range page.Items {
+			if seen[s.ID] {
+				t.Fatalf("row %s repeated", s.ID)
+			}
+			seen[s.ID] = true
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		path = "/v1/portfolio/simulations?limit=4&cursor=" + url.QueryEscape(*page.NextCursor)
+	}
+	if len(seen) != want {
+		t.Fatalf("saw %d of %d", len(seen), want)
 	}
 }

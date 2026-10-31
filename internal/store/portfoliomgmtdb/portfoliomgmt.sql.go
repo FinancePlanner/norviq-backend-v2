@@ -205,8 +205,10 @@ func (q *Queries) ActiveMembershipPortfolioIDs(ctx context.Context, userID uuid.
 
 const activeMemberships = `-- name: ActiveMemberships :many
 SELECT id, portfolio_id, user_id, role, status, joined_at, created_at, updated_at FROM portfolio_memberships WHERE portfolio_id = $1 AND status = 'active'
+ORDER BY joined_at ASC NULLS LAST, created_at ASC NULLS LAST, id
 `
 
+// Join order (Vapor's query had no ORDER BY).
 func (q *Queries) ActiveMemberships(ctx context.Context, portfolioID uuid.UUID) ([]PortfolioMembership, error) {
 	rows, err := q.db.Query(ctx, activeMemberships, portfolioID)
 	if err != nil {

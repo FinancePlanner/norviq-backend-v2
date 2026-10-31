@@ -56,18 +56,23 @@ func parseDateFormatter(s string) (time.Time, bool) {
 var buyDateRE = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 
 // parseBuyDate is DatabaseStocksRepository.parseISODateOnly: strictly
-// four-two-two digits, then Calendar.date(from: DateComponents), which rolls
-// an out-of-range month or day over ("2024-02-30" is March 1st) rather
-// than rejecting it.
+// four-two-two digits naming a real calendar day. Vapor's
+// Calendar.date(from: DateComponents) rolled an out-of-range month or day
+// over ("2025-02-30" became March 2nd); v2 rejects it.
 func parseBuyDate(raw string) (time.Time, error) {
 	trimmed := trim(raw)
+	invalid := httpx.BadRequest("Invalid buyDate. Expected YYYY-MM-DD.")
 	if !buyDateRE.MatchString(trimmed) {
-		return time.Time{}, httpx.BadRequest("Invalid buyDate. Expected YYYY-MM-DD.")
+		return time.Time{}, invalid
 	}
 	y, _ := strconv.Atoi(trimmed[0:4])
 	mo, _ := strconv.Atoi(trimmed[5:7])
 	d, _ := strconv.Atoi(trimmed[8:10])
-	return time.Date(y, time.Month(mo), d, 0, 0, 0, 0, time.UTC), nil
+	t := time.Date(y, time.Month(mo), d, 0, 0, 0, 0, time.UTC)
+	if y < 1 || t.Year() != y || int(t.Month()) != mo || t.Day() != d {
+		return time.Time{}, invalid
+	}
+	return t, nil
 }
 
 // parseRequiredDate is StockService.parseISODateOnly / TransactionService

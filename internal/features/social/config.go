@@ -141,6 +141,14 @@ type facebookConfig struct {
 	AppSecret *string
 }
 
+// webAppID is the app the web dialog and the Graph token exchange run as.
+//
+// Configuration rule (owner decision, docs/vapor-bugs/social.md): the WEB
+// app id goes FIRST in FACEBOOK_APP_ID, and FACEBOOK_APP_SECRET must be
+// that app's secret. The other ids (e.g. the iOS app) are only audiences for
+// Limited Login tokens, which need no secret. Nothing checks that the secret
+// matches this id: with the wrong id first, the code exchange fails at
+// Facebook. There is deliberately no FACEBOOK_WEB_APP_ID.
 func (c facebookConfig) webAppID() string {
 	if len(c.AppIDs) == 0 {
 		return ""

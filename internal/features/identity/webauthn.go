@@ -197,7 +197,8 @@ func (s *service) webAuthnLoginVerify(c *echo.Context) error {
 		return unauthorized("Passkey challenge expired or invalid.")
 	}
 	if err := parsed.Verify(base64.RawURLEncoding.EncodeToString(challenge), s.webauthn.RPID, "",
-		[]string{origin}, nil, protocol.TopOriginDefaultVerificationMode, true, false, true, stored.PublicKey); err != nil {
+		[]string{origin}, nil, nil, protocol.TopOriginDefaultVerificationMode, true, false, true,
+		stored.PublicKey, protocol.SignaturePolicy{}); err != nil {
 		return err
 	}
 	newCount := parsed.Response.AuthenticatorData.Counter
@@ -309,7 +310,8 @@ func (s *service) webAuthnRegisterVerify(c *echo.Context) error {
 		params[i] = protocol.CredentialParameter{Type: protocol.PublicKeyCredentialType, Algorithm: webauthncose.COSEAlgorithmIdentifier(alg)}
 	}
 	if _, err := parsed.Verify(base64.RawURLEncoding.EncodeToString(challenge), s.webauthn.RPID,
-		[]string{origin}, nil, protocol.TopOriginDefaultVerificationMode, true, false, true, nil, params); err != nil {
+		[]string{origin}, nil, nil, protocol.TopOriginDefaultVerificationMode, true, false, true,
+		nil, params, protocol.AttestationPolicy{}, protocol.SignaturePolicy{}); err != nil {
 		return err
 	}
 	// swift-webauthn stores the id as `urlDecoded`: standard base64, padded.

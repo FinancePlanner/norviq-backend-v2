@@ -254,10 +254,6 @@ const (
 	modeConfirmed
 )
 
-func (m confirmationMode) deferred() bool {
-	return m == modeDeferredDestructiveOnly || m == modeDeferredEveryWrite
-}
-
 // actionTools is ActionCatalog.toolDefinitions(mode:).
 func actionTools(mode confirmationMode) []ai.Tool {
 	out := make([]ai.Tool, 0, len(catalog))

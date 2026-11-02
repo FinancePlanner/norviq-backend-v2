@@ -78,6 +78,7 @@ func ParseTimeJSON(data []byte) (time.Time, error) {
 	}
 	seconds, err := strconv.ParseFloat(string(data), 64)
 	if err != nil {
+		//lint:ignore ST1005 Swift decoder wording is part of the wire-compatible error.
 		return time.Time{}, errors.New("Date must be an ISO8601 string or seconds since Apple reference date")
 	}
 	return fromReferenceSeconds(seconds), nil
@@ -96,6 +97,7 @@ func ParseTimeString(s string) (time.Time, error) {
 	if seconds, err := strconv.ParseFloat(s, 64); err == nil {
 		return fromReferenceSeconds(seconds), nil
 	}
+	//lint:ignore ST1005 Swift decoder wording is part of the wire-compatible error.
 	return time.Time{}, errors.New("Date must be an ISO8601 string or seconds since Apple reference date")
 }
 

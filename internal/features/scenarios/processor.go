@@ -138,6 +138,7 @@ func (p Processor) monthlyExpenseSpending(ctx context.Context, userID uuid.UUID)
 		// Fluent decoded allocation_kind as BudgetAllocationKind and threw
 		// on any other raw value.
 		if r.AllocationKind != allocationExpense && r.AllocationKind != allocationInvestment {
+			//lint:ignore ST1005 Swift decoder wording is part of the wire-compatible error.
 			return nil, fmt.Errorf("Cannot initialize BudgetAllocationKind from invalid String value %s", r.AllocationKind)
 		}
 		items = append(items, BudgetItem{AllocationKind: r.AllocationKind, PlannedAmount: r.PlannedAmount, UserSharePercent: r.UserSharePercent})

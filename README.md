@@ -10,13 +10,25 @@ routes.
 ## Develop
 
 ```sh
-make hooks                       # gofumpt + golangci-lint pre-commit hook
+make hooks                       # gofumpt + lint + check-all pre-commit hook
 cp .env.example .env             # then: set -a; . ./.env; set +a
 go run ./cmd/api serve           # serves every registered route; anything else is a 404
 go run ./cmd/api migrate         # goose up (adopts a Vapor-migrated DB first)
 go run ./cmd/api routes          # every route v2 serves
 scripts/coverage.sh              # served vs Vapor's 693 routes
 ```
+
+For a disposable local Postgres and Redis stack, use the compose file:
+
+```sh
+docker compose up -d postgres redis
+docker compose --profile migrate run --rm migrate
+docker compose up -d api
+```
+
+The API is available at `http://localhost:8080`. Compose uses development-only
+credentials and publishes Postgres on `55499` and Redis on `56379` to avoid
+colliding with common local services.
 
 Tests need a disposable Postgres:
 

@@ -503,10 +503,7 @@ func rowDictionary(headers, values []string) map[string]string {
 
 // MARK: - Statement parser (IBKRSODStatementParser): provisional counts only.
 
-var (
-	sodSymbolAliases   = normalizedAliases("symbol", "ticker", "underlying", "underlyingSymbol", "sym")
-	sodQuantityAliases = normalizedAliases("quantity", "qty", "position", "shares", "share")
-)
+var sodSymbolAliases = normalizedAliases("symbol", "ticker", "underlying", "underlyingSymbol", "sym")
 
 func normalizedAliases(aliases ...string) map[string]bool {
 	out := map[string]bool{}

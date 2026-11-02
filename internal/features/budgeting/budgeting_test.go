@@ -554,8 +554,7 @@ func TestTemplates(t *testing.T) {
 }
 
 func TestPremiumGate(t *testing.T) {
-	var e *env
-	e = newEnv(t, func(f *budgeting.Feature) { f.Premium = nil })
+	e := newEnv(t, func(f *budgeting.Feature) { f.Premium = nil })
 	r := e.do(http.MethodGet, "/v1/budget/templates", nil)
 	if r.Status != http.StatusPaymentRequired && r.Status != http.StatusForbidden {
 		t.Fatalf("free user templates: %d %s", r.Status, r.Body)

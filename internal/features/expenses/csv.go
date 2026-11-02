@@ -68,7 +68,7 @@ func (c CSVService) ImportCSV(ctx context.Context, db expensesdb.DBTX, csv strin
 	if len(parsed) > CSVMaxRows {
 		return CSVImportResult{}, httpx.BadRequest("CSV exceeds " + strconv.Itoa(CSVMaxRows) + " row limit.")
 	}
-	importer := BulkImporter{Service: c.Service, EvaluateDrift: c.EvaluateDrift}
+	importer := BulkImporter(c)
 
 	rows := make([]CSVRowResult, 0, len(parsed))
 	var candidates []Candidate

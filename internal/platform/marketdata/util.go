@@ -1,7 +1,6 @@
 package marketdata
 
 import (
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -95,9 +94,6 @@ func uniqued(values []string) []string {
 	}
 	return out
 }
-
-// roundHalfAway is Swift's `.rounded()` (schoolbook rounding).
-func roundHalfAway(v float64) float64 { return math.Round(v) }
 
 // addMonths adds months the way Calendar.date(byAdding:) does: the day clamps
 // to the target month's last day instead of overflowing.

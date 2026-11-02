@@ -148,12 +148,11 @@ func plaidPublicKey(jwk plaidJWK) (*ecdsa.PublicKey, error) {
 		return nil, errPlaidMalformed
 	}
 	raw := append([]byte{4}, append(x, y...)...)
-	//nolint:staticcheck // Unmarshal validates the point is on the curve.
-	px, py := elliptic.Unmarshal(elliptic.P256(), raw)
-	if px == nil {
+	key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+	if err != nil {
 		return nil, errPlaidKey
 	}
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: px, Y: py}, nil
+	return key, nil
 }
 
 // plaidWebhook is PlaidWebhookController.receive (POST /webhooks/plaid).

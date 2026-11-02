@@ -156,10 +156,9 @@ func TestFacebookDisabled(t *testing.T) {
 
 // graphStub is a fake Graph API: code exchange, /me and two pages of friends.
 type graphStub struct {
-	mu      sync.Mutex
-	paths   []string
-	friends int
-	srv     *httptest.Server
+	mu    sync.Mutex
+	paths []string
+	srv   *httptest.Server
 }
 
 func newGraphStub(t *testing.T) *graphStub {

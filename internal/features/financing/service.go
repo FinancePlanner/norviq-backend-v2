@@ -140,11 +140,7 @@ func (s *service) createPlan(ctx context.Context, userID uuid.UUID, req PlanRequ
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := s.q.WithTx(tx)
-	if err := q.InsertPlan(ctx, financingdb.InsertPlanParams{
-		ID: plan.ID, UserID: plan.UserID, Title: plan.Title, Market: plan.Market, PurchaseType: plan.PurchaseType,
-		Currency: plan.Currency, Status: plan.Status, UserSharePercent: plan.UserSharePercent,
-		SourceDomain: plan.SourceDomain, CreatedAt: plan.CreatedAt, UpdatedAt: plan.UpdatedAt,
-	}); err != nil {
+	if err := q.InsertPlan(ctx, financingdb.InsertPlanParams(plan)); err != nil {
 		return PlanResponse{}, err
 	}
 	if err := q.InsertRevision(ctx, financingdb.InsertRevisionParams{

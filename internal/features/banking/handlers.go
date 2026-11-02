@@ -265,7 +265,7 @@ func (h *handlers) syncConnection(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return httpx.OK(c, SyncResponse{Added: r.Added, Modified: r.Modified, Removed: r.Removed})
+	return httpx.OK(c, SyncResponse(r))
 }
 
 func (h *handlers) listTransactions(c *echo.Context) error {

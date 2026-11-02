@@ -351,7 +351,7 @@ func (c *OpenAIClient) completion(ctx context.Context, messages []Message, tools
 	if choice.Message.HasNoUsableOutput() {
 		logger.Warn(fmt.Sprintf("ai_completion_empty finish_reason=%s model=%s", finishReason, responseModel))
 	}
-	return Completion{Message: choice.Message, FinishReason: choice.FinishReason}, nil
+	return Completion(choice), nil
 }
 
 // redactBody drops a provider error body that echoes the key back (which

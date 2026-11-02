@@ -72,13 +72,12 @@ type stubPosition struct {
 }
 
 type stubTrade struct {
-	id, symbol, typ  string
-	quantity, price  float64
-	daysAgo          int
-	assetClass       string
-	conid            string
-	listingExchange  string
-	settleDaysOffset int
+	id, symbol, typ string
+	quantity, price float64
+	daysAgo         int
+	assetClass      string
+	conid           string
+	listingExchange string
 }
 
 // stubGateway answers like the IBKR Client Portal gateway; transactions only

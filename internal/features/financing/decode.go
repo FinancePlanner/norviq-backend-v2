@@ -113,7 +113,8 @@ func decodeStrict(data []byte, v any) error {
 		return err
 	}
 	if tree == nil {
-		return errors.New("Cannot get keyed decoding container -- found null value instead.") //nolint:staticcheck // Foundation's wording
+		//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+		return errors.New("Cannot get keyed decoding container -- found null value instead.")
 	}
 	return checkRequired(reflect.TypeOf(v).Elem(), normalizeTree(tree), "")
 }
@@ -175,7 +176,8 @@ func checkRequired(t reflect.Type, node any, path string) error {
 				if f.Type.Kind() == reflect.Pointer {
 					continue
 				}
-				return fmt.Errorf("No value associated with key '%s' at path '%s'.", name, path) //nolint:staticcheck // Foundation's wording
+				//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+				return fmt.Errorf("No value associated with key '%s' at path '%s'.", name, path)
 			}
 			sub := name
 			if path != "" {
@@ -191,12 +193,14 @@ func checkRequired(t reflect.Type, node any, path string) error {
 
 // formMissing is URLEncodedFormDecoder's error for an absent key.
 func formMissing(name, typ string) error {
-	return fmt.Errorf("No value found (expected type '%s') at path '%s'. No %s was found at '%s'.", typ, name, typ, name) //nolint:staticcheck // Vapor's wording
+	//lint:ignore ST1005 Vapor's wording is part of the wire-compatible error.
+	return fmt.Errorf("No value found (expected type '%s') at path '%s'. No %s was found at '%s'.", typ, name, typ, name)
 }
 
 // multipartMissing is FormDataDecoder's error for an absent key.
 func multipartMissing(name, _ string) error {
-	return fmt.Errorf("No such key '%s' at path ''. No value associated with key %q.", name, name) //nolint:staticcheck // Vapor's wording
+	//lint:ignore ST1005 Vapor's wording is part of the wire-compatible error.
+	return fmt.Errorf("No such key '%s' at path ''. No value associated with key %q.", name, name)
 }
 
 // multipartValues reads the text parts of a multipart body (the last part
@@ -258,17 +262,20 @@ func decodeForm(values url.Values, v any, missing func(name, typ string) error) 
 		case reflect.Float64:
 			n, err := strconv.ParseFloat(raw, 64)
 			if err != nil {
-				return fmt.Errorf("Could not convert value at '%s' to Double.", name) //nolint:staticcheck // Foundation's wording
+				//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+				return fmt.Errorf("Could not convert value at '%s' to Double.", name)
 			}
 			target.SetFloat(n)
 		case reflect.Int:
 			n, err := strconv.Atoi(raw)
 			if err != nil {
-				return fmt.Errorf("Could not convert value at '%s' to Int.", name) //nolint:staticcheck // Foundation's wording
+				//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+				return fmt.Errorf("Could not convert value at '%s' to Int.", name)
 			}
 			target.SetInt(int64(n))
 		default:
-			return fmt.Errorf("Value at '%s' cannot be decoded from a form.", name) //nolint:staticcheck // Foundation's wording
+			//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+			return fmt.Errorf("Value at '%s' cannot be decoded from a form.", name)
 		}
 		if optional {
 			p := reflect.New(ft)

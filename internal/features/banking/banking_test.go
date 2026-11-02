@@ -747,8 +747,7 @@ func TestPlaidExchangeAndSyncImportsNewAccountTransaction(t *testing.T) {
 }
 
 func TestGoCardlessCallbackCreatesConnection(t *testing.T) {
-	var tb *testBank
-	tb = newTestBank(t, func(s *Settings) {
+	tb := newTestBank(t, func(s *Settings) {
 		s.GoCardlessSecretID, s.GoCardlessSecretKey = "id", "key"
 	})
 	gc, _ := tb.bank.Registry.Provider(KindGoCardless)

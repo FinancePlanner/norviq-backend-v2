@@ -479,9 +479,7 @@ func (h *handler) createContribution(c *echo.Context) error {
 	row := goalplanningdb.FinancialGoalContribution{
 		ID: uuid.New(), GoalID: goal.ID, UserID: userID, Amount: in.Amount, OccurredAt: occurredAt, Note: note, CreatedAt: &now,
 	}
-	if err := h.svc.q.InsertContribution(c.Request().Context(), goalplanningdb.InsertContributionParams{
-		ID: row.ID, GoalID: row.GoalID, UserID: row.UserID, Amount: row.Amount, OccurredAt: row.OccurredAt, Note: row.Note, CreatedAt: row.CreatedAt,
-	}); err != nil {
+	if err := h.svc.q.InsertContribution(c.Request().Context(), goalplanningdb.InsertContributionParams(row)); err != nil {
 		return err
 	}
 	if h.achievements != nil {
@@ -586,10 +584,7 @@ func (h *handler) acceptSuggestion(c *echo.Context) error {
 	draft := goalplanningdb.FinancialGoalAdjustmentDraft{
 		ID: uuid.New(), SuggestionID: suggestion.ID, UserID: userID, Destination: destination, Payload: payload, CreatedAt: &now,
 	}
-	if err := h.svc.q.InsertAdjustmentDraft(ctx, goalplanningdb.InsertAdjustmentDraftParams{
-		ID: draft.ID, SuggestionID: draft.SuggestionID, UserID: draft.UserID, Destination: draft.Destination,
-		Payload: draft.Payload, CreatedAt: draft.CreatedAt,
-	}); err != nil {
+	if err := h.svc.q.InsertAdjustmentDraft(ctx, goalplanningdb.InsertAdjustmentDraftParams(draft)); err != nil {
 		return err
 	}
 	return httpx.OK(c, h.svc.draftDTO(&draft))

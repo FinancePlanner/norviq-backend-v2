@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -677,8 +676,6 @@ func (s *Service) syncTickerPosts(ctx context.Context) tickerPostSyncResult {
 	}
 	return res
 }
-
-var shared sync.Map // *server.Deps -> *bundle
 
 // lim32 converts a LIMIT to sqlc's int32, saturating.
 func lim32(n int) int32 {

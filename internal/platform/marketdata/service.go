@@ -568,7 +568,7 @@ func (s *Service) fetchSearch(ctx context.Context, query, providerName string) (
 	}
 	mapped := make([]SearchResultResponse, 0, len(fresh))
 	for _, r := range fresh {
-		mapped = append(mapped, SearchResultResponse{Symbol: r.Symbol, Name: r.Name, Exchange: r.Exchange, Currency: r.Currency, Conid: r.Conid})
+		mapped = append(mapped, SearchResultResponse(r))
 	}
 	payload, err := apijson.Marshal(mapped)
 	if err != nil {

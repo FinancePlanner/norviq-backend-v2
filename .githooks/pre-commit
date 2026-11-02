@@ -38,4 +38,7 @@ echo "pre-commit: golangci-lint run"
 # same time would otherwise abort this commit on golangci-lint's global lock.
 golangci-lint run --allow-parallel-runners
 
+echo "pre-commit: make check-all"
+make check-all
+
 echo "pre-commit: ok"

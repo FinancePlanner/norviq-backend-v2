@@ -38,14 +38,16 @@ func checkEnum(value string, allowed []string, typ, path string) error {
 	if slices.Contains(allowed, value) {
 		return nil
 	}
-	return fmt.Errorf("Cannot initialize %s from invalid String value %s at path '%s'.", typ, value, path) //nolint:staticcheck // Foundation's wording
+	//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+	return fmt.Errorf("Cannot initialize %s from invalid String value %s at path '%s'.", typ, value, path)
 }
 
 func checkMarket(value, path string) error {
 	if _, ok := marketCurrency[value]; ok {
 		return nil
 	}
-	return fmt.Errorf("Cannot initialize FinancingMarket from invalid String value %s at path '%s'.", value, path) //nolint:staticcheck // Foundation's wording
+	//lint:ignore ST1005 Foundation's wording is part of the wire-compatible error.
+	return fmt.Errorf("Cannot initialize FinancingMarket from invalid String value %s at path '%s'.", value, path)
 }
 
 // AdditionalCost is FinancingAdditionalCost.

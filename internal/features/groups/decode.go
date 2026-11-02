@@ -54,13 +54,6 @@ func (d decoded) str(k string) *string {
 
 func (d decoded) boolean(k string) bool { v, _ := d[k].(bool); return v }
 
-func (d decoded) optBool(k string) *bool {
-	if v, ok := d[k].(bool); ok {
-		return &v
-	}
-	return nil
-}
-
 func (d decoded) id(k string) uuid.UUID { v, _ := d[k].(uuid.UUID); return v }
 
 func (d decoded) ids(k string) []uuid.UUID { v, _ := d[k].([]uuid.UUID); return v }
@@ -263,5 +256,3 @@ func validReportReason(s string) bool {
 	}
 	return false
 }
-
-func anyString(string) bool { return true }

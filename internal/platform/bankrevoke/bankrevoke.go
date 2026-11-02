@@ -153,7 +153,9 @@ type Plaid struct {
 }
 
 // ErrPlaid is the 502 "Plaid request failed." Abort.
-var ErrPlaid = errors.New("Plaid request failed.") //nolint:staticcheck // Vapor's reason, verbatim
+//
+//lint:ignore ST1005 Vapor's reason is part of the wire-compatible error.
+var ErrPlaid = errors.New("Plaid request failed.")
 
 func (p Plaid) Disconnect(ctx context.Context, c Connection) error {
 	if c.AccessTokenEnc == nil {
@@ -193,7 +195,9 @@ type GoCardless struct {
 }
 
 // ErrGoCardless is the 502 "GoCardless request failed." Abort.
-var ErrGoCardless = errors.New("GoCardless request failed.") //nolint:staticcheck // Vapor's reason, verbatim
+//
+//lint:ignore ST1005 Vapor's reason is part of the wire-compatible error.
+var ErrGoCardless = errors.New("GoCardless request failed.")
 
 func (g GoCardless) Disconnect(ctx context.Context, c Connection) error {
 	body, _ := json.Marshal(map[string]string{"secret_id": g.SecretID, "secret_key": g.SecretKey})
@@ -269,7 +273,8 @@ var reauthCodes = map[string]bool{
 func (e EnableBanking) Token(now time.Time) (string, error) {
 	key, err := parseRSAKey(e.PrivateKeyPEM)
 	if err != nil {
-		return "", errors.New("Invalid Enable Banking private key format.") //nolint:staticcheck // Vapor's reason
+		//lint:ignore ST1005 Vapor's reason is part of the wire-compatible error.
+		return "", errors.New("Invalid Enable Banking private key format.")
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "enablebanking.com",

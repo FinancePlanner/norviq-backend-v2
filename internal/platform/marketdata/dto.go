@@ -129,6 +129,7 @@ func (m MetricValue) MarshalJSON() ([]byte, error) {
 	return []byte("null"), nil
 }
 
+//lint:ignore ST1005 Swift decoder wording is part of the wire-compatible error.
 var errUnsupportedMetric = errors.New("Unsupported basic financial metric value.")
 
 func (m *MetricValue) UnmarshalJSON(data []byte) error {

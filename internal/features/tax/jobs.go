@@ -278,7 +278,8 @@ func (s *service) enqueueDailyProjections(ctx context.Context) error {
 	return nil
 }
 
-var errProjectionProfileMissing = errors.New("Abort.404: Tax profile not found for projection job.") //nolint:staticcheck // Vapor's String(describing: Abort), stored in last_error
+//lint:ignore ST1005 Vapor's String(describing: Abort) is stored in last_error.
+var errProjectionProfileMissing = errors.New("Abort.404: Tax profile not found for projection job.")
 
 func (s *service) processDueProjections(ctx context.Context, n notifier) error {
 	jobs, err := s.q.DueProjectionJobs(ctx, s.now())

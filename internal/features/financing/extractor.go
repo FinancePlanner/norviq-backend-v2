@@ -69,7 +69,7 @@ func extractOffer(text string, sourceDomain *string) ImportResponse {
 
 func firstCapture(patterns []*regexp.Regexp, text string) (string, bool) {
 	for _, re := range patterns {
-		if m := re.FindStringSubmatch(text); m != nil && len(m) > 1 {
+		if m := re.FindStringSubmatch(text); len(m) > 1 {
 			return m[1], true
 		}
 	}

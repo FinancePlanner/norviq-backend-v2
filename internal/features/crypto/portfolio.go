@@ -99,10 +99,7 @@ func (s PortfolioStore) Add(ctx context.Context, p PortfolioItemRequest, userID 
 		ID: uuid.New(), UserID: userID, Symbol: symbol, Name: strings.TrimSpace(p.Name),
 		Quantity: p.Quantity, AverageBuyPrice: p.AverageBuyPrice, CreatedAt: now, UpdatedAt: &now,
 	}
-	if err := s.Q.InsertPortfolioItem(ctx, cryptodb.InsertPortfolioItemParams{
-		ID: item.ID, UserID: item.UserID, Symbol: item.Symbol, Name: item.Name, Quantity: item.Quantity,
-		AverageBuyPrice: item.AverageBuyPrice, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
-	}); err != nil {
+	if err := s.Q.InsertPortfolioItem(ctx, cryptodb.InsertPortfolioItemParams(item)); err != nil {
 		return PortfolioItemResponse{}, err
 	}
 	return makeResponse(item), nil

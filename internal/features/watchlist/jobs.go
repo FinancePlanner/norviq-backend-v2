@@ -181,6 +181,22 @@ func (a TargetAlerts) evaluate(ctx context.Context, t *watchlistdb.Target) {
 		a.Logger.Warn("target-alert inbox persistence failed", "symbol", t.Symbol)
 		return
 	}
+	// Mark the target triggered BEFORE sending the push notification.
+	// The original order (send → mark) left alert_triggered_at null on a
+	// failed mark and caused the same push to fire on every subsequent poll
+	// until the mark succeeded. A crash after the mark and before the send
+	// loses that one push; the duplicate window is closed.
+	marked, err := a.markTriggered(ctx, t.ID, price)
+	if err != nil {
+		a.Logger.Warn("target-alert state update failed", "symbol", t.Symbol)
+		return
+	}
+	if !marked {
+		return
+	}
+	// alert_triggered_at is committed now: craft.target_hit can move.
+	achievementhooks.Schedule(t.UserID)
+
 	devices, err := a.Push.Devices.Active(ctx, t.UserID)
 	if err != nil {
 		a.Logger.Warn("target-alert device query failed", "userId", apijson.FormatUUID(t.UserID), "error", err)
@@ -194,16 +210,6 @@ func (a TargetAlerts) evaluate(ctx context.Context, t *watchlistdb.Target) {
 		a.Logger.Warn("target-alert no successful deliveries", "symbol", t.Symbol, "failed", summary.Failed)
 		return
 	}
-	marked, err := a.markTriggered(ctx, t.ID, price)
-	if err != nil {
-		a.Logger.Warn("target-alert state update failed", "symbol", t.Symbol)
-		return
-	}
-	if !marked {
-		return
-	}
-	// alert_triggered_at is committed now: craft.target_hit can move.
-	achievementhooks.Schedule(t.UserID)
 	a.Logger.Info("target-alert push delivered", "symbol", t.Symbol, "currentPrice", price)
 }
 
@@ -402,12 +408,6 @@ func (e EarningsReminders) evaluateUser(ctx context.Context, q *watchlistdb.Quer
 		e.Logger.Warn("earnings-reminder inbox persistence failed", "userId", uid, "symbol", symbol)
 		return
 	}
-	if err := q.InsertEarningsReminderDelivery(ctx, watchlistdb.InsertEarningsReminderDeliveryParams{
-		ID: uuid.New(), UserID: userID, Symbol: symbol, EarningsDate: date, LeadDays: int64(lead), SentAt: now,
-	}); err != nil {
-		e.Logger.Warn("earnings-reminder inbox persistence failed", "userId", uid, "symbol", symbol)
-		return
-	}
 	devices, err := e.Push.Devices.Active(ctx, userID)
 	if err != nil {
 		e.Logger.Warn("earnings-reminder device lookup failed", "userId", uid, "symbol", symbol, "error", err)
@@ -416,7 +416,18 @@ func (e EarningsReminders) evaluateUser(ctx context.Context, q *watchlistdb.Quer
 	if len(devices) == 0 {
 		return
 	}
-	if summary := e.Push.Sender.Send(ctx, push.EarningsReminder(symbol, date, lead), devices); summary.Delivered == 0 {
+	summary := e.Push.Sender.Send(ctx, push.EarningsReminder(symbol, date, lead), devices)
+	if summary.Delivered == 0 {
 		e.Logger.Warn("earnings-reminder push was not delivered", "userId", uid, "symbol", symbol)
+		return
+	}
+	// Insert the delivery row only after a successful send. The original order
+	// (insert → send) meant a failed send was never retried because the row
+	// already existed. A crash after a successful send but before the insert
+	// can produce one extra push on the next poll; that is acceptable.
+	if err := q.InsertEarningsReminderDelivery(ctx, watchlistdb.InsertEarningsReminderDeliveryParams{
+		ID: uuid.New(), UserID: userID, Symbol: symbol, EarningsDate: date, LeadDays: int64(lead), SentAt: now,
+	}); err != nil {
+		e.Logger.Warn("earnings-reminder delivery record failed", "userId", uid, "symbol", symbol)
 	}
 }

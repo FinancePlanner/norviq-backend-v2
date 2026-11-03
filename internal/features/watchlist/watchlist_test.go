@@ -584,24 +584,57 @@ func TestTargetAlertsTriggerAndDedupe(t *testing.T) {
 	}
 }
 
-// "Target alert evaluator does not mark target triggered when all
-// deliveries fail".
-func TestTargetAlertsNotMarkedWhenDeliveryFails(t *testing.T) {
+// Vapor's "does not mark target triggered when all deliveries fail" is
+// reversed on purpose: v2 marks before it sends, so a failed mark can no
+// longer re-send the same push every poll. A failed send is not retried.
+func TestTargetAlertsMarkBeforeSendAndNeverRepeat(t *testing.T) {
 	e := newEnv(t)
 	userID, _ := e.user(true)
 	e.device(t, userID)
 	e.exec(`INSERT INTO targets (id, user_id, symbol, scenario, target_price, created_at) VALUES ($1, $2, 'NVDA', 'bull', 100, now())`, uuid.New(), userID)
 	sender := &fakeSender{results: []push.Summary{{Delivered: 0, Failed: 1}}}
-	watchlist.TargetAlerts{DB: e.Deps.DB, Quotes: fixedQuotes{"NVDA": 150}, Push: e.pushService(sender), Logger: e.Deps.Logger}.Run(context.Background())
+	sweep := watchlist.TargetAlerts{DB: e.Deps.DB, Quotes: fixedQuotes{"NVDA": 150}, Push: e.pushService(sender), Logger: e.Deps.Logger}
+	sweep.Run(context.Background())
+	sweep.Run(context.Background())
 	if len(sender.sent) != 1 {
-		t.Fatalf("sent %d", len(sender.sent))
+		t.Fatalf("sent %d, want 1", len(sender.sent))
 	}
-	if n := e.count(t, `SELECT count(*) FROM targets WHERE user_id = $1 AND alert_triggered_at IS NULL AND alert_triggered_price IS NULL`, userID); n != 1 {
-		t.Fatal("target marked triggered")
+	if n := e.count(t, `SELECT count(*) FROM targets WHERE user_id = $1 AND alert_triggered_at IS NOT NULL AND alert_triggered_price = 150`, userID); n != 1 {
+		t.Fatal("target not marked before the send")
 	}
-	// The inbox event is recorded regardless, once.
 	if n := e.count(t, `SELECT count(*) FROM notification_events WHERE user_id = $1 AND kind = 'price_target'`, userID); n != 1 {
 		t.Fatalf("inbox events %d", n)
+	}
+}
+
+// The earnings delivery row is written only after a push was delivered, so
+// a failed send is retried on the next poll instead of counting as sent.
+func TestEarningsReminderRetriesAFailedSend(t *testing.T) {
+	e := newEnv(t)
+	holder, _ := e.user(true)
+	e.device(t, holder)
+	portfolio := uuid.New()
+	e.exec(`INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Main', true, now())`, portfolio, holder)
+	e.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id, category)
+		VALUES ($1, $2, 'AAPL', 1, 100, '2026-01-01', now(), $3, 'stock')`, uuid.New(), holder, portfolio)
+	now := time.Date(2026, 10, 29, 23, 30, 0, 0, time.UTC)
+	sender := &fakeSender{results: []push.Summary{{Delivered: 0, Failed: 1}}}
+	sweep := watchlist.EarningsReminders{
+		DB: e.Deps.DB, Calendar: &stubCalendar{byDate: map[string][]string{"2026-10-30": {"AAPL"}}},
+		Push: e.pushService(sender), Logger: e.Deps.Logger, Now: func() time.Time { return now },
+		Premium: premiumSet{holder: true},
+	}
+	sweep.Run(context.Background())
+	if n := e.count(t, `SELECT count(*) FROM earnings_notification_deliveries WHERE user_id = $1`, holder); n != 0 {
+		t.Fatalf("failed send recorded as delivered (%d rows)", n)
+	}
+	sweep.Run(context.Background())
+	sweep.Run(context.Background())
+	if len(sender.sent) != 2 {
+		t.Fatalf("sent %d, want the failure and one retry", len(sender.sent))
+	}
+	if n := e.count(t, `SELECT count(*) FROM earnings_notification_deliveries WHERE user_id = $1`, holder); n != 1 {
+		t.Fatalf("deliveries %d", n)
 	}
 }
 

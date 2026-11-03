@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -19,6 +20,9 @@ import (
 	"norviq-api/internal/store/billingdb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 )
 
@@ -201,7 +205,7 @@ func (h *handlers) revenueCatWebhook(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := processEvent(c.Request().Context(), h.svc, h.deps.Logger, event, rawPayload); err != nil {
+	if err := processEvent(c.Request().Context(), h.deps.DB, h.svc, h.deps.Logger, event, rawPayload); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusOK)
@@ -233,7 +237,37 @@ func fromMillis(ms *int64) *time.Time {
 }
 
 // processEvent is DefaultBillingService.process.
-func processEvent(ctx context.Context, svc *entitlements.Service, logger *slog.Logger, e *webhookEvent, rawPayload string) error {
+//
+// v2 runs the event insert and every entitlement write (tax packs included)
+// in one transaction. Vapor committed the event first, so a failed
+// entitlement write left an event row behind and the redelivery skipped it
+// as a duplicate: the entitlement update was lost. Now a failure rolls the
+// event back and the redelivery applies it. The decision to do nothing for
+// an unknown user or event type commits with the event row, as before.
+func processEvent(ctx context.Context, pool *pgxpool.Pool, svc *entitlements.Service, logger *slog.Logger, e *webhookEvent, rawPayload string) error {
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		return processEventTx(ctx, svc.WithDB(tx), logger, e, rawPayload)
+	})
+	if isDuplicateEvent(err) {
+		// A concurrent delivery of this event won the insert. Its
+		// transaction held the entitlement write too, so the work is done:
+		// applying it again could grant, revoke or move a subscription twice.
+		return nil
+	}
+	return err
+}
+
+// isDuplicateEvent reports the unique violation on provider_event_id that
+// the loser of two overlapping deliveries gets once the winner commits.
+func isDuplicateEvent(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == billingEventUniqueConstraint
+}
+
+const billingEventUniqueConstraint = "uq:billing_events.provider_event_id"
+
+// processEventTx is processEvent's body; svc is bound to the transaction.
+func processEventTx(ctx context.Context, svc *entitlements.Service, logger *slog.Logger, e *webhookEvent, rawPayload string) error {
 	q := svc.Queries()
 	exists, err := q.BillingEventExists(ctx, *e.ID)
 	if err != nil || exists {

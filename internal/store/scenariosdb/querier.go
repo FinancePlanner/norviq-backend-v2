@@ -22,12 +22,14 @@ type Querier interface {
 	ClaimScenarioRun(ctx context.Context, workerID string) (uuid.UUID, error)
 	// execute's success save: result, state, progress, completedAt and the
 	// cleared lease (Fluent sends every assigned field).
-	CompleteScenarioRun(ctx context.Context, arg CompleteScenarioRunParams) error
+	CompleteScenarioRun(ctx context.Context, arg CompleteScenarioRunParams) (int64, error)
+	// SetScenarioQueueDepth metric: queued + lease-expired running runs.
+	CountQueuedScenarioRuns(ctx context.Context) (int32, error)
 	CountScenarioRunsForDefinition(ctx context.Context, scenarioID uuid.UUID) (int32, error)
 	// ScenarioRetentionJob: expired terminal runs.
 	DeleteExpiredScenarioRuns(ctx context.Context, expiresAt *time.Time) error
 	DeleteScenarioDefinition(ctx context.Context, id uuid.UUID) error
-	FailScenarioRun(ctx context.Context, arg FailScenarioRunParams) error
+	FailScenarioRun(ctx context.Context, arg FailScenarioRunParams) (int64, error)
 	FindCompletedScenarioRunByHash(ctx context.Context, arg FindCompletedScenarioRunByHashParams) (ScenarioRun, error)
 	// FinancialGoalModel.owned(by:).filter(id).first(): the fields scenarios use.
 	GetOwnedFinancialGoal(ctx context.Context, arg GetOwnedFinancialGoalParams) (GetOwnedFinancialGoalRow, error)
@@ -59,7 +61,7 @@ type Querier interface {
 	ListUnsavedScenarioDefinitionIDs(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error)
 	// PortfolioList.query.filter(id).filter(userId).first() != nil
 	OwnedPortfolioListExists(ctx context.Context, arg OwnedPortfolioListExistsParams) (bool, error)
-	RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) error
+	RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) (int64, error)
 	SetScenarioRunProgress(ctx context.Context, arg SetScenarioRunProgressParams) error
 	// The cash of the snapshot's portfolio: its accounts' balances. Vapor read
 	// every account of the user (Account.query.filter(userId)), so each

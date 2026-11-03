@@ -573,6 +573,63 @@ func TestWorkerLeavesARunReclaimedByAnotherWorker(t *testing.T) {
 	}
 }
 
+// Renew, complete and fail are fenced on lease owner and state = 'running':
+// a user cancel (which keeps lease_owner) or a reclaim is never overwritten.
+func TestFencedRunWritesSkipCanceledAndReclaimedRuns(t *testing.T) {
+	e := newEnv(t, true)
+	ctx := context.Background()
+	q := scenariosdb.New(e.Deps.DB)
+	owner := e.proUser("fence@example.com")
+	list := e.portfolio(owner)
+	sc := e.scenario(owner, map[string]any{
+		"portfolioListId": list, "name": "MC", "kind": "monte_carlo",
+		"configuration": map[string]any{"values": map[string]any{"distribution": "normal"}},
+	})
+	snap := e.snapshot(owner, list, map[string]any{"total_value": 1000})
+	run := e.createRun(owner, sc["id"].(string), snap, 1, 202)
+	runID := uuid.MustParse(run.ID)
+	mine, theirs := "worker-a", "worker-b"
+	if id, err := q.ClaimScenarioRun(ctx, mine); err != nil || id != runID {
+		t.Fatalf("claim %v %v", id, err)
+	}
+	now := time.Now()
+	expires := now.Add(time.Minute)
+	affected := func(n int64, err error) int64 {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if n := affected(q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{ID: runID, LeaseOwner: &theirs, LeaseExpiresAt: &expires})); n != 0 {
+		t.Fatalf("renew by a non-owner touched %d rows", n)
+	}
+	if n := affected(q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{ID: runID, LeaseOwner: &mine, LeaseExpiresAt: &expires})); n != 1 {
+		t.Fatalf("renew by the owner touched %d rows", n)
+	}
+	if n := affected(q.CompleteScenarioRun(ctx, scenariosdb.CompleteScenarioRunParams{ID: runID, LeaseOwner: &theirs, Result: []byte(`{}`), CompletedAt: &now})); n != 0 {
+		t.Fatalf("complete by a non-owner touched %d rows", n)
+	}
+
+	// The user cancels between the worker's read and its write.
+	if r := e.Do("DELETE", "/v1/scenario-runs/"+run.ID, e.Token(owner), nil); r.Status != 204 {
+		t.Fatalf("cancel %d", r.Status)
+	}
+	if n := affected(q.CompleteScenarioRun(ctx, scenariosdb.CompleteScenarioRunParams{ID: runID, LeaseOwner: &mine, Result: []byte(`{}`), CompletedAt: &now})); n != 0 {
+		t.Fatalf("complete overwrote a cancel (%d rows)", n)
+	}
+	if n := affected(q.FailScenarioRun(ctx, scenariosdb.FailScenarioRunParams{ID: runID, LeaseOwner: &mine, ErrorMessage: new("boom"), CompletedAt: &now})); n != 0 {
+		t.Fatalf("fail overwrote a cancel (%d rows)", n)
+	}
+	if n := affected(q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{ID: runID, LeaseOwner: &mine, LeaseExpiresAt: &expires})); n != 0 {
+		t.Fatalf("renew revived a canceled run (%d rows)", n)
+	}
+	if got := e.getRun(owner, run.ID); got.State != stateCanceledValue || got.ErrorMessage != nil || string(got.Result) != "null" {
+		t.Fatalf("run %+v", got)
+	}
+}
+
 func TestRetentionJob(t *testing.T) {
 	e := newEnv(t, true)
 	owner := e.proUser("retention@example.com")

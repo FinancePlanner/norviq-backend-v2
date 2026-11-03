@@ -125,24 +125,47 @@ func (q *Queries) ClaimScenarioRun(ctx context.Context, workerID string) (uuid.U
 	return id, err
 }
 
-const completeScenarioRun = `-- name: CompleteScenarioRun :exec
+const completeScenarioRun = `-- name: CompleteScenarioRun :execrows
 UPDATE scenario_runs
-SET result = $2, state = 'completed', progress = 1, completed_at = $3,
+SET result = $3, state = 'completed', progress = 1, completed_at = $4,
     lease_owner = NULL, lease_expires_at = NULL
-WHERE id = $1
+WHERE id = $1 AND lease_owner = $2 AND state = 'running'
 `
 
 type CompleteScenarioRunParams struct {
 	ID          uuid.UUID
+	LeaseOwner  *string
 	Result      json.RawMessage
 	CompletedAt *time.Time
 }
 
 // execute's success save: result, state, progress, completedAt and the
 // cleared lease (Fluent sends every assigned field).
-func (q *Queries) CompleteScenarioRun(ctx context.Context, arg CompleteScenarioRunParams) error {
-	_, err := q.db.Exec(ctx, completeScenarioRun, arg.ID, arg.Result, arg.CompletedAt)
-	return err
+func (q *Queries) CompleteScenarioRun(ctx context.Context, arg CompleteScenarioRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeScenarioRun,
+		arg.ID,
+		arg.LeaseOwner,
+		arg.Result,
+		arg.CompletedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countQueuedScenarioRuns = `-- name: CountQueuedScenarioRuns :one
+SELECT COUNT(*)::int FROM scenario_runs
+WHERE state = 'queued'
+   OR (state = 'running' AND lease_expires_at < NOW())
+`
+
+// SetScenarioQueueDepth metric: queued + lease-expired running runs.
+func (q *Queries) CountQueuedScenarioRuns(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countQueuedScenarioRuns)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countScenarioRunsForDefinition = `-- name: CountScenarioRunsForDefinition :one
@@ -176,22 +199,31 @@ func (q *Queries) DeleteScenarioDefinition(ctx context.Context, id uuid.UUID) er
 	return err
 }
 
-const failScenarioRun = `-- name: FailScenarioRun :exec
+const failScenarioRun = `-- name: FailScenarioRun :execrows
 UPDATE scenario_runs
-SET state = 'failed', error_message = $2, completed_at = $3,
+SET state = 'failed', error_message = $3, completed_at = $4,
     lease_owner = NULL, lease_expires_at = NULL
-WHERE id = $1
+WHERE id = $1 AND lease_owner = $2 AND state = 'running'
 `
 
 type FailScenarioRunParams struct {
 	ID           uuid.UUID
+	LeaseOwner   *string
 	ErrorMessage *string
 	CompletedAt  *time.Time
 }
 
-func (q *Queries) FailScenarioRun(ctx context.Context, arg FailScenarioRunParams) error {
-	_, err := q.db.Exec(ctx, failScenarioRun, arg.ID, arg.ErrorMessage, arg.CompletedAt)
-	return err
+func (q *Queries) FailScenarioRun(ctx context.Context, arg FailScenarioRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failScenarioRun,
+		arg.ID,
+		arg.LeaseOwner,
+		arg.ErrorMessage,
+		arg.CompletedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const findCompletedScenarioRunByHash = `-- name: FindCompletedScenarioRunByHash :one
@@ -664,18 +696,24 @@ func (q *Queries) ListUnsavedScenarioDefinitionIDs(ctx context.Context, cutoff t
 	return items, nil
 }
 
-const renewScenarioRunLease = `-- name: RenewScenarioRunLease :exec
-UPDATE scenario_runs SET lease_expires_at = $2 WHERE id = $1
+const renewScenarioRunLease = `-- name: RenewScenarioRunLease :execrows
+UPDATE scenario_runs
+SET lease_expires_at = $3
+WHERE id = $1 AND lease_owner = $2 AND state = 'running'
 `
 
 type RenewScenarioRunLeaseParams struct {
 	ID             uuid.UUID
+	LeaseOwner     *string
 	LeaseExpiresAt *time.Time
 }
 
-func (q *Queries) RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) error {
-	_, err := q.db.Exec(ctx, renewScenarioRunLease, arg.ID, arg.LeaseExpiresAt)
-	return err
+func (q *Queries) RenewScenarioRunLease(ctx context.Context, arg RenewScenarioRunLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewScenarioRunLease, arg.ID, arg.LeaseOwner, arg.LeaseExpiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setScenarioRunProgress = `-- name: SetScenarioRunProgress :exec

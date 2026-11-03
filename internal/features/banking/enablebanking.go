@@ -192,11 +192,18 @@ func (c *enableBankingClient) deleteSession(ctx context.Context, id string) erro
 	return err
 }
 
+// errRepeatedContinuationKey ends a transactions fetch whose provider sent
+// a continuation key it had already sent in this fetch: that is not a next
+// page, whether it repeats at once or after a cycle (A, B, A).
+var errRepeatedContinuationKey = errors.New("enable banking: provider repeated the continuation key")
+
 // transactions fetches every page: only a null (or empty) continuation key
-// ends the loop, since an empty page may still carry one.
+// ends the loop, since an empty page may still carry one. A repeated key is
+// treated as an error rather than progress to avoid an unbounded allocation.
 func (c *enableBankingClient) transactions(ctx context.Context, accountUID string, dateFrom *string) ([]ebTransaction, error) {
 	all := []ebTransaction{}
 	var continuation *string
+	seen := map[string]struct{}{}
 	for {
 		q := []string{}
 		if dateFrom != nil {
@@ -214,13 +221,19 @@ func (c *enableBankingClient) transactions(ctx context.Context, accountUID strin
 			return nil, err
 		}
 		all = append(all, page.Transactions...)
-		continuation = nil
+		var next *string
 		if page.ContinuationKey != nil && *page.ContinuationKey != "" {
-			continuation = page.ContinuationKey
+			next = page.ContinuationKey
 		}
-		if continuation == nil {
+		if next == nil {
 			return all, nil
 		}
+		// A key already followed is not a next page.
+		if _, dup := seen[*next]; dup {
+			return nil, errRepeatedContinuationKey
+		}
+		seen[*next] = struct{}{}
+		continuation = next
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -358,6 +359,39 @@ func TestEnableBankingPaginationFollowsContinuationKey(t *testing.T) {
 	}
 	if got := calls[0].Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ey") {
 		t.Fatalf("auth header %q", got)
+	}
+}
+
+// A continuation key that does not change is not a next page: the loop
+// fails instead of growing the slice until shutdown.
+func TestEnableBankingRepeatedContinuationKeyFails(t *testing.T) {
+	tb := newTestBank(t, nil)
+	k := "same"
+	tb.stub.on("GET /accounts/uid-1/transactions",
+		ok(ebPage(&k, ebTx{ref: "r1"}.json())), ok(ebPage(&k, ebTx{ref: "r2"}.json())), ok(ebPage(nil)))
+	txs, err := tb.eb(t).client.transactions(context.Background(), "uid-1", nil)
+	if !errors.Is(err, errRepeatedContinuationKey) || txs != nil {
+		t.Fatalf("txs=%v err=%v", txs, err)
+	}
+	if calls := tb.stub.requests("GET /accounts/uid-1/transactions"); len(calls) != 2 {
+		t.Fatalf("%d calls", len(calls))
+	}
+}
+
+// A key cycle (A, B, A) is no progress either, even though no key repeats
+// back to back.
+func TestEnableBankingContinuationKeyCycleFails(t *testing.T) {
+	tb := newTestBank(t, nil)
+	a, b := "a", "b"
+	tb.stub.on("GET /accounts/uid-1/transactions",
+		ok(ebPage(&a, ebTx{ref: "r1"}.json())), ok(ebPage(&b, ebTx{ref: "r2"}.json())),
+		ok(ebPage(&a, ebTx{ref: "r3"}.json())), ok(ebPage(nil)))
+	txs, err := tb.eb(t).client.transactions(context.Background(), "uid-1", nil)
+	if !errors.Is(err, errRepeatedContinuationKey) || txs != nil {
+		t.Fatalf("txs=%v err=%v", txs, err)
+	}
+	if calls := tb.stub.requests("GET /accounts/uid-1/transactions"); len(calls) != 3 {
+		t.Fatalf("%d calls", len(calls))
 	}
 }
 

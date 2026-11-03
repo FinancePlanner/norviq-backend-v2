@@ -3,6 +3,8 @@ package middleware
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -107,34 +109,77 @@ func (l *Limiter) Idempotency(keyPrefix string) echo.MiddlewareFunc {
 			}
 			ctx := c.Request().Context()
 			key := keyPrefix + ":" + auth.SHA256Hex(authorization)[:32] + ":" + idemKey
-			if cached, err := l.Redis.Get(ctx, key).Result(); err == nil {
+			cached, err := l.Redis.Get(ctx, key).Result()
+			switch {
+			case err == nil:
 				if status, headers, body, ok := parseCached(cached); ok {
+					// Set, and only the handler's own headers: the global
+					// middleware (CORS, security headers, gzip, request id)
+					// sets the rest on this response already. Replaying a
+					// recorded Content-Encoding would label a plain body gzip
+					// for a client that never asked for it.
 					h := c.Response().Header()
 					for _, kv := range headers {
-						h.Add(kv[0], kv[1])
+						if replayHeader(kv[0]) {
+							h.Set(kv[0], kv[1])
+						}
 					}
 					c.Response().WriteHeader(status)
 					_, _ = c.Response().Write([]byte(body))
 					return nil
 				}
+			case errors.Is(err, redis.Nil):
+			default:
+				// The handler has not run, so a 503 cannot hide a committed
+				// write. Running it without the replay check could commit a
+				// retried write twice.
+				if l.Production {
+					l.Logger.Error("idempotency unavailable", "prefix", keyPrefix, "error", err)
+					return httpx.Abort(http.StatusServiceUnavailable, "Idempotency is unavailable.")
+				}
+				return next(c)
 			}
 
 			rec := &recorder{ResponseWriter: c.Response()}
 			c.SetResponse(rec)
-			err := next(c)
+			err = next(c)
 			c.SetResponse(rec.ResponseWriter)
 			if err == nil && rec.status >= 200 && rec.status <= 399 {
 				var pairs [][2]string
 				for name, values := range rec.Header() {
+					if !replayHeader(name) {
+						continue
+					}
 					for _, v := range values {
 						pairs = append(pairs, [2]string{name, v})
 					}
 				}
-				_ = l.Redis.Set(ctx, key, encodeCached(rec.status, pairs, rec.body.String()), ttl).Err()
+				// The handler committed: store even if the client has gone,
+				// or its retry would run the write again.
+				storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), storeTimeout)
+				if err := l.Redis.Set(storeCtx, key, encodeCached(rec.status, pairs, rec.body.String()), ttl).Err(); err != nil {
+					l.Logger.Warn("idempotency store failed", "prefix", keyPrefix, "error", err)
+				}
+				cancel()
 			}
 			return err
 		}
 	}
+}
+
+// storeTimeout bounds the cache write after the handler has committed.
+const storeTimeout = 2 * time.Second
+
+// replayHeader reports whether a recorded response header belongs to the
+// handler, and so is stored and replayed. Everything else on the response is
+// set per request by the global middleware.
+func replayHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case echo.HeaderContentType, echo.HeaderContentDisposition, echo.HeaderLocation,
+		"Cache-Control", "Etag", echo.HeaderLastModified:
+		return true
+	}
+	return false
 }
 
 // recorder tees the response body so it can be cached.

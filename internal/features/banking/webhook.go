@@ -196,7 +196,14 @@ func (h *handlers) plaidWebhook(c *echo.Context) error {
 		if err != nil {
 			return err
 		}
-		_, _ = p.Sync(ctx, Call{}, &conn)
+		if _, err := p.Sync(ctx, Call{}, &conn); err != nil {
+			h.b.logger.Error("plaid.webhook.sync_failed",
+				"connection_id", conn.ID.String(),
+				"webhook_code", *payload.WebhookCode,
+				"item_id", *payload.ItemID,
+				"error", err.Error(),
+			)
+		}
 	case "PENDING_EXPIRATION", "ERROR", "USER_PERMISSION_REVOKED":
 		reauth := "reauth_required"
 		if err := h.b.q.UpdateConnectionStatusError(ctx, bankingdb.UpdateConnectionStatusErrorParams{

@@ -72,24 +72,36 @@ func (s *service) mfaVerify(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if ch.FailedAttempts >= int64(s.cfg.MFA.MaxVerifyAttempts) {
+	maxAttempts := int64(s.cfg.MFA.MaxVerifyAttempts)
+	if ch.FailedAttempts >= maxAttempts {
 		return unauthorized("Too many invalid verification attempts.")
+	}
+	// Claim the attempt before comparing, so concurrent guesses cannot share
+	// one read of the counter. The claim also returns the code current now,
+	// in case a resend swapped it since the read above.
+	ch, err = q.ClaimMFAAttempt(ctx, identitydb.ClaimMFAAttemptParams{ID: ch.ID, Now: &now, MaxAttempts: maxAttempts})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unauthorized("Too many invalid verification attempts.")
+	}
+	if err != nil {
+		return err
 	}
 	bypass := s.testFlightApplies(ch.Destination) && code == testFlightMagicCode
 	if !bypass && ch.CodeHash != users.HashToken(code) {
-		ch.FailedAttempts++
-		if ch.FailedAttempts >= int64(s.cfg.MFA.MaxVerifyAttempts) {
-			ch.ConsumedAt = &now
-		}
-		if err := s.saveChallenge(ctx, q, ch, now); err != nil {
-			return err
+		if ch.FailedAttempts >= maxAttempts {
+			if _, err := q.ConsumeMFAChallenge(ctx, identitydb.ConsumeMFAChallengeParams{ID: ch.ID, ConsumedAt: &now}); err != nil {
+				return err
+			}
 		}
 		s.log.Warn("auth.mfa verify_failed", "challenge_id", apijson.FormatUUID(ch.ID), "attempts", ch.FailedAttempts)
 		return unauthorized("Invalid verification code.")
 	}
-	ch.ConsumedAt = &now
-	if err := s.saveChallenge(ctx, q, ch, now); err != nil {
+	n, err := q.ConsumeMFAChallenge(ctx, identitydb.ConsumeMFAChallengeParams{ID: ch.ID, ConsumedAt: &now})
+	if err != nil {
 		return err
+	}
+	if n == 0 { // a concurrent request consumed it first
+		return unauthorized("Verification challenge is no longer valid.")
 	}
 	s.log.Info("auth.mfa verify_succeeded", "challenge_id", apijson.FormatUUID(ch.ID))
 	u, err := s.requireUser(ctx, ch.UserID, "User not found.")
@@ -121,16 +133,19 @@ func (s *service) mfaResend(c *echo.Context) error {
 	if ch.ResendCount >= int64(s.cfg.MFA.MaxResends) {
 		return httpx.Abort(http.StatusTooManyRequests, "Maximum resend attempts reached.")
 	}
-	if now.Before(ch.LastSentAt.Add(time.Duration(s.cfg.MFA.ResendCooldownSeconds) * time.Second)) {
+	cooldown := time.Duration(s.cfg.MFA.ResendCooldownSeconds) * time.Second
+	if now.Before(ch.LastSentAt.Add(cooldown)) {
 		return httpx.Abort(http.StatusTooManyRequests, "Please wait before requesting another verification code.")
 	}
 	code := sixDigitCode()
-	ch.CodeHash = users.HashToken(code)
-	ch.ExpiresAt = now.Add(time.Duration(s.cfg.MFA.CodeTTLSeconds) * time.Second)
-	ch.ResendCount++
-	ch.LastSentAt = now
-	ch.FailedAttempts = 0
-	if err := s.saveChallenge(ctx, q, ch, now); err != nil {
+	ch, err = q.ResendMFAChallenge(ctx, identitydb.ResendMFAChallengeParams{
+		ID: ch.ID, CodeHash: users.HashToken(code), ExpiresAt: now.Add(time.Duration(s.cfg.MFA.CodeTTLSeconds) * time.Second),
+		Now: now, MaxResends: int64(s.cfg.MFA.MaxResends), SentBefore: now.Add(-cooldown),
+	})
+	if errors.Is(err, pgx.ErrNoRows) { // a concurrent resend or verify won
+		return httpx.Abort(http.StatusTooManyRequests, "Please wait before requesting another verification code.")
+	}
+	if err != nil {
 		return err
 	}
 	s.log.Info("auth.mfa resent", "challenge_id", apijson.FormatUUID(ch.ID), "resend_count", ch.ResendCount)
@@ -155,13 +170,6 @@ func (s *service) activeChallenge(ctx context.Context, q *identitydb.Queries, id
 		return ch, unauthorized("Verification challenge expired.")
 	}
 	return ch, nil
-}
-
-func (s *service) saveChallenge(ctx context.Context, q *identitydb.Queries, ch identitydb.MfaChallenge, now time.Time) error {
-	return q.SaveMFAChallenge(ctx, identitydb.SaveMFAChallengeParams{
-		ID: ch.ID, CodeHash: ch.CodeHash, ExpiresAt: ch.ExpiresAt, ConsumedAt: ch.ConsumedAt,
-		FailedAttempts: ch.FailedAttempts, ResendCount: ch.ResendCount, LastSentAt: ch.LastSentAt, UpdatedAt: &now,
-	})
 }
 
 // issueMFAChallenge ends any open challenge for the purpose and mails a new code.

@@ -26,8 +26,22 @@ LIMIT 1;
 -- name: CountRecentPasswordResetTokens :one
 SELECT count(*) FROM password_reset_tokens WHERE user_id = $1 AND created_at >= $2;
 
--- name: SavePasswordResetToken :exec
-UPDATE password_reset_tokens SET failed_attempts = $2, locked_until = $3, used_at = $4 WHERE id = $1;
+-- Attempt counters are only ever changed relatively and under a predicate,
+-- never written back from a value read earlier: concurrent guesses would
+-- otherwise lose increments and get more than the capped number of tries.
+
+-- name: ClaimPasswordResetAttempt :one
+-- Takes one attempt on an unused code before its hash is compared. No row
+-- means the code is used up.
+UPDATE password_reset_tokens SET failed_attempts = failed_attempts + 1
+WHERE id = sqlc.arg(id) AND used_at IS NULL AND failed_attempts < sqlc.arg(max_attempts)
+RETURNING failed_attempts;
+
+-- name: LockPasswordResetToken :exec
+UPDATE password_reset_tokens SET used_at = $2, locked_until = $3 WHERE id = $1 AND used_at IS NULL;
+
+-- name: ConsumePasswordResetToken :execrows
+UPDATE password_reset_tokens SET used_at = $2 WHERE id = $1 AND used_at IS NULL;
 
 -- name: InsertMFAChallenge :exec
 INSERT INTO mfa_challenges (
@@ -42,11 +56,26 @@ SELECT * FROM mfa_challenges WHERE id = $1;
 UPDATE mfa_challenges SET consumed_at = $3, updated_at = $3
 WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL;
 
--- name: SaveMFAChallenge :exec
+-- name: ClaimMFAAttempt :one
+-- Takes one attempt on a live challenge and returns the code hash current at
+-- that moment. No row means the challenge is spent, expired or out of tries.
+UPDATE mfa_challenges SET failed_attempts = failed_attempts + 1, updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id) AND consumed_at IS NULL AND expires_at > sqlc.arg(now)
+  AND failed_attempts < sqlc.arg(max_attempts)
+RETURNING *;
+
+-- name: ConsumeMFAChallenge :execrows
+UPDATE mfa_challenges SET consumed_at = $2, updated_at = $2 WHERE id = $1 AND consumed_at IS NULL;
+
+-- name: ResendMFAChallenge :one
+-- Swaps in a new code. The attempt count carries over, so resending never
+-- buys more guesses; the resend cap and cooldown hold under concurrency.
 UPDATE mfa_challenges SET
-    code_hash = $2, expires_at = $3, consumed_at = $4, failed_attempts = $5,
-    resend_count = $6, last_sent_at = $7, updated_at = $8
-WHERE id = $1;
+    code_hash = sqlc.arg(code_hash), expires_at = sqlc.arg(expires_at),
+    resend_count = resend_count + 1, last_sent_at = sqlc.arg(now), updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id) AND consumed_at IS NULL
+  AND resend_count < sqlc.arg(max_resends) AND last_sent_at <= sqlc.arg(sent_before)
+RETURNING *;
 
 -- name: InsertOAuthFlow :exec
 INSERT INTO oauth_flows (id, provider, state, nonce, code_verifier, redirect_uri, expires_at, used_at, created_at, purpose, user_id)

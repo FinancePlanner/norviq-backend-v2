@@ -12,6 +12,66 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimMFAAttempt = `-- name: ClaimMFAAttempt :one
+UPDATE mfa_challenges SET failed_attempts = failed_attempts + 1, updated_at = $1
+WHERE id = $2 AND consumed_at IS NULL AND expires_at > $1
+  AND failed_attempts < $3
+RETURNING id, user_id, purpose, channel, destination, code_hash, expires_at, consumed_at, failed_attempts, resend_count, last_sent_at, created_at, updated_at
+`
+
+type ClaimMFAAttemptParams struct {
+	Now         *time.Time
+	ID          uuid.UUID
+	MaxAttempts int64
+}
+
+// Takes one attempt on a live challenge and returns the code hash current at
+// that moment. No row means the challenge is spent, expired or out of tries.
+func (q *Queries) ClaimMFAAttempt(ctx context.Context, arg ClaimMFAAttemptParams) (MfaChallenge, error) {
+	row := q.db.QueryRow(ctx, claimMFAAttempt, arg.Now, arg.ID, arg.MaxAttempts)
+	var i MfaChallenge
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Channel,
+		&i.Destination,
+		&i.CodeHash,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.FailedAttempts,
+		&i.ResendCount,
+		&i.LastSentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const claimPasswordResetAttempt = `-- name: ClaimPasswordResetAttempt :one
+
+UPDATE password_reset_tokens SET failed_attempts = failed_attempts + 1
+WHERE id = $1 AND used_at IS NULL AND failed_attempts < $2
+RETURNING failed_attempts
+`
+
+type ClaimPasswordResetAttemptParams struct {
+	ID          uuid.UUID
+	MaxAttempts int64
+}
+
+// Attempt counters are only ever changed relatively and under a predicate,
+// never written back from a value read earlier: concurrent guesses would
+// otherwise lose increments and get more than the capped number of tries.
+// Takes one attempt on an unused code before its hash is compared. No row
+// means the code is used up.
+func (q *Queries) ClaimPasswordResetAttempt(ctx context.Context, arg ClaimPasswordResetAttemptParams) (int64, error) {
+	row := q.db.QueryRow(ctx, claimPasswordResetAttempt, arg.ID, arg.MaxAttempts)
+	var failed_attempts int64
+	err := row.Scan(&failed_attempts)
+	return failed_attempts, err
+}
+
 const consumeActiveMFAChallenges = `-- name: ConsumeActiveMFAChallenges :exec
 UPDATE mfa_challenges SET consumed_at = $3, updated_at = $3
 WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL
@@ -26,6 +86,40 @@ type ConsumeActiveMFAChallengesParams struct {
 func (q *Queries) ConsumeActiveMFAChallenges(ctx context.Context, arg ConsumeActiveMFAChallengesParams) error {
 	_, err := q.db.Exec(ctx, consumeActiveMFAChallenges, arg.UserID, arg.Purpose, arg.ConsumedAt)
 	return err
+}
+
+const consumeMFAChallenge = `-- name: ConsumeMFAChallenge :execrows
+UPDATE mfa_challenges SET consumed_at = $2, updated_at = $2 WHERE id = $1 AND consumed_at IS NULL
+`
+
+type ConsumeMFAChallengeParams struct {
+	ID         uuid.UUID
+	ConsumedAt *time.Time
+}
+
+func (q *Queries) ConsumeMFAChallenge(ctx context.Context, arg ConsumeMFAChallengeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeMFAChallenge, arg.ID, arg.ConsumedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const consumePasswordResetToken = `-- name: ConsumePasswordResetToken :execrows
+UPDATE password_reset_tokens SET used_at = $2 WHERE id = $1 AND used_at IS NULL
+`
+
+type ConsumePasswordResetTokenParams struct {
+	ID     uuid.UUID
+	UsedAt *time.Time
+}
+
+func (q *Queries) ConsumePasswordResetToken(ctx context.Context, arg ConsumePasswordResetTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumePasswordResetToken, arg.ID, arg.UsedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countRecentPasswordResetTokens = `-- name: CountRecentPasswordResetTokens :one
@@ -279,6 +373,21 @@ func (q *Queries) LatestActivePasswordResetToken(ctx context.Context, arg Latest
 	return i, err
 }
 
+const lockPasswordResetToken = `-- name: LockPasswordResetToken :exec
+UPDATE password_reset_tokens SET used_at = $2, locked_until = $3 WHERE id = $1 AND used_at IS NULL
+`
+
+type LockPasswordResetTokenParams struct {
+	ID          uuid.UUID
+	UsedAt      *time.Time
+	LockedUntil *time.Time
+}
+
+func (q *Queries) LockPasswordResetToken(ctx context.Context, arg LockPasswordResetTokenParams) error {
+	_, err := q.db.Exec(ctx, lockPasswordResetToken, arg.ID, arg.UsedAt, arg.LockedUntil)
+	return err
+}
+
 const mFAChallengeByID = `-- name: MFAChallengeByID :one
 SELECT id, user_id, purpose, channel, destination, code_hash, expires_at, consumed_at, failed_attempts, resend_count, last_sent_at, created_at, updated_at FROM mfa_challenges WHERE id = $1
 `
@@ -401,6 +510,54 @@ func (q *Queries) OAuthIdentityByUserProvider(ctx context.Context, arg OAuthIden
 	return i, err
 }
 
+const resendMFAChallenge = `-- name: ResendMFAChallenge :one
+UPDATE mfa_challenges SET
+    code_hash = $1, expires_at = $2,
+    resend_count = resend_count + 1, last_sent_at = $3, updated_at = $3
+WHERE id = $4 AND consumed_at IS NULL
+  AND resend_count < $5 AND last_sent_at <= $6
+RETURNING id, user_id, purpose, channel, destination, code_hash, expires_at, consumed_at, failed_attempts, resend_count, last_sent_at, created_at, updated_at
+`
+
+type ResendMFAChallengeParams struct {
+	CodeHash   string
+	ExpiresAt  time.Time
+	Now        time.Time
+	ID         uuid.UUID
+	MaxResends int64
+	SentBefore time.Time
+}
+
+// Swaps in a new code. The attempt count carries over, so resending never
+// buys more guesses; the resend cap and cooldown hold under concurrency.
+func (q *Queries) ResendMFAChallenge(ctx context.Context, arg ResendMFAChallengeParams) (MfaChallenge, error) {
+	row := q.db.QueryRow(ctx, resendMFAChallenge,
+		arg.CodeHash,
+		arg.ExpiresAt,
+		arg.Now,
+		arg.ID,
+		arg.MaxResends,
+		arg.SentBefore,
+	)
+	var i MfaChallenge
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Channel,
+		&i.Destination,
+		&i.CodeHash,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.FailedAttempts,
+		&i.ResendCount,
+		&i.LastSentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
 UPDATE refresh_tokens SET revoked_at = $2 WHERE id = $1
 `
@@ -412,59 +569,6 @@ type RevokeRefreshTokenParams struct {
 
 func (q *Queries) RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error {
 	_, err := q.db.Exec(ctx, revokeRefreshToken, arg.ID, arg.RevokedAt)
-	return err
-}
-
-const saveMFAChallenge = `-- name: SaveMFAChallenge :exec
-UPDATE mfa_challenges SET
-    code_hash = $2, expires_at = $3, consumed_at = $4, failed_attempts = $5,
-    resend_count = $6, last_sent_at = $7, updated_at = $8
-WHERE id = $1
-`
-
-type SaveMFAChallengeParams struct {
-	ID             uuid.UUID
-	CodeHash       string
-	ExpiresAt      time.Time
-	ConsumedAt     *time.Time
-	FailedAttempts int64
-	ResendCount    int64
-	LastSentAt     time.Time
-	UpdatedAt      *time.Time
-}
-
-func (q *Queries) SaveMFAChallenge(ctx context.Context, arg SaveMFAChallengeParams) error {
-	_, err := q.db.Exec(ctx, saveMFAChallenge,
-		arg.ID,
-		arg.CodeHash,
-		arg.ExpiresAt,
-		arg.ConsumedAt,
-		arg.FailedAttempts,
-		arg.ResendCount,
-		arg.LastSentAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const savePasswordResetToken = `-- name: SavePasswordResetToken :exec
-UPDATE password_reset_tokens SET failed_attempts = $2, locked_until = $3, used_at = $4 WHERE id = $1
-`
-
-type SavePasswordResetTokenParams struct {
-	ID             uuid.UUID
-	FailedAttempts int64
-	LockedUntil    *time.Time
-	UsedAt         *time.Time
-}
-
-func (q *Queries) SavePasswordResetToken(ctx context.Context, arg SavePasswordResetTokenParams) error {
-	_, err := q.db.Exec(ctx, savePasswordResetToken,
-		arg.ID,
-		arg.FailedAttempts,
-		arg.LockedUntil,
-		arg.UsedAt,
-	)
 	return err
 }
 

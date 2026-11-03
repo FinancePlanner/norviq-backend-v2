@@ -12,6 +12,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/config"
 	"norviq-api/internal/platform/achievementhooks"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/scenariosdb"
 
@@ -129,9 +130,14 @@ func NewRunWorker(d *server.Deps, s WorkerSettings) *RunWorker {
 }
 
 // RunOnce is ScenarioRunWorker.runOnce: claim up to maxConcurrent runs,
-// execute them concurrently, wait for all. (Vapor also counted the queue
-// for a Prometheus gauge; v2 has no metrics registry.)
+// execute them concurrently, wait for all. Queue depth is published to
+// Prometheus before claiming so a stuck queue is visible.
 func (w *RunWorker) RunOnce(ctx context.Context) {
+	if metrics.Enabled() {
+		if depth, err := w.q.CountQueuedScenarioRuns(ctx); err == nil {
+			metrics.Shared.SetScenarioQueueDepth(int(depth))
+		}
+	}
 	var wg sync.WaitGroup
 	for range w.maxConcurrent {
 		id, err := w.q.ClaimScenarioRun(ctx, w.workerID)
@@ -169,7 +175,9 @@ func (w *RunWorker) execute(ctx context.Context, id uuid.UUID) {
 		return
 	}
 	now := w.now()
-	_ = w.q.FailScenarioRun(ctx, scenariosdb.FailScenarioRunParams{ID: id, ErrorMessage: ptr(Describe(err)), CompletedAt: &now})
+	// Fenced on owner and state: a cancel or a reclaim that lands after the
+	// check above is not overwritten.
+	_, _ = w.q.FailScenarioRun(ctx, scenariosdb.FailScenarioRunParams{ID: id, LeaseOwner: &w.workerID, ErrorMessage: ptr(Describe(err)), CompletedAt: &now})
 	w.logger.Error("scenario_run failed", "id", apijson.FormatUUID(id), "error", Describe(err))
 }
 
@@ -249,8 +257,16 @@ func (w *RunWorker) process(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	now := w.now()
-	if err := w.q.CompleteScenarioRun(ctx, scenariosdb.CompleteScenarioRunParams{ID: id, Result: encoded, CompletedAt: &now}); err != nil {
+	completed, err := w.q.CompleteScenarioRun(ctx, scenariosdb.CompleteScenarioRunParams{
+		ID: id, LeaseOwner: &w.workerID, Result: encoded, CompletedAt: &now,
+	})
+	if err != nil {
 		return err
+	}
+	if completed == 0 {
+		// Canceled or reclaimed since the read above: the run is not ours
+		// to complete, award or cache.
+		return nil
 	}
 	achievementhooks.Schedule(run.UserID)
 	w.cache(ctx, encoded, id)
@@ -259,7 +275,10 @@ func (w *RunWorker) process(ctx context.Context, id uuid.UUID) error {
 
 // renewLease is the heartbeat task: every 20s it extends the lease by 60s,
 // or cancels the simulation once the run is no longer running under this
-// worker (canceled by the user, or reclaimed after an expired lease).
+// worker (canceled by the user, or reclaimed after an expired lease). The
+// renew is fenced on owner and state, so zero rows is that signal. An error
+// also cancels: without a confirmed lease another worker may claim the run,
+// and aborting on a database blip beats two workers writing one run.
 func (w *RunWorker) renewLease(ctx context.Context, id uuid.UUID, cancelSimulation context.CancelFunc, stop <-chan struct{}) {
 	t := time.NewTimer(w.heartbeat)
 	defer t.Stop()
@@ -271,15 +290,13 @@ func (w *RunWorker) renewLease(ctx context.Context, id uuid.UUID, cancelSimulati
 			return
 		case <-t.C:
 		}
-		run, err := w.q.GetScenarioRunByID(ctx, id)
-		if err != nil {
-			return
-		}
-		if run.State != "running" || run.LeaseOwner == nil || *run.LeaseOwner != w.workerID {
+		renewed, err := w.q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{
+			ID: id, LeaseOwner: &w.workerID, LeaseExpiresAt: ptr(w.now().Add(60 * time.Second)),
+		})
+		if err != nil || renewed == 0 {
 			cancelSimulation()
 			return
 		}
-		_ = w.q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{ID: id, LeaseExpiresAt: ptr(w.now().Add(60 * time.Second))})
 		t.Reset(w.heartbeat)
 	}
 }

@@ -72,6 +72,12 @@ INSERT INTO scenario_runs (id, user_id, scenario_id, snapshot_id, state, progres
                            engine_version, catalog_version, created_at, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
 
+-- name: CountQueuedScenarioRuns :one
+-- SetScenarioQueueDepth metric: queued + lease-expired running runs.
+SELECT COUNT(*)::int FROM scenario_runs
+WHERE state = 'queued'
+   OR (state = 'running' AND lease_expires_at < NOW());
+
 -- name: CancelScenarioRun :exec
 -- cancelRun's save: only the changed fields.
 UPDATE scenario_runs SET state = 'cancelled', completed_at = $2 WHERE id = $1;
@@ -96,22 +102,24 @@ RETURNING run.id;
 -- name: SetScenarioRunProgress :exec
 UPDATE scenario_runs SET progress = $2 WHERE id = $1;
 
--- name: RenewScenarioRunLease :exec
-UPDATE scenario_runs SET lease_expires_at = $2 WHERE id = $1;
+-- name: RenewScenarioRunLease :execrows
+UPDATE scenario_runs
+SET lease_expires_at = $3
+WHERE id = $1 AND lease_owner = $2 AND state = 'running';
 
--- name: CompleteScenarioRun :exec
+-- name: CompleteScenarioRun :execrows
 -- execute's success save: result, state, progress, completedAt and the
 -- cleared lease (Fluent sends every assigned field).
 UPDATE scenario_runs
-SET result = $2, state = 'completed', progress = 1, completed_at = $3,
+SET result = $3, state = 'completed', progress = 1, completed_at = $4,
     lease_owner = NULL, lease_expires_at = NULL
-WHERE id = $1;
+WHERE id = $1 AND lease_owner = $2 AND state = 'running';
 
--- name: FailScenarioRun :exec
+-- name: FailScenarioRun :execrows
 UPDATE scenario_runs
-SET state = 'failed', error_message = $2, completed_at = $3,
+SET state = 'failed', error_message = $3, completed_at = $4,
     lease_owner = NULL, lease_expires_at = NULL
-WHERE id = $1;
+WHERE id = $1 AND lease_owner = $2 AND state = 'running';
 
 -- name: DeleteExpiredScenarioRuns :exec
 -- ScenarioRetentionJob: expired terminal runs.

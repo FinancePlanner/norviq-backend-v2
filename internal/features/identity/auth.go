@@ -556,6 +556,11 @@ func (s *service) issueResetCode(c *echo.Context) error {
 	return httpx.OK(c, generic)
 }
 
+// maxResetAttempts is how many times one reset code may be checked in total.
+const maxResetAttempts = 5
+
+var errResetCodeSpent = errors.New("reset code already used")
+
 type resetPasswordRequest struct {
 	Email       *string `json:"email"`
 	Code        *string `json:"code"`
@@ -598,16 +603,23 @@ func (s *service) resetPassword(c *echo.Context) error {
 	if tok.LockedUntil != nil && tok.LockedUntil.After(now) {
 		return httpx.Abort(http.StatusTooManyRequests, "Too many reset attempts. Please request a new code later.")
 	}
+	// Claim the attempt before comparing, so concurrent guesses cannot share
+	// one read of the counter and exceed the cap.
+	attempts, err := q.ClaimPasswordResetAttempt(ctx, identitydb.ClaimPasswordResetAttemptParams{ID: tok.ID, MaxAttempts: maxResetAttempts})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unauthorized(invalid)
+	}
+	if err != nil {
+		return err
+	}
 	if tok.CodeHash != users.HashToken(*p.Code) {
-		tok.FailedAttempts++
-		if tok.FailedAttempts >= 5 {
+		if attempts >= maxResetAttempts {
 			locked := now.Add(15 * time.Minute)
-			tok.LockedUntil, tok.UsedAt = &locked, &now
-		}
-		if err := q.SavePasswordResetToken(ctx, identitydb.SavePasswordResetTokenParams{
-			ID: tok.ID, FailedAttempts: tok.FailedAttempts, LockedUntil: tok.LockedUntil, UsedAt: tok.UsedAt,
-		}); err != nil {
-			return err
+			if err := q.LockPasswordResetToken(ctx, identitydb.LockPasswordResetTokenParams{
+				ID: tok.ID, UsedAt: &now, LockedUntil: &locked,
+			}); err != nil {
+				return err
+			}
 		}
 		return unauthorized(invalid)
 	}
@@ -628,13 +640,18 @@ func (s *service) resetPassword(c *echo.Context) error {
 		if err := s.users.RewritePII(ctx, tx, u, now); err != nil {
 			return err
 		}
-		if err := identitydb.New(tx).SavePasswordResetToken(ctx, identitydb.SavePasswordResetTokenParams{
-			ID: tok.ID, FailedAttempts: tok.FailedAttempts, LockedUntil: tok.LockedUntil, UsedAt: &now,
-		}); err != nil {
+		n, err := identitydb.New(tx).ConsumePasswordResetToken(ctx, identitydb.ConsumePasswordResetTokenParams{ID: tok.ID, UsedAt: &now})
+		if err != nil {
 			return err
+		}
+		if n == 0 {
+			return errResetCodeSpent // a concurrent request used or locked it
 		}
 		return users.RevokeAllTokens(ctx, tx, u.ID, nil, now)
 	})
+	if errors.Is(err, errResetCodeSpent) {
+		return unauthorized(invalid)
+	}
 	if err != nil {
 		return err
 	}

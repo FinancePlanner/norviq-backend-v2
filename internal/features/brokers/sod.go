@@ -251,11 +251,30 @@ func (c *sodClient) get(ctx context.Context, target string) (int, []byte, error)
 	req.Header.Set("Accept", "*/*")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, redactURLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	return resp.StatusCode, body, err
+}
+
+// redactURLError drops the query from the URL a transport error carries. The
+// SOD query holds the Flex token and query ID, and this error ends up in
+// status_detail, the API response and the logs. The *url.Error type is kept,
+// so Timeout() and errors.Is still work.
+func redactURLError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	redacted := *ue
+	if u, perr := url.Parse(ue.URL); perr == nil {
+		u.RawQuery, u.ForceQuery, u.Fragment, u.User = "", false, "", nil
+		redacted.URL = u.String()
+	} else {
+		redacted.URL = "(redacted)"
+	}
+	return &redacted
 }
 
 var sodErrorPatterns = []*regexp.Regexp{

@@ -14,9 +14,20 @@ import (
 type Querier interface {
 	ActivePersonalAccessTokens(ctx context.Context, userID uuid.UUID) ([]PersonalAccessToken, error)
 	ApproveOAuthAuthorizationFlow(ctx context.Context, arg ApproveOAuthAuthorizationFlowParams) error
+	// Takes one attempt on a live challenge and returns the code hash current at
+	// that moment. No row means the challenge is spent, expired or out of tries.
+	ClaimMFAAttempt(ctx context.Context, arg ClaimMFAAttemptParams) (MfaChallenge, error)
 	// Of two concurrent redemptions only one sees `approved`.
 	ClaimOAuthAuthorizationCode(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Attempt counters are only ever changed relatively and under a predicate,
+	// never written back from a value read earlier: concurrent guesses would
+	// otherwise lose increments and get more than the capped number of tries.
+	// Takes one attempt on an unused code before its hash is compared. No row
+	// means the code is used up.
+	ClaimPasswordResetAttempt(ctx context.Context, arg ClaimPasswordResetAttemptParams) (int64, error)
 	ConsumeActiveMFAChallenges(ctx context.Context, arg ConsumeActiveMFAChallengesParams) error
+	ConsumeMFAChallenge(ctx context.Context, arg ConsumeMFAChallengeParams) (int64, error)
+	ConsumePasswordResetToken(ctx context.Context, arg ConsumePasswordResetTokenParams) (int64, error)
 	CountActivePersonalAccessTokens(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountRecentPasswordResetTokens(ctx context.Context, arg CountRecentPasswordResetTokensParams) (int64, error)
 	DeletePasswordResetTokensExpiredBy(ctx context.Context, expiresAt time.Time) (int64, error)
@@ -46,6 +57,7 @@ type Querier interface {
 	InsertWebAuthnLoginChallenge(ctx context.Context, arg InsertWebAuthnLoginChallengeParams) error
 	InsertWebAuthnRegisterChallenge(ctx context.Context, arg InsertWebAuthnRegisterChallengeParams) error
 	LatestActivePasswordResetToken(ctx context.Context, arg LatestActivePasswordResetTokenParams) (PasswordResetToken, error)
+	LockPasswordResetToken(ctx context.Context, arg LockPasswordResetTokenParams) error
 	MFAChallengeByID(ctx context.Context, id uuid.UUID) (MfaChallenge, error)
 	MarkOAuthFlowUsed(ctx context.Context, arg MarkOAuthFlowUsedParams) error
 	OAuthAuthorizationFlowByCodeHash(ctx context.Context, codeHash *string) (OauthAuthorizationFlow, error)
@@ -59,11 +71,12 @@ type Querier interface {
 	OAuthTokenRowByAccessHash(ctx context.Context, accessTokenHash string) (OauthToken, error)
 	PersonalAccessTokenForUser(ctx context.Context, arg PersonalAccessTokenForUserParams) (PersonalAccessToken, error)
 	PersonalAccessTokenRowByHash(ctx context.Context, tokenHash string) (PersonalAccessToken, error)
+	// Swaps in a new code. The attempt count carries over, so resending never
+	// buys more guesses; the resend cap and cooldown hold under concurrency.
+	ResendMFAChallenge(ctx context.Context, arg ResendMFAChallengeParams) (MfaChallenge, error)
 	RevokeOAuthTokenFamily(ctx context.Context, arg RevokeOAuthTokenFamilyParams) error
 	RevokePersonalAccessToken(ctx context.Context, arg RevokePersonalAccessTokenParams) error
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
-	SaveMFAChallenge(ctx context.Context, arg SaveMFAChallengeParams) error
-	SavePasswordResetToken(ctx context.Context, arg SavePasswordResetTokenParams) error
 	SetOAuthTokenRevoked(ctx context.Context, arg SetOAuthTokenRevokedParams) error
 	SetWebAuthnSignCount(ctx context.Context, arg SetWebAuthnSignCountParams) error
 	ValidOAuthFlow(ctx context.Context, arg ValidOAuthFlowParams) (OauthFlow, error)

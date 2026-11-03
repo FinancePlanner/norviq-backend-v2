@@ -540,3 +540,36 @@ func readFixture(t *testing.T, name string) string {
 	}
 	return string(data)
 }
+
+// C10: a transport failure on the SOD request must not leak the Flex token or
+// query ID (both ride in the URL query) into status_detail, the API response
+// or the error that the job and error handler log.
+func TestSODTransportErrorRedactsCredentials(t *testing.T) {
+	sod := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer sod.Close()
+	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
+	userID, tok := h.user(t)
+	const secretToken, secretQuery = "LEAKCHECKTOKEN123", "LEAKCHECKQID9"
+	h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": secretToken, "queryId": secretQuery})
+
+	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil)
+	if r.Status < 500 {
+		t.Fatalf("sync = %d %s, want a 5xx transport failure", r.Status, r.Body)
+	}
+	var status, detail string
+	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail)
+	list := h.app.Do(http.MethodGet, "/v1/brokers", tok, nil)
+	for where, s := range map[string]string{"status_detail": detail, "sync response": string(r.Body), "GET /v1/brokers": string(list.Body)} {
+		if strings.Contains(s, secretToken) || strings.Contains(s, secretQuery) {
+			t.Errorf("%s leaks SOD credentials: %q", where, s)
+		}
+	}
+	if status != "error" || !strings.Contains(detail, "/Reporting/IBRITService") {
+		t.Fatalf("connection = %s %q, want an error naming the endpoint", status, detail)
+	}
+}

@@ -77,7 +77,7 @@ func (DailyJob) Run(ctx context.Context, d *server.Deps) {
 	case <-time.After(120 * time.Second):
 	}
 	for {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, dailyJobLock, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, dailyJobLock, func(ctx context.Context) {
 			if err := job.runOnce(ctx); err != nil && ctx.Err() == nil {
 				d.Logger.Error("goal-planning daily evaluation failed", "error", err)
 			}

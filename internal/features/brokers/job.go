@@ -47,7 +47,7 @@ func (j IBKRSyncJob) Run(ctx context.Context, d *server.Deps) {
 			d.Logger.Info("ibkr_sync_job shutdown")
 			return
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, syncJobLock, s.runScheduledSync)
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, syncJobLock, s.runScheduledSync)
 	}
 }
 

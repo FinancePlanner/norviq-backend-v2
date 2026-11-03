@@ -144,7 +144,7 @@ func (j RefreshJob) Run(ctx context.Context, d *server.Deps) {
 
 // RunOnce is one leader-elected tick (runOnce(_:force:)).
 func (RefreshJob) RunOnce(ctx context.Context, d *server.Deps, svc *Service, status *SyncStatus, cadence Cadence, force bool) {
-	joblock.RunAsLeader(ctx, d.DB, d.Logger, RefreshJobLockName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, RefreshJobLockName, func(ctx context.Context) {
 		now := time.Now()
 		for _, c := range svc.Registry.EnabledCountries() {
 			if ctx.Err() != nil {

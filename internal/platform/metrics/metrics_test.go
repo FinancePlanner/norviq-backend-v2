@@ -91,3 +91,40 @@ func TestEnabledIsLenient(t *testing.T) {
 		}
 	}
 }
+
+func TestJobDurationsByNameAndPoolStatsAtScrape(t *testing.T) {
+	r := &Registry{}
+	r.RecordJobDuration("target_alert_poller", 30*time.Millisecond)
+	r.RecordJobDuration("target_alert_poller", 3*time.Second)
+	r.RecordJobDuration("bank_sync_job", time.Millisecond)
+	reads := 0
+	r.SetPoolStats(func() PoolStats {
+		reads++
+		return PoolStats{AcquireCount: 7, AcquireDuration: 1500 * time.Millisecond, AcquiredConns: 2, IdleConns: 3, TotalConns: 5, MaxConns: 20, EmptyAcquireCount: 1}
+	})
+	if reads != 0 {
+		t.Fatal("pool read before a scrape")
+	}
+	out := r.Render()
+	for _, want := range []string{
+		"# TYPE job_duration_seconds histogram\njob_duration_seconds_bucket{job=\"bank_sync_job\",le=\"0.005\"} 1\n",
+		"job_duration_seconds_bucket{job=\"target_alert_poller\",le=\"0.025\"} 0\n",
+		"job_duration_seconds_bucket{job=\"target_alert_poller\",le=\"0.050\"} 1\n",
+		"job_duration_seconds_bucket{job=\"target_alert_poller\",le=\"5.000\"} 2\n",
+		"job_duration_seconds_bucket{job=\"target_alert_poller\",le=\"+Inf\"} 2\n",
+		"job_duration_seconds_sum{job=\"target_alert_poller\"} 3.030000\n",
+		"job_duration_seconds_count{job=\"target_alert_poller\"} 2\n",
+		"pg_pool_acquire_total 7\n",
+		"pg_pool_acquire_duration_seconds_total 1.500000\n",
+		"pg_pool_empty_acquire_total 1\n",
+		"pg_pool_acquired_conns 2\n",
+		"pg_pool_max_conns 20\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("pool read %d times for one scrape", reads)
+	}
+}

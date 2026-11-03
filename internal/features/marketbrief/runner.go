@@ -254,7 +254,7 @@ func (t *Ticker) Tick(ctx context.Context, now time.Time) {
 		return
 	}
 	runner := Runner{Generator: t.Generator, Repository: t.Repository}
-	joblock.RunAsLeader(ctx, t.Deps.DB, logger, JobLockName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, t.Deps.DB, t.Deps.LockSession, logger, JobLockName, func(ctx context.Context) {
 		outcome, err := runner.Run(ctx, due, false)
 		if err != nil {
 			failures := t.attempts.recordFailure(due)

@@ -7,6 +7,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/social"
+	"norviq-api/internal/platform/detached"
 	"norviq-api/internal/platform/push"
 	"norviq-api/internal/store/groupsdb"
 
@@ -67,14 +68,28 @@ type Notifier struct {
 	Log    *slog.Logger
 	// Wait, when set, is called with each detached fan-out (tests).
 	Wait func(done <-chan struct{})
+	// ProcessCtx bounds each detached fan-out (Vapor used a detached Task);
+	// nil means context.Background(). A push missed during shutdown is the
+	// accepted cost of not running after the pool closes.
+	ProcessCtx context.Context
+
+	// inflight runs detached fan-outs; serve closes it on shutdown.
+	inflight detached.Group
 }
 
 func (n *Notifier) detach(fn func(ctx context.Context)) {
+	ctx := n.ProcessCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	done := make(chan struct{})
-	go func() {
+	if !n.inflight.Go(func() {
 		defer close(done)
-		fn(context.Background())
-	}()
+		fn(ctx)
+	}) {
+		// Shutting down: the push is the accepted loss (see ProcessCtx).
+		close(done)
+	}
 	if n.Wait != nil {
 		n.Wait(done)
 	}

@@ -47,7 +47,7 @@ func (j CleanupJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, CleanupJobName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, CleanupJobName, func(ctx context.Context) {
 			deleted, err := DeleteExpired(ctx, dataexportdb.New(d.DB), time.Now())
 			if err != nil {
 				d.Logger.Error("data_export.cleanup.failed", "error", err)

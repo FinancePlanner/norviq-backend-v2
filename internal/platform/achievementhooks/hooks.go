@@ -166,7 +166,8 @@ func (h *Hooks) finish(id uuid.UUID) {
 }
 
 // WaitUntilIdle returns once every queued and running evaluation has
-// finished, including re-runs. Tests only.
+// finished, including re-runs. Tests, and serve's shutdown wait after the
+// evaluator's context is canceled (queued runs then skip at once).
 func (h *Hooks) WaitUntilIdle() {
 	h.mu.Lock()
 	defer h.mu.Unlock()

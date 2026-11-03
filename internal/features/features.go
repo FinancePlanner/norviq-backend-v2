@@ -4,7 +4,10 @@ package features
 
 import (
 	"context"
+	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +79,10 @@ import (
 
 // All returns every ported feature, in Vapor's registration order where it
 // matters (a route registered twice is an error, not an override).
-func All() []server.Feature {
+//
+// ctx is the process lifetime: detached work (exports, group fan-out, live
+// achievement checks) runs under it and ends when serve cancels it.
+func All(ctx context.Context) []server.Feature {
 	return []server.Feature{
 		billing.Feature{},
 		notifications.Feature{Premium: func(d *server.Deps) notifications.PremiumGate {
@@ -162,7 +168,7 @@ func All() []server.Feature {
 		social.Feature{},
 		// Achievements and the friends' activity feed; installs the
 		// achievementhooks evaluator.
-		achievements.Feature{},
+		achievements.Feature{HooksContext: ctx},
 		// User-published articles; behind ARTICLES_ENABLED.
 		articles.Feature{},
 		// Pilot follows (PILOTS_ENABLED, checked per request).
@@ -187,7 +193,7 @@ func All() []server.Feature {
 		// UserProfileService.delete (DELETE /v1/users, /v1/users/:id).
 		accountdeletion.Feature{},
 		// DataExportController, ExportFileController (/v1/api/v3/export).
-		dataexport.Feature{},
+		dataexport.Feature{ProcessCtx: ctx},
 		// PortfolioShareController's public route.
 		sharing.Feature{},
 		// /docs, /openapi.yaml, /metrics, /internal/metrics.
@@ -198,7 +204,7 @@ func All() []server.Feature {
 		// Groups (GroupsController, GroupMessagesController) and the
 		// realtime stream; behind SOCIAL_ENABLED and GROUPS_ENABLED, read
 		// per request.
-		groups.Feature{},
+		groups.Feature{ProcessCtx: ctx},
 		// DigestController: /v1/digests and /v1/digest-preferences behind
 		// DIGEST_ENABLED (read once at boot); /v1/digest/unsubscribe always.
 		digest.Feature{},
@@ -403,15 +409,24 @@ func assistantSources(d *server.Deps) (assistant.Sources, error) {
 }
 
 // Jobs tracks running jobs for shutdown.
-type Jobs struct{ wg sync.WaitGroup }
+type Jobs struct {
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	running map[string]struct{}
+}
 
-// Wait blocks until every job returned.
-func (j *Jobs) Wait() {
+// Wait blocks until every job returned or ctx ends, logging the jobs still
+// inside Run in that case.
+func (j *Jobs) Wait(ctx context.Context, logger *slog.Logger) {
 	done := make(chan struct{})
 	go func() { j.wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(15 * time.Second):
+	case <-ctx.Done():
+		j.mu.Lock()
+		names := slices.Sorted(maps.Keys(j.running))
+		j.mu.Unlock()
+		logger.Warn("jobs shutdown timed out; still running", "jobs", names)
 	}
 }
 
@@ -428,17 +443,24 @@ func StartJobs(ctx context.Context, d *server.Deps) *Jobs {
 			enabled[n] = true
 		}
 	}
-	j := &Jobs{}
+	j := &Jobs{running: map[string]struct{}{}}
 	for _, job := range AllJobs() {
 		if !enabled["all"] && !enabled[job.Name()] {
 			continue
 		}
 		d.Logger.Info("job starting", "job", job.Name())
-		j.wg.Add(1)
-		go func() {
-			defer j.wg.Done()
+		name := job.Name()
+		j.mu.Lock()
+		j.running[name] = struct{}{}
+		j.mu.Unlock()
+		j.wg.Go(func() {
+			defer func() {
+				j.mu.Lock()
+				delete(j.running, name)
+				j.mu.Unlock()
+			}()
 			job.Run(ctx, d)
-		}()
+		})
 	}
 	return j
 }

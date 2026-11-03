@@ -45,9 +45,21 @@ so a retry after a failed concurrent build does not keep an INVALID one.
 Jobs start only when they are named in `V2_JOBS` (comma-separated, or `all`).
 The default is none, so a local run or a one-off command sends no pushes or
 emails. Production and staging set `V2_JOBS=all`. Each job wraps its tick in
-`joblock.RunAsLeader` with the Swift job's lock name (a Postgres advisory lock
-on `hashtext(name)`, held for one tick), so replicas never run a tick at the
-same time.
+`joblock.RunAsLeaderWithSession` with the Swift job's lock name (a Postgres
+advisory lock on `hashtext(name)`, held for one tick), so replicas never run
+a tick at the same time. Every lock a process holds lives on one dedicated
+connection (`joblock.Session`, dialed outside the pool and redialed after
+it dies), so a tick never keeps a pool connection checked out while its body
+needs the pool.
+
+On shutdown, one budget measured from SIGTERM keeps the process inside the
+kubelet's default 30 second grace period (`cmd/api/main.go`): HTTP requests
+get 15 seconds; Telegram turns, jobs and detached work (exports, group push
+fan-out, live achievement checks) share what is left until 24 seconds; the
+lock session and the pool then get 2 and 3 seconds to close. Names still
+running at each deadline are logged. Exports and fan-out stop accepting new
+work before the wait, so a handler that outlived `Shutdown` gets a 503 for an
+export (its row is marked failed) and a skipped group push.
 
 ## Realtime: one replica
 
@@ -77,6 +89,38 @@ Vapor bugs were ported faithfully unless they are listed here or in
   free, and `/v1/billing/management-url` never returned RevenueCat's URL or
   the web-billing portal. v2 decodes RevenueCat bodies with plain
   `encoding/json` (`internal/features/billing/revenuecat.go`).
+- **Job lock fail-open, narrowed** (`internal/platform/joblock`): Vapor ran
+  the tick unlocked whenever the lock could not be taken. v2 still does when
+  the database is unreachable: the lock session could not dial, and the pool
+  can neither ping nor shows every connection checked out. In every other
+  case it skips the tick and logs, because the database is up and running
+  unlocked would duplicate sends: a Postgres error such as 53300 during a
+  rollout, a lock statement failing on an established connection, a pool
+  that pings, or a pool too busy for the ping to get a connection.
+- **Idempotency fails closed on a Redis read error** (`middleware/ratelimit.go`):
+  Vapor treated any `GET` failure as a cache miss and ran the handler, so a
+  retry could commit the same write twice. v2 answers 503 in production
+  before the handler runs. A replay now restores only the handler's own
+  headers (`Content-Type`, `Location`, `Content-Disposition`,
+  `Cache-Control`, `ETag`, `Last-Modified`) with `Set`; the global middleware
+  sets the rest, so a replay no longer duplicates them or labels a plain
+  body gzip. The cache write survives a client disconnect.
+- **Enable Banking pagination** fails a fetch whose provider sends a
+  continuation key it already sent in that fetch (back to back or in a
+  cycle), instead of looping until shutdown.
+- **RevenueCat webhook, one transaction** (billing): Vapor committed the
+  event row before the entitlement writes, so a failed write was skipped as
+  a duplicate on redelivery. v2 writes both in one transaction; the loser of
+  two overlapping deliveries answers 200 without reapplying.
+- **Target alerts mark before they send; earnings reminders record after a
+  delivered push** (watchlist): Vapor's order re-sent a target push every
+  poll while the mark kept failing, and counted a failed earnings push as
+  sent. A crash between mark and send now loses one target push; a crash
+  between send and record can send one extra earnings push.
+- **Scenario run writes are fenced** on `lease_owner` and `state =
+  'running'`: a reclaimed or user-canceled run is never completed or failed
+  by the worker that lost it, and a heartbeat that cannot renew cancels the
+  simulation.
 - The bugs that were ported faithfully, and the owner's decision on each (fix
   or keep), are in `docs/vapor-bugs/money.md`, `docs/vapor-bugs/portfolio.md`
   and `docs/vapor-bugs/social.md`. Tests that pin those decisions cite the

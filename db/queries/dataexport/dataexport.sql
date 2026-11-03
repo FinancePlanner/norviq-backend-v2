@@ -17,7 +17,7 @@ LIMIT sqlc.arg(row_limit)::bigint OFFSET sqlc.arg(row_offset)::bigint;
 UPDATE data_exports
 SET status = 'ready', file_path = @file_path, file_size_bytes = @file_size_bytes,
     expires_at = @expires_at, updated_at = @updated_at
-WHERE id = @id;
+WHERE id = @id AND status = 'pending';
 
 -- name: MarkExportFailed :exec
 UPDATE data_exports SET status = 'failed', updated_at = @updated_at WHERE id = @id;

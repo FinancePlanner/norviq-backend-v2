@@ -77,7 +77,7 @@ func SweepOnce(ctx context.Context, d *server.Deps, svc *Service, now time.Time,
 		unlocks []Unlock
 	}
 	var unlocked []found
-	joblock.RunAsLeader(ctx, d.DB, d.Logger, SweepJobLockName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, SweepJobLockName, func(ctx context.Context) {
 		if err := svc.ensureActivated(ctx, now); err != nil {
 			d.Logger.Warn("achievement_sweep activation failed", "error", err)
 			return

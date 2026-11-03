@@ -37,8 +37,9 @@ const evaluationDebounce = 60 * time.Second
 type Feature struct {
 	// Hooks receives the live evaluator; nil means achievementhooks.Shared.
 	Hooks *achievementhooks.Hooks
-	// HooksContext bounds every live evaluation. Register has no lifecycle
-	// context, so nil means context.Background().
+	// HooksContext bounds every live evaluation; serve passes the process
+	// lifetime, cancels it on shutdown and waits for running evaluations
+	// before the pool closes. Nil means context.Background().
 	HooksContext context.Context
 }
 
@@ -72,6 +73,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		hctx = context.Background()
 	}
 	hooks.SetEvaluator(hctx, svc.hookEvaluate)
+	d.Health.AddShutdownHook("achievements.hooks", hooks.WaitUntilIdle)
 
 	h := &handlers{svc: svc, q: achievementsdb.New(d.DB)}
 

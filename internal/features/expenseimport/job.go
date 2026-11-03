@@ -42,7 +42,7 @@ func (j RetentionJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, RetentionJobName, func(ctx context.Context) { RetentionOnce(ctx, d, time.Now()) })
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, RetentionJobName, func(ctx context.Context) { RetentionOnce(ctx, d, time.Now()) })
 		timer.Reset(interval)
 	}
 }

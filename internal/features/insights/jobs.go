@@ -57,7 +57,7 @@ func (HermesSyncJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	interval := time.Duration(max(b.settings.HermesSyncSeconds, 60)) * time.Second
 	runEvery(ctx, 30*time.Second, interval, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, HermesSyncJobName, func(ctx context.Context) { HermesSyncOnce(ctx, d, b.insights) })
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, HermesSyncJobName, func(ctx context.Context) { HermesSyncOnce(ctx, d, b.insights) })
 	})
 }
 
@@ -133,7 +133,7 @@ func (SentimentAggregationJob) Run(ctx context.Context, d *server.Deps) {
 // SentimentAggregationOnce runs the roll-up under the job lock, regardless
 // of the clock (Vapor's runOnce). onDone receives the completed asOfDate.
 func SentimentAggregationOnce(ctx context.Context, d *server.Deps, a *Aggregator, onDone func(string)) {
-	joblock.RunAsLeader(ctx, d.DB, d.Logger, SentimentAggregationJobName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, SentimentAggregationJobName, func(ctx context.Context) {
 		summary, err := a.RunDailyAggregation(ctx)
 		if err != nil {
 			d.Logger.Error("sentiment_aggregation failed error=" + describe(err))
@@ -170,7 +170,7 @@ func (SentimentRetentionJob) Run(ctx context.Context, d *server.Deps) {
 		return
 	}
 	runEvery(ctx, 600*time.Second, 86400*time.Second, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, SentimentRetentionJobName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, SentimentRetentionJobName, func(ctx context.Context) {
 			SentimentRetentionOnce(ctx, d, b, time.Now())
 		})
 	})

@@ -50,7 +50,7 @@ func (j SyncJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, SyncJobName, func(ctx context.Context) { bank.SyncOnce(ctx) })
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, SyncJobName, func(ctx context.Context) { bank.SyncOnce(ctx) })
 		timer.Reset(interval)
 	}
 }
@@ -65,6 +65,11 @@ func (bank *Bank) SyncOnce(ctx context.Context) {
 	}
 	b.logger.Info("bank_sync_job reconcile connections=" + strconv.Itoa(len(conns)))
 	for i := range conns {
+		// Shutdown ends the tick between connections, never inside a
+		// provider call.
+		if ctx.Err() != nil {
+			return
+		}
 		conn := &conns[i]
 		kind, ok := parseKind(conn.Provider)
 		if !ok {

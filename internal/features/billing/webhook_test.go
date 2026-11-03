@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,6 +176,72 @@ func TestWebhookDuplicateEventIsIdempotent(t *testing.T) {
 	}
 	if n := app.count(`SELECT count(*) FROM billing_events WHERE provider_event_id = $1`, id); n != 1 {
 		t.Fatalf("events %d", n)
+	}
+}
+
+// Vapor committed the event before the entitlement, so a failed entitlement
+// write made the redelivery a "duplicate" and the update was lost.
+func TestWebhookEntitlementFailureRollsBackTheEvent(t *testing.T) {
+	app := newApp(t)
+	user := app.user("rollback")
+	app.exec(`CREATE FUNCTION fail_entitlement() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'entitlement write failed'; END $$`)
+	app.exec(`CREATE TRIGGER fail_entitlement BEFORE INSERT OR UPDATE ON entitlements
+		FOR EACH ROW EXECUTE FUNCTION fail_entitlement()`)
+	id := uuid.NewString()
+	p := makePayload("INITIAL_PURCHASE", id, upperID(user), payloadOpts{})
+	if s := app.post(p, testSecret); s != 500 {
+		t.Fatalf("failed write answered %d", s)
+	}
+	if n := app.count(`SELECT count(*) FROM billing_events WHERE provider_event_id = $1`, id); n != 0 {
+		t.Fatalf("event committed without its entitlement (%d rows)", n)
+	}
+	if n := app.count(`SELECT count(*) FROM subscriptions`); n != 0 {
+		t.Fatalf("subscription committed without its entitlement (%d rows)", n)
+	}
+
+	app.exec(`DROP TRIGGER fail_entitlement ON entitlements`)
+	if s := app.post(p, testSecret); s != 200 {
+		t.Fatalf("redelivery %d", s)
+	}
+	if n := app.count(`SELECT count(*) FROM billing_events WHERE provider_event_id = $1`, id); n != 1 {
+		t.Fatalf("events %d", n)
+	}
+	if ent := app.entitlementOf(user); ent == nil || ent.Level != "pro" {
+		t.Fatalf("redelivery did not apply: %+v", ent)
+	}
+}
+
+// Two overlapping deliveries of one event: the loser blocks on the unique
+// index, sees the winner commit, and answers 200 without reapplying.
+func TestWebhookOverlappingDeliveriesApplyOnce(t *testing.T) {
+	app := newApp(t)
+	user := app.user("overlap")
+	app.exec(`CREATE TABLE entitlement_writes (at timestamptz NOT NULL DEFAULT clock_timestamp())`)
+	app.exec(`CREATE FUNCTION slow_entitlement() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN INSERT INTO entitlement_writes DEFAULT VALUES; PERFORM pg_sleep(0.3); RETURN NEW; END $$`)
+	app.exec(`CREATE TRIGGER slow_entitlement BEFORE INSERT OR UPDATE ON entitlements
+		FOR EACH ROW EXECUTE FUNCTION slow_entitlement()`)
+	id := uuid.NewString()
+	p := makePayload("INITIAL_PURCHASE", id, upperID(user), payloadOpts{})
+
+	var statuses [2]int
+	var wg sync.WaitGroup
+	for i := range statuses {
+		wg.Go(func() { statuses[i] = app.post(p, testSecret) })
+	}
+	wg.Wait()
+	if statuses != [2]int{200, 200} {
+		t.Fatalf("statuses %v", statuses)
+	}
+	if n := app.count(`SELECT count(*) FROM billing_events WHERE provider_event_id = $1`, id); n != 1 {
+		t.Fatalf("events %d", n)
+	}
+	if n := app.count(`SELECT count(*) FROM entitlement_writes`); n != 1 {
+		t.Fatalf("entitlement written %d times", n)
+	}
+	if ent := app.entitlementOf(user); ent == nil || ent.Level != "pro" {
+		t.Fatalf("ent=%+v", ent)
 	}
 }
 

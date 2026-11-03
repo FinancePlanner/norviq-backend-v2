@@ -19,12 +19,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/detached"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/platform/swiftjson"
 	"norviq-api/internal/server"
@@ -69,6 +69,9 @@ type Feature struct {
 	// Generated, when set, is called after each background export finishes
 	// (tests wait on it).
 	Generated func(id uuid.UUID)
+	// ProcessCtx bounds each background export; serve cancels it on
+	// shutdown. Nil means context.Background(), Vapor's detached Task.
+	ProcessCtx context.Context
 }
 
 // Name implements server.Feature.
@@ -81,6 +84,13 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		dir = BaseDir()
 	}
 	h := &handler{q: dataexportdb.New(d.DB), logger: d.Logger, dir: dir, generated: f.Generated}
+	h.processCtx = f.ProcessCtx
+	if h.processCtx == nil {
+		h.processCtx = context.Background()
+	}
+	// serve refuses new exports, then waits for running ones, before the
+	// pool closes.
+	d.Health.AddShutdownHook("dataexport", h.work.CloseAndWait)
 
 	// DataExportController.boot: ScopedBearerAuthenticator + guard, then
 	// RateLimitMiddleware(limit: 60, interval: 60) with the default
@@ -105,7 +115,9 @@ type handler struct {
 	logger    *slog.Logger
 	dir       string
 	generated func(uuid.UUID)
-	wg        sync.WaitGroup
+	work      detached.Group
+	// processCtx bounds background exports (Feature.ProcessCtx).
+	processCtx context.Context
 }
 
 // exportType is ExportType.
@@ -264,15 +276,24 @@ func (h *handler) create(c *echo.Context) error {
 	}
 
 	// Schedule the background task, detached from the request (Vapor's
-	// unstructured Task).
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
-		h.generate(context.Background(), id, s.UserID, string(body.Type), string(body.Format), body.Filters.parsed())
+	// unstructured Task) but not from the process.
+	started := h.work.Go(func() {
+		h.generate(h.processCtx, id, s.UserID, string(body.Type), string(body.Format), body.Filters.parsed())
 		if h.generated != nil {
 			h.generated(id)
 		}
-	}()
+	})
+	if !started {
+		// The process is shutting down and no longer runs exports. Fail the
+		// row rather than leave it pending forever; the client may retry.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
+		defer cancel()
+		now := time.Now()
+		if err := h.q.MarkExportFailed(ctx, dataexportdb.MarkExportFailedParams{UpdatedAt: &now, ID: id}); err != nil {
+			h.logger.Error("export mark failed on shutdown", "id", id, "error", err)
+		}
+		return httpx.Abort(http.StatusServiceUnavailable, "The server is restarting. Please try again.")
+	}
 	return httpx.OK(c, createResponse{ExportID: apijson.NewUUID(id), Status: "pending"})
 }
 
@@ -311,6 +332,10 @@ func (h *handler) generate(ctx context.Context, id, userID uuid.UUID, kind, form
 	if err == nil {
 		return
 	}
+	// A shutdown cancels ctx mid-export; the pool is still open while serve
+	// waits, so record the failure instead of leaving the row pending.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if found, ferr := h.q.ExportForUser(ctx, dataexportdb.ExportForUserParams{ID: id, UserID: userID}); ferr == nil && len(found) > 0 {
 		now := time.Now()
 		if uerr := h.q.MarkExportFailed(ctx, dataexportdb.MarkExportFailedParams{UpdatedAt: &now, ID: id}); uerr != nil {

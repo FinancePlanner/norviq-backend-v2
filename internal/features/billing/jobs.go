@@ -52,7 +52,7 @@ func (j TrialExpirationJob) Run(ctx context.Context, d *server.Deps) {
 	d.Logger.Info("trial_expiration_job starting")
 	defer d.Logger.Info("trial_expiration_job shutdown")
 	for {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, lockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, lockName, func(ctx context.Context) {
 			RunTrialExpirationOnce(ctx, d, svc)
 		})
 		select {

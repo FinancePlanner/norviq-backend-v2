@@ -39,6 +39,10 @@ type Feature struct {
 	WaitPush func(done <-chan struct{})
 	// Heartbeat and MaxStream override the stream's clock (tests).
 	Heartbeat, MaxStream time.Duration
+	// ProcessCtx bounds detached push fan-out; serve cancels it on shutdown
+	// and waits for the fan-out before the pool closes. Nil means
+	// context.Background().
+	ProcessCtx context.Context
 }
 
 func (Feature) Name() string { return "groups" }
@@ -75,7 +79,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	s := &Service{DB: d.DB, Social: soc}
 	h := &handler{
 		s:           s,
-		n:           &Notifier{DB: d.DB, Social: soc, Push: pusher, Redis: d.Redis, Log: d.Logger, Wait: f.WaitPush},
+		n:           &Notifier{DB: d.DB, Social: soc, Push: pusher, Redis: d.Redis, Log: d.Logger, Wait: f.WaitPush, ProcessCtx: f.ProcessCtx},
 		pub:         &publisher{bus: bus, db: d.DB, log: d.Logger},
 		bus:         bus,
 		discord:     sender,
@@ -83,6 +87,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		heartbeat:   heartbeatInterval,
 		maxDuration: maxConnectionDuration,
 	}
+	d.Health.AddShutdownHook("groups.fanout", h.n.inflight.CloseAndWait)
 	if f.Heartbeat > 0 {
 		h.heartbeat = f.Heartbeat
 	}

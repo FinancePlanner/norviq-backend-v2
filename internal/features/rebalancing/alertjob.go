@@ -59,7 +59,7 @@ func (j AlertJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	interval = max(interval, 60)
 	runEvery(ctx, 45*time.Second, time.Duration(interval)*time.Second, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, alertJobName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, alertJobName, func(ctx context.Context) {
 			if err := ev.Evaluate(ctx); err != nil && ctx.Err() == nil {
 				d.Logger.Error("rebalancing.alerts evaluation failed", "error", err)
 			}

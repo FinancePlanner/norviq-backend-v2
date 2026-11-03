@@ -70,7 +70,7 @@ func (j HistoryIngestionJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, HistoryJobLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, HistoryJobLockName, func(ctx context.Context) {
 			Sweep(ctx, d, svc)
 		})
 		timer.Reset(time.Duration(interval) * time.Second)

@@ -297,3 +297,35 @@ func TestExpiryAndCleanup(t *testing.T) {
 		t.Fatalf("rows left %d", left)
 	}
 }
+
+// After serve's shutdown hook has run, a handler that outlived Shutdown can
+// no longer start an export (the WaitGroup is already being waited on). It
+// answers 503 and fails the row it inserted instead of leaving it pending.
+func TestCreateAfterShutdownFailsTheExport(t *testing.T) {
+	e := newEnv(t)
+	e.app.Deps.Health.RunShutdownHooks(context.Background(), e.app.Deps.Logger)
+	r := e.app.Do(http.MethodPost, "/v1/api/v3/export", e.tok, map[string]any{"type": "insights", "format": "json"})
+	if r.Status != http.StatusServiceUnavailable {
+		t.Fatalf("create after shutdown: %d %s", r.Status, r.Body)
+	}
+	var statuses []string
+	rows, err := e.app.Deps.DB.Query(context.Background(), `SELECT status FROM data_exports WHERE user_id = $1`, e.user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		statuses = append(statuses, s)
+	}
+	if rows.Err() != nil || !slices.Equal(statuses, []string{"failed"}) {
+		t.Fatalf("export rows %v (err %v), want one failed", statuses, rows.Err())
+	}
+	select {
+	case <-e.done:
+		t.Fatal("an export ran after shutdown")
+	default:
+	}
+}

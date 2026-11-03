@@ -54,7 +54,7 @@ func runLoop(ctx context.Context, d *server.Deps, lock string, initial, interval
 		return
 	}
 	for {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, lock, tick)
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, lock, tick)
 		if !sleep(ctx, interval) {
 			return
 		}

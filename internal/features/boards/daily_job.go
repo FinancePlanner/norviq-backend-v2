@@ -683,7 +683,7 @@ func (j DailyPostJob) Run(ctx context.Context, d *server.Deps) {
 			Service: &Service{DB: d.DB, Q: boardsdb.New(d.DB)},
 			Sources: sources, Writer: writer, Logger: d.Logger,
 		},
-		DB: d.DB, Logger: d.Logger,
+		DB: d.DB, Logger: d.Logger, LockSession: d.LockSession,
 	}
 	now := j.Now
 	if now == nil {
@@ -748,9 +748,10 @@ func dailySleep(ctx context.Context, d time.Duration) bool {
 // DailyPostRunner is one DailyBoardPostJob: its ticks and its in-memory
 // failure count per date.
 type DailyPostRunner struct {
-	Publisher *DailyPublisher
-	DB        *pgxpool.Pool
-	Logger    *slog.Logger
+	Publisher   *DailyPublisher
+	DB          *pgxpool.Pool
+	Logger      *slog.Logger
+	LockSession *joblock.Session
 
 	mu       sync.Mutex
 	failures map[string]int
@@ -762,7 +763,7 @@ func (r *DailyPostRunner) Tick(ctx context.Context, now time.Time) {
 	if !ok {
 		return
 	}
-	joblock.RunAsLeader(ctx, r.DB, r.Logger, DailyPostJobName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, r.DB, r.LockSession, r.Logger, DailyPostJobName, func(ctx context.Context) {
 		if err := r.tick(ctx, tradingDate, now); err != nil {
 			count := r.recordFailure(tradingDate)
 			r.Logger.Error("daily_board_post failed", "date", tradingDate,

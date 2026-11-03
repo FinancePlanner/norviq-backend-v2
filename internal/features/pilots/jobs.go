@@ -112,7 +112,7 @@ func (j IngestionJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	runEvery(ctx, delay, time.Duration(interval)*time.Second, func(ctx context.Context) {
 		svc := build(d)
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, IngestionLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, IngestionLockName, func(ctx context.Context) {
 			RunIngestionOnce(ctx, d.DB, d.Logger, svc, time.Now())
 		})
 	})
@@ -176,7 +176,7 @@ func (j MirrorJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	runEvery(ctx, delay, time.Duration(interval)*time.Second, func(ctx context.Context) {
 		m := build(d)
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, MirrorLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, MirrorLockName, func(ctx context.Context) {
 			RunMirrorOnce(ctx, d.DB, d.Logger, m, time.Now())
 		})
 	})

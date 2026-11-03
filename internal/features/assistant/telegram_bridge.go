@@ -89,8 +89,14 @@ func newTelegramBot(h *handlers, cfg *telegram.Config) *telegramBot {
 }
 
 // DrainTelegramTurns is TelegramTurnDrain: stop accepting turns, cancel the
-// running ones and wait for them. Call it on shutdown.
-func DrainTelegramTurns() {
+// running ones and wait for them.
+func DrainTelegramTurns() { DrainTelegramTurnsUntil(context.Background()) }
+
+// DrainTelegramTurnsUntil is DrainTelegramTurns bounded by ctx, for serve's
+// shutdown budget: every bot stops and cancels its turns at once, then the
+// wait ends when they have all returned or ctx does. It reports whether every
+// turn returned.
+func DrainTelegramTurnsUntil(ctx context.Context) bool {
 	botsMu.Lock()
 	list := append([]*telegramBot(nil), bots...)
 	botsMu.Unlock()
@@ -101,7 +107,19 @@ func DrainTelegramTurns() {
 			t.cancel()
 		}
 		b.mu.Unlock()
-		b.wg.Wait()
+	}
+	done := make(chan struct{})
+	go func() {
+		for _, b := range list {
+			b.wg.Wait()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

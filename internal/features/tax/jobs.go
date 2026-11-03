@@ -78,7 +78,7 @@ func (ReportGenerationJob) Run(ctx context.Context, d *server.Deps) {
 	interval := time.Duration(max(5, envSeconds("TAX_REPORT_GENERATION_POLL_SECONDS", 10))) * time.Second
 	storage := reportStorageFromEnv()
 	runEvery(ctx, time.Second, interval, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, reportGenerationLock, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, reportGenerationLock, func(ctx context.Context) {
 			svc.runReportGeneration(ctx, storage, newECBProvider(), d.Logger)
 		})
 	})
@@ -176,7 +176,7 @@ func (ReportCleanupJob) Run(ctx context.Context, d *server.Deps) {
 	interval := time.Duration(max(1, envSeconds("TAX_REPORT_CLEANUP_INTERVAL_SECONDS", 3600))) * time.Second
 	storage := reportStorageFromEnv()
 	runEvery(ctx, 60*time.Second, interval, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, reportCleanupLock, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, reportCleanupLock, func(ctx context.Context) {
 			if err := svc.cleanupExpiredReports(ctx, storage, d.Logger); err != nil && ctx.Err() == nil {
 				d.Logger.Error("tax_report.cleanup failed", "error", err)
 			}
@@ -235,7 +235,7 @@ func (ProjectionJob) Run(ctx context.Context, d *server.Deps) {
 	n := notifier{q: notificationsdb.New(d.DB), push: pushSvc}
 	interval := time.Duration(max(3600, envSeconds("TAX_PROJECTION_POLL_SECONDS", 86400))) * time.Second
 	runEvery(ctx, 90*time.Second, interval, func(ctx context.Context) {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, projectionLock, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, projectionLock, func(ctx context.Context) {
 			if err := svc.runProjections(ctx, n); err != nil && ctx.Err() == nil {
 				d.Logger.Error("tax.projection poll failed", "error", err)
 			}

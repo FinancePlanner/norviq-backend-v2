@@ -55,7 +55,7 @@ func (j CleanupJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, CleanupJobName, func(ctx context.Context) { CleanupOnce(ctx, d, time.Now()) })
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, CleanupJobName, func(ctx context.Context) { CleanupOnce(ctx, d, time.Now()) })
 		timer.Reset(interval)
 	}
 }

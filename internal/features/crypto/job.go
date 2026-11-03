@@ -81,7 +81,7 @@ func (j RefreshJob) Run(ctx context.Context, d *server.Deps) {
 
 // Tick is one leader-locked refresh.
 func (RefreshJob) Tick(ctx context.Context, d *server.Deps, svc *MarketsService, budget int) {
-	joblock.RunAsLeader(ctx, d.DB, d.Logger, RefreshJobLockName, func(ctx context.Context) {
+	joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, RefreshJobLockName, func(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}

@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +29,8 @@ import (
 	"norviq-api/internal/features/assistant"
 	"norviq-api/internal/middleware"
 	"norviq-api/internal/migrate"
+	"norviq-api/internal/platform/joblock"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/platform/pprof"
 	"norviq-api/internal/platform/realtime"
 	"norviq-api/internal/server"
@@ -172,17 +175,61 @@ func buildDeps(ctx context.Context, cfg config.Base, logger *slog.Logger, withDB
 	return d, cleanup, nil
 }
 
+// Shutdown budget, measured from SIGTERM and kept inside the kubelet's
+// default 30 second grace period: HTTP gets 15 seconds to finish requests,
+// every drain (Telegram turns, jobs, detached work) shares what is left until
+// 24 seconds, then the lock session and the pool get 2 and 3 seconds to close.
+// Past each bound serve logs and moves on rather than being SIGKILLed with
+// nothing logged.
+const (
+	httpShutdownBudget     = 15 * time.Second
+	drainDeadline          = 24 * time.Second
+	lockSessionCloseBudget = 2 * time.Second
+	poolCloseBudget        = 3 * time.Second
+)
+
 func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 	d, cleanup, err := buildDeps(ctx, cfg, logger, true)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	// pool.Close waits for every acquired connection; do not let one stuck
+	// query hold the process past its grace period.
+	defer closeWithin(poolCloseBudget, logger, "database pool", cleanup)
 
-	srv, err := server.New(d, features.All())
+	// Every job lock lives on one extra connection (joblock.Session), so no
+	// tick holds a pool connection while its body needs the pool.
+	d.LockSession = joblock.NewSession(d.DB)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), lockSessionCloseBudget)
+		defer cancel()
+		d.LockSession.Close(closeCtx)
+	}()
+
+	// lifetime bounds detached work (exports, group fan-out, live achievement
+	// checks). It outlives ctx so requests drained by Shutdown can still
+	// start that work, and ends once the HTTP server has stopped.
+	lifetime, endLifetime := context.WithCancel(context.WithoutCancel(ctx))
+	defer endLifetime()
+
+	srv, err := server.New(d, features.All(lifetime))
 	if err != nil {
 		return err
 	}
+	// Pool stats are read when Prometheus scrapes, not per request.
+	metrics.Shared.SetPoolStats(func() metrics.PoolStats {
+		s := d.DB.Stat()
+		return metrics.PoolStats{
+			AcquireCount:         s.AcquireCount(),
+			AcquireDuration:      s.AcquireDuration(),
+			AcquiredConns:        s.AcquiredConns(),
+			IdleConns:            s.IdleConns(),
+			TotalConns:           s.TotalConns(),
+			MaxConns:             s.MaxConns(),
+			EmptyAcquireCount:    s.EmptyAcquireCount(),
+			CanceledAcquireCount: s.CanceledAcquireCount(),
+		}
+	})
 	jobs := features.StartJobs(ctx, d)
 	pprof.Start(ctx, cfg.PprofAddr, logger)
 
@@ -190,6 +237,7 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
 		Handler:           srv.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	// Open realtime streams end with the process (RealtimeBus shutdown):
 	// Shutdown does not wait for hijacked or long-lived SSE responses.
@@ -200,23 +248,54 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 		errCh <- httpServer.ListenAndServe()
 	}()
 
+	var shutdownStart time.Time
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
+		shutdownStart = time.Now()
 	case <-ctx.Done():
+		shutdownStart = time.Now()
 		logger.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		shutdownCtx, cancel := context.WithDeadline(context.Background(), shutdownStart.Add(httpShutdownBudget))
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			logger.Error("shutdown", "error", err)
 		}
 	}
-	// TelegramTurnDrain: detached bot turns end before the pool closes.
-	assistant.DrainTelegramTurns()
-	jobs.Wait()
+	// Jobs (ctx) and detached work (lifetime) are both canceled now, and
+	// TelegramTurnDrain cancels the bot turns. They share one deadline to
+	// return before the pool closes; the shutdown hooks also refuse new
+	// detached work from handlers that outlived Shutdown.
+	endLifetime()
+	drainCtx, cancelDrain := context.WithDeadline(context.Background(), shutdownStart.Add(drainDeadline))
+	defer cancelDrain()
+	var drain sync.WaitGroup
+	drain.Go(func() {
+		if !assistant.DrainTelegramTurnsUntil(drainCtx) {
+			logger.Warn("shutdown drain timed out; Telegram turns still running")
+		}
+	})
+	drain.Go(func() { jobs.Wait(drainCtx, logger) })
+	drain.Go(func() { d.Health.RunShutdownHooks(drainCtx, logger) })
+	drain.Wait()
 	return nil
+}
+
+// closeWithin runs closeFn and returns once it has, or after budget with a
+// warning: the process is exiting, and the kernel closes what is left.
+func closeWithin(budget time.Duration, logger *slog.Logger, what string, closeFn func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		closeFn()
+	}()
+	select {
+	case <-done:
+	case <-time.After(budget):
+		logger.Warn("shutdown: close timed out; exiting anyway", "resource", what)
+	}
 }
 
 func runMigrate(ctx context.Context, cfg config.Base, logger *slog.Logger, args []string) error {
@@ -240,7 +319,7 @@ func printRoutes(cfg config.Base, _ *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv, err := server.New(d, features.All())
+	srv, err := server.New(d, features.All(context.Background()))
 	if err != nil {
 		return err
 	}

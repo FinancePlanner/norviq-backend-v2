@@ -62,7 +62,7 @@ func (j Job) Run(ctx context.Context, d *server.Deps) {
 		return
 	}
 	for {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, JobLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, JobLockName, func(ctx context.Context) {
 			s, err := runner.RunDue(ctx, runner.now())
 			if err != nil {
 				d.Logger.Error("digest.tick_failed", "error", err)

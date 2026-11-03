@@ -239,7 +239,7 @@ const markExportReady = `-- name: MarkExportReady :exec
 UPDATE data_exports
 SET status = 'ready', file_path = $1, file_size_bytes = $2,
     expires_at = $3, updated_at = $4
-WHERE id = $5
+WHERE id = $5 AND status = 'pending'
 `
 
 type MarkExportReadyParams struct {

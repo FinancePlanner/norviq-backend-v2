@@ -7,7 +7,9 @@ package server
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"norviq-api/internal/config"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/middleware"
+	"norviq-api/internal/platform/joblock"
 	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/store"
 
@@ -37,6 +40,9 @@ type Deps struct {
 	Admin   auth.Admin
 	Limiter *middleware.Limiter
 	Health  *Health
+	// LockSession holds every job's advisory lock on one connection; serve
+	// sets it. Nil (tests, the routes command) takes joblock's pool path.
+	LockSession *joblock.Session
 }
 
 // Routes are the two mount points Vapor had: the root (`app`) and `/v1`
@@ -158,8 +164,14 @@ type HealthCheck struct {
 
 // Health collects readiness checks; features add their own.
 type Health struct {
-	mu     sync.Mutex
-	checks map[string]func(ctx context.Context) HealthCheck
+	mu       sync.Mutex
+	checks   map[string]func(ctx context.Context) HealthCheck
+	shutdown []shutdownHook
+}
+
+type shutdownHook struct {
+	name string
+	wait func()
 }
 
 // NewHealth returns an empty registry.
@@ -170,6 +182,46 @@ func (h *Health) Add(name string, check func(ctx context.Context) HealthCheck) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.checks[name] = check
+}
+
+// AddShutdownHook registers a wait for detached work (exports, fan-out,
+// live evaluations) that serve runs after the HTTP server stops and before
+// the pool closes. wait blocks until that work has returned.
+func (h *Health) AddShutdownHook(name string, wait func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.shutdown = append(h.shutdown, shutdownHook{name, wait})
+}
+
+// RunShutdownHooks runs every hook concurrently and returns when all have
+// returned or ctx ends, logging the names still waiting in that case.
+func (h *Health) RunShutdownHooks(ctx context.Context, logger *slog.Logger) {
+	h.mu.Lock()
+	hooks := slices.Clone(h.shutdown)
+	h.mu.Unlock()
+
+	var mu sync.Mutex
+	pending := map[string]struct{}{}
+	var wg sync.WaitGroup
+	for _, hook := range hooks {
+		pending[hook.name] = struct{}{}
+		wg.Go(func() {
+			hook.wait()
+			mu.Lock()
+			delete(pending, hook.name)
+			mu.Unlock()
+		})
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		mu.Lock()
+		names := slices.Sorted(maps.Keys(pending))
+		mu.Unlock()
+		logger.Warn("shutdown drain timed out; detached work still running", "hooks", names)
+	}
 }
 
 func (h *Health) run(ctx context.Context) map[string]HealthCheck {

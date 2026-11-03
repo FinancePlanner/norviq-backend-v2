@@ -101,7 +101,7 @@ func (j WorkerJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	interval := time.Duration(max(2, s.WorkerIntervalSeconds)) * time.Second
 	loop(ctx, 2*time.Second, interval, func() {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, WorkerLockName, func(ctx context.Context) { w.runOnce(ctx) })
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, WorkerLockName, func(ctx context.Context) { w.runOnce(ctx) })
 	})
 }
 
@@ -125,7 +125,7 @@ func (j RetentionJob) Run(ctx context.Context, d *server.Deps) {
 	}
 	interval := time.Duration(max(60, s.CleanupIntervalSeconds)) * time.Second
 	loop(ctx, 60*time.Second, interval, func() {
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, RetentionLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, RetentionLockName, func(ctx context.Context) {
 			retentionOnce(ctx, reportingdb.New(d.DB), Storage{Root: s.StoragePath}, d.Logger, now())
 		})
 	})

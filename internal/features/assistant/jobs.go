@@ -43,7 +43,7 @@ func tick(ctx context.Context, d *server.Deps, name string, delay, interval time
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, name, body)
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, name, body)
 		timer.Reset(interval)
 	}
 }

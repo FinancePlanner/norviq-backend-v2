@@ -66,7 +66,7 @@ func (j SnapshotJob) Run(ctx context.Context, d *server.Deps) {
 			return
 		case <-timer.C:
 		}
-		joblock.RunAsLeader(ctx, d.DB, d.Logger, SnapshotJobLockName, func(ctx context.Context) {
+		joblock.RunAsLeaderWithSession(ctx, d.DB, d.LockSession, d.Logger, SnapshotJobLockName, func(ctx context.Context) {
 			RunSnapshotTick(ctx, d.DB, d.Logger, portfolios.Now())
 		})
 		timer.Reset(interval)

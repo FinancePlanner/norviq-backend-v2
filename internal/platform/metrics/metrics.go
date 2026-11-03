@@ -13,8 +13,11 @@ package metrics
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,6 +58,33 @@ type Registry struct {
 	taxCarryforwardReconciliation atomic.Int64
 	taxCarryforwardGeneratedCents atomic.Int64
 	taxCarryforwardAppliedCents   atomic.Int64
+
+	// jobDurations is job_duration_seconds, one histogram per job (lock)
+	// name. A few dozen jobs is a bounded label set.
+	jobMu        sync.Mutex
+	jobDurations map[string]*histogram
+
+	// poolStats reads pgxpool.Stat when /metrics renders, never per request.
+	poolStats atomic.Pointer[func() PoolStats]
+}
+
+// histogram is one label's cumulative buckets, guarded by Registry.jobMu.
+type histogram struct {
+	buckets [11]int64
+	sum     time.Duration
+	count   int64
+}
+
+// PoolStats is the subset of pgxpool.Stat that /metrics exports.
+type PoolStats struct {
+	AcquireCount         int64
+	AcquireDuration      time.Duration
+	AcquiredConns        int32
+	IdleConns            int32
+	TotalConns           int32
+	MaxConns             int32
+	EmptyAcquireCount    int64
+	CanceledAcquireCount int64
 }
 
 // Shared is PrometheusMetrics.shared.
@@ -115,6 +145,32 @@ func (r *Registry) RecordScenarioDataQuality(proxyCount, missingHistoryCount int
 func (r *Registry) RecordScenarioHistoryCoverage(covered, expected int) {
 	r.scenarioHistoryBarsCovered.Add(int64(max(0, covered)))
 	r.scenarioHistoryBarsExpected.Add(int64(max(0, expected)))
+}
+
+// SetPoolStats installs the pool reader /metrics calls on each scrape.
+func (r *Registry) SetPoolStats(read func() PoolStats) { r.poolStats.Store(&read) }
+
+// RecordJobDuration records one job tick's wall-clock duration under the
+// job's name.
+func (r *Registry) RecordJobDuration(job string, d time.Duration) {
+	secs := d.Seconds()
+	r.jobMu.Lock()
+	defer r.jobMu.Unlock()
+	if r.jobDurations == nil {
+		r.jobDurations = map[string]*histogram{}
+	}
+	h := r.jobDurations[job]
+	if h == nil {
+		h = &histogram{}
+		r.jobDurations[job] = h
+	}
+	h.sum += d
+	h.count++
+	for i, bound := range bucketBounds {
+		if secs <= bound {
+			h.buckets[i]++
+		}
+	}
 }
 
 // RecordTaxCarryforwardReconciliation is
@@ -182,7 +238,41 @@ func (r *Registry) Render() string {
 	w("# TYPE tax_carryforward_reconciliations_total counter\ntax_carryforward_reconciliations_total %d\n", r.taxCarryforwardReconciliation.Load())
 	w("# TYPE tax_carryforward_generated_cents_total counter\ntax_carryforward_generated_cents_total %d\n", r.taxCarryforwardGeneratedCents.Load())
 	w("# TYPE tax_carryforward_applied_cents_total counter\ntax_carryforward_applied_cents_total %d\n", r.taxCarryforwardAppliedCents.Load())
+
+	r.renderJobDurations(w)
+	if read := r.poolStats.Load(); read != nil {
+		ps := (*read)()
+		w("# TYPE pg_pool_acquire_total counter\npg_pool_acquire_total %d\n", ps.AcquireCount)
+		w("# TYPE pg_pool_acquire_duration_seconds_total counter\npg_pool_acquire_duration_seconds_total %.6f\n", ps.AcquireDuration.Seconds())
+		w("# TYPE pg_pool_empty_acquire_total counter\npg_pool_empty_acquire_total %d\n", ps.EmptyAcquireCount)
+		w("# TYPE pg_pool_canceled_acquire_total counter\npg_pool_canceled_acquire_total %d\n", ps.CanceledAcquireCount)
+		w("# TYPE pg_pool_acquired_conns gauge\npg_pool_acquired_conns %d\n", ps.AcquiredConns)
+		w("# TYPE pg_pool_idle_conns gauge\npg_pool_idle_conns %d\n", ps.IdleConns)
+		w("# TYPE pg_pool_total_conns gauge\npg_pool_total_conns %d\n", ps.TotalConns)
+		w("# TYPE pg_pool_max_conns gauge\npg_pool_max_conns %d\n", ps.MaxConns)
+	}
 	return b.String()
+}
+
+// renderJobDurations writes job_duration_seconds, labels sorted so the
+// output is stable. Nothing is written before the first tick.
+func (r *Registry) renderJobDurations(w func(string, ...any)) {
+	r.jobMu.Lock()
+	defer r.jobMu.Unlock()
+	if len(r.jobDurations) == 0 {
+		return
+	}
+	w("# HELP job_duration_seconds Wall-clock duration of one background job tick.\n")
+	w("# TYPE job_duration_seconds histogram\n")
+	for _, job := range slices.Sorted(maps.Keys(r.jobDurations)) {
+		h := r.jobDurations[job]
+		for i, bound := range bucketBounds {
+			w("job_duration_seconds_bucket{job=%q,le=\"%.3f\"} %d\n", job, bound, h.buckets[i])
+		}
+		w("job_duration_seconds_bucket{job=%q,le=\"+Inf\"} %d\n", job, h.count)
+		w("job_duration_seconds_sum{job=%q} %.6f\n", job, h.sum.Seconds())
+		w("job_duration_seconds_count{job=%q} %d\n", job, h.count)
+	}
 }
 
 // HTTPMiddleware is HTTPMetricsMiddleware, installed outermost (Vapor put it

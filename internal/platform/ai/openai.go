@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -354,12 +355,19 @@ func (c *OpenAIClient) completion(ctx context.Context, messages []Message, tools
 	return Completion(choice), nil
 }
 
+// base64Run matches a long base64 run, which in a provider body can only be
+// an echoed image.
+var base64Run = regexp.MustCompile(`[A-Za-z0-9+/]{64,}={0,2}`)
+
 // redactBody drops a provider error body that echoes the key back (which
 // matters now that the key can be a user's own), and truncates the rest.
 func redactBody(body, key string, limit int) string {
 	if key != "" && strings.Contains(body, key) {
 		return "<redacted: contained the key>"
 	}
+	// A provider that echoes the request back must not put an attached
+	// image in the logs.
+	body = base64Run.ReplaceAllString(body, "<image data redacted>")
 	if utf8.RuneCountInString(body) <= limit {
 		return body
 	}

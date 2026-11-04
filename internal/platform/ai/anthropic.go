@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -362,9 +363,14 @@ func buildTurns(messages []Message, flattenTools, replayThinking bool) []Anthrop
 			appendTurn("user", []json.RawMessage{mustJSON(block)})
 
 		default:
-			if text, ok := nonEmpty(m.Content); ok {
-				appendTurn("user", []json.RawMessage{textBlock(text)})
+			var blocks []json.RawMessage
+			for _, img := range m.Images {
+				blocks = append(blocks, imageBlock(img))
 			}
+			if text, ok := nonEmpty(m.Content); ok {
+				blocks = append(blocks, textBlock(text))
+			}
+			appendTurn("user", blocks)
 		}
 	}
 
@@ -643,4 +649,17 @@ func mustJSON(v any) json.RawMessage {
 		panic(err) // only ever called with maps of strings and raw JSON
 	}
 	return out
+}
+
+// imageBlock is a Messages API base64 image block.
+func imageBlock(img Image) json.RawMessage {
+	type source struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}
+	return mustJSON(struct {
+		Type   string `json:"type"`
+		Source source `json:"source"`
+	}{"image", source{"base64", img.MediaType, base64.StdEncoding.EncodeToString(img.Data)}})
 }

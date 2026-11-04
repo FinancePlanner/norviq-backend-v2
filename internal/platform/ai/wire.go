@@ -28,6 +28,37 @@ type Message struct {
 	// untouched, so they stay raw JSON.
 	ReasoningDetails []json.RawMessage `json:"reasoning_details,omitempty"`
 	Reasoning        *string           `json:"reasoning,omitempty"`
+	// Images ride on a user turn for one request only. They never marshal
+	// as a field: MarshalJSON turns them into the content array.
+	Images []Image `json:"-"`
+}
+
+// Image is one attached picture: raw bytes plus the media type the provider
+// is told. It is never persisted or logged.
+type Image struct {
+	MediaType string
+	Data      []byte
+}
+
+// MarshalJSON encodes as before unless the message carries images, then
+// content becomes an OpenAI multimodal array (text first, then one data URL
+// per image). It encodes without HTML escaping, like the rest of the wire.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type plain Message
+	if len(m.Images) == 0 {
+		return marshalNoEscape(plain(m))
+	}
+	parts := []VisionPart{}
+	if text := m.ContentString(); text != "" {
+		parts = append(parts, VisionText(text))
+	}
+	for _, img := range m.Images {
+		parts = append(parts, VisionImage(img.Data, img.MediaType))
+	}
+	return marshalNoEscape(struct {
+		plain
+		Content []VisionPart `json:"content"`
+	}{plain: plain(m), Content: parts})
 }
 
 // Text builds a message with only role and content.
@@ -85,7 +116,9 @@ type FunctionDef struct {
 type Parameter struct {
 	Description *string  `json:"description,omitempty"`
 	EnumValues  []string `json:"enum,omitempty"`
-	Type        string   `json:"type"`
+	// Items is the element schema of an array parameter.
+	Items any    `json:"items,omitempty"`
+	Type  string `json:"type"`
 }
 
 // JSONSchema is OpenAIJSONSchema. A tool without parameters encodes as

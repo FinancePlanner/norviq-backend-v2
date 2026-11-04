@@ -161,6 +161,33 @@ func (f *FallbackClient) alert(ctx context.Context, logger *slog.Logger, key, me
 	}
 }
 
+// ExcludeFreeRungs returns c without its `:free` models, for turns that carry
+// images (free models do not read them). A chain left with no rung, or a
+// bare free client, becomes DisabledClient; other clients pass through. The
+// input chain is never mutated.
+func ExcludeFreeRungs(c ChatClient) ChatClient {
+	switch v := c.(type) {
+	case *FallbackClient:
+		var kept []Rung
+		for i := range v.Rungs {
+			if !strings.HasSuffix(v.Rungs[i].Tier.Model, ":free") {
+				kept = append(kept, v.Rungs[i])
+			}
+		}
+		if len(kept) == 0 {
+			return DisabledClient{}
+		}
+		out := *v
+		out.Rungs = kept
+		return &out
+	case *OpenAIClient:
+		if strings.HasSuffix(v.Model, ":free") {
+			return DisabledClient{}
+		}
+	}
+	return c
+}
+
 // ChainOptions are what every client in a chain shares.
 type ChainOptions struct {
 	Timeout time.Duration

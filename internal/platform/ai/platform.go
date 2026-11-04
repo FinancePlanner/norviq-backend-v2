@@ -382,7 +382,7 @@ func resolveCredentialBaseURL(row *Credential) (string, error) {
 // UserCredentialFailure is AIUserCredentialFailure: the user's own key
 // failed mid-turn, as distinct from Norviq's AI being down.
 type UserCredentialFailure struct {
-	Kind         string // "rejected" | "rate_limited" | "unreachable"
+	Kind         string // "rejected" | "rate_limited" | "unreachable" | "image_unsupported"
 	Provider     string
 	CredentialID uuid.UUID
 }
@@ -402,6 +402,8 @@ func (f *UserCredentialFailure) UserFacingMessage() string {
 		return "Your " + f.Provider + " key was rejected. Update it in Settings → AI providers."
 	case "rate_limited":
 		return "Your " + f.Provider + " account is rate limiting requests. Try again shortly."
+	case "image_unsupported":
+		return "Your " + f.Provider + " model can't read images. Try without the image, or change the model in Settings → AI providers."
 	}
 	return "Could not reach " + f.Provider + " with your key. Try again shortly."
 }
@@ -413,6 +415,8 @@ func (f *UserCredentialFailure) ErrorCode() string {
 		return "user_credential_rejected"
 	case "rate_limited":
 		return "user_credential_rate_limited"
+	case "image_unsupported":
+		return "user_credential_image_unsupported"
 	}
 	return "user_credential_unreachable"
 }
@@ -432,6 +436,21 @@ func ClassifyCredentialFailure(err error, cred *Credential) (*UserCredentialFail
 		kind = "rate_limited"
 	}
 	return &UserCredentialFailure{Kind: kind, Provider: cred.Provider, CredentialID: cred.ID}, true
+}
+
+// ClassifyImageRejection maps a 400, 415 or 422 on a turn that carried an
+// image on the user's own key: the model cannot read images. ok is false for
+// any other error, which passes through.
+func ClassifyImageRejection(err error, cred *Credential) (*UserCredentialFailure, bool) {
+	up, ok := AsUpstream(err)
+	if !ok || cred == nil {
+		return nil, false
+	}
+	switch up.Status {
+	case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+		return &UserCredentialFailure{Kind: "image_unsupported", Provider: cred.Provider, CredentialID: cred.ID}, true
+	}
+	return nil, false
 }
 
 // RecordCredentialSuccess stamps last_used_at so the settings page stays

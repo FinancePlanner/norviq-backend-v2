@@ -52,8 +52,15 @@ const (
 
 // Session is the process-wide advisory-lock connection. It dials lazily and
 // redials after the connection dies, so a database blip does not leave every
-// job skipping its ticks until the next deploy. Locks held on a connection
-// that dies are released by Postgres with it, as they were under Vapor.
+// job skipping its ticks until the next deploy.
+//
+// The cost of sharing: when this connection dies, or a lock statement hits its
+// timeout (pgx closes the connection), Postgres releases every lock this process
+// holds, not just one. Running ticks are not told, so during that tick another
+// process can win the same job. This is accepted because the API runs one
+// replica and only a rollout's surge pod could take the lock. Canceling the
+// running ticks would be worse here, aborting a bank sync or a digest to guard
+// against a contender that is usually absent. Revisit before raising replicas.
 type Session struct {
 	dial func(ctx context.Context) (*pgx.Conn, error)
 
@@ -103,6 +110,24 @@ func (s *Session) tryLock(ctx context.Context, name string) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, statementTimeout)
 	defer cancel()
+	acquired, err := s.lockOnce(ctx, name)
+	// A connection the server dropped still reports open until a statement
+	// fails on it. Redial once rather than cost this tick; every lock it held
+	// died with it. A timeout also closes the connection, but leaves no budget.
+	if err != nil && s.conn != nil && s.conn.IsClosed() && ctx.Err() == nil {
+		acquired, err = s.lockOnce(ctx, name)
+	}
+	if err != nil {
+		return false, err
+	}
+	if acquired {
+		s.held[name] = struct{}{}
+	}
+	return acquired, nil
+}
+
+// lockOnce runs the lock statement, dialing first if there is no live connection.
+func (s *Session) lockOnce(ctx context.Context, name string) (bool, error) {
 	if s.conn == nil || s.conn.IsClosed() {
 		conn, err := s.dial(ctx)
 		if err != nil {
@@ -111,13 +136,8 @@ func (s *Session) tryLock(ctx context.Context, name string) (bool, error) {
 		s.conn = conn
 	}
 	var acquired bool
-	if err := s.conn.QueryRow(ctx, lockSQL, name).Scan(&acquired); err != nil {
-		return false, err
-	}
-	if acquired {
-		s.held[name] = struct{}{}
-	}
-	return acquired, nil
+	err := s.conn.QueryRow(ctx, lockSQL, name).Scan(&acquired)
+	return acquired, err
 }
 
 // dialError is a lock-session failure before any connection existed. Only

@@ -175,10 +175,11 @@ func buildDeps(ctx context.Context, cfg config.Base, logger *slog.Logger, withDB
 	return d, cleanup, nil
 }
 
-// Shutdown budget, measured from SIGTERM and kept inside the kubelet's
-// default 30 second grace period: HTTP gets 15 seconds to finish requests,
-// every drain (Telegram turns, jobs, detached work) shares what is left until
-// 24 seconds, then the lock session and the pool get 2 and 3 seconds to close.
+// Shutdown budget, measured from SIGTERM. It stays inside 30 seconds, the
+// kubelet's default grace period; the chart allows 45, less a 5 second preStop
+// sleep. HTTP gets 15 seconds to finish requests, every drain (Telegram turns,
+// jobs, detached work) shares what is left until 24 seconds, then the lock
+// session and the pool get 2 and 3 seconds to close.
 // Past each bound serve logs and moves on rather than being SIGKILLed with
 // nothing logged.
 const (
@@ -233,12 +234,7 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 	jobs := features.StartJobs(ctx, d)
 	pprof.Start(ctx, cfg.PprofAddr, logger)
 
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           srv.Handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	httpServer := newHTTPServer(cfg.Port, srv.Handler)
 	// Open realtime streams end with the process (RealtimeBus shutdown):
 	// Shutdown does not wait for hijacked or long-lived SSE responses.
 	httpServer.RegisterOnShutdown(realtime.FinishAll)
@@ -281,6 +277,19 @@ func serve(ctx context.Context, cfg config.Base, logger *slog.Logger) error {
 	drain.Go(func() { d.Health.RunShutdownHooks(drainCtx, logger) })
 	drain.Wait()
 	return nil
+}
+
+// newHTTPServer limits how long a connection may send headers or sit idle
+// between requests. IdleTimeout does not affect a response in flight, so SSE
+// streams are safe. ReadTimeout stays unset because it covers the body and
+// would cut slow uploads; WriteTimeout stays unset because it would cut SSE.
+func newHTTPServer(port int, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 // closeWithin runs closeFn and returns once it has, or after budget with a

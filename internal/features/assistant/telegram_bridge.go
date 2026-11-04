@@ -172,8 +172,12 @@ func (b *telegramBot) dispatch(u telegram.Update) {
 	ctx, cancel := context.WithTimeout(context.Background(), telegramReplyTimeout)
 	t := &turnHandle{cancel: cancel}
 	b.inflight[t] = struct{}{}
+	inFlight := len(b.inflight)
 	b.wg.Add(1)
 	b.mu.Unlock()
+	// Turns are not capped while the process is up. This is how a flood
+	// would show; it carries no chat or user id.
+	b.m.h.d.Logger.Info("telegram_turn_started", "in_flight", inFlight)
 
 	go func() {
 		defer func() {

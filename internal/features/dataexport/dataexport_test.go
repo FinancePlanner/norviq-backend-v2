@@ -329,3 +329,33 @@ func TestCreateAfterShutdownFailsTheExport(t *testing.T) {
 	default:
 	}
 }
+
+// A generator that finishes after the row was failed cannot flip it to ready.
+func TestLateReadyDoesNotOverwriteFailed(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	q := dataexportdb.New(e.app.Deps.DB)
+	id := uuid.New()
+	if err := q.InsertExport(ctx, dataexportdb.InsertExportParams{
+		ID: id, UserID: e.user, Type: "insights", Format: "json", Status: "pending", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := q.MarkExportFailed(ctx, dataexportdb.MarkExportFailedParams{UpdatedAt: &now, ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	path, size, expires := "/tmp/late.json", int64(1), now.Add(time.Hour)
+	if err := q.MarkExportReady(ctx, dataexportdb.MarkExportReadyParams{
+		FilePath: &path, FileSizeBytes: &size, ExpiresAt: &expires, UpdatedAt: &now, ID: id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := e.app.Deps.DB.QueryRow(ctx, `SELECT status FROM data_exports WHERE id = $1`, id).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" {
+		t.Fatalf("status %q, want failed", status)
+	}
+}

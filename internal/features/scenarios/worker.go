@@ -107,6 +107,7 @@ type RunWorker struct {
 	interval      time.Duration
 	maxConcurrent int
 	heartbeat     time.Duration
+	renewTimeout  time.Duration
 	running       atomic.Bool
 	now           func() time.Time
 }
@@ -125,7 +126,7 @@ func NewRunWorker(d *server.Deps, s WorkerSettings) *RunWorker {
 	return &RunWorker{
 		q: q, redis: d.Redis, logger: d.Logger, processor: Processor{Store: q},
 		workerID: apijson.FormatUUID(uuid.New()), interval: time.Duration(max(1, interval)) * time.Second,
-		maxConcurrent: int(max(1, min(maxConcurrent, 8))), heartbeat: 20 * time.Second, now: time.Now,
+		maxConcurrent: int(max(1, min(maxConcurrent, 8))), heartbeat: 20 * time.Second, renewTimeout: 20 * time.Second, now: time.Now,
 	}
 }
 
@@ -157,11 +158,20 @@ func (w *RunWorker) RunOnce(ctx context.Context) {
 // stores in error_message.
 func Describe(err error) string { return err.Error() }
 
+// errLeaseUnconfirmed ends a run whose heartbeat could not reach the database.
+// The run stays leased, not failed: this worker no longer knows it owns the run,
+// and once the lease expires another worker claims it.
+var errLeaseUnconfirmed = errors.New("scenario lease not confirmed")
+
 func (w *RunWorker) execute(ctx context.Context, id uuid.UUID) {
 	err := w.process(ctx, id)
 	if err == nil || ctx.Err() != nil {
 		// On shutdown Vapor's process simply exited: the run keeps its
 		// lease and is reclaimed once it expires.
+		return
+	}
+	if errors.Is(err, errLeaseUnconfirmed) {
+		w.logger.Warn("scenario_run stopped; lease not confirmed", "id", apijson.FormatUUID(id))
 		return
 	}
 	run, ferr := w.q.GetScenarioRunByID(ctx, id)
@@ -219,8 +229,8 @@ func (w *RunWorker) process(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
-	simCtx, cancelSimulation := context.WithCancel(ctx)
-	defer cancelSimulation()
+	simCtx, cancelSimulation := context.WithCancelCause(ctx)
+	defer cancelSimulation(nil)
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
 	go func() {
@@ -238,6 +248,9 @@ func (w *RunWorker) process(ctx context.Context, id uuid.UUID) error {
 	}
 	close(stopHeartbeat)
 	<-heartbeatDone
+	if errors.Is(context.Cause(simCtx), errLeaseUnconfirmed) {
+		return errLeaseUnconfirmed
+	}
 	if err != nil {
 		return err
 	}
@@ -277,9 +290,10 @@ func (w *RunWorker) process(ctx context.Context, id uuid.UUID) error {
 // or cancels the simulation once the run is no longer running under this
 // worker (canceled by the user, or reclaimed after an expired lease). The
 // renew is fenced on owner and state, so zero rows is that signal. An error
-// also cancels: without a confirmed lease another worker may claim the run,
-// and aborting on a database blip beats two workers writing one run.
-func (w *RunWorker) renewLease(ctx context.Context, id uuid.UUID, cancelSimulation context.CancelFunc, stop <-chan struct{}) {
+// or a renewal that hangs past renewTimeout also cancels: without a confirmed
+// lease another worker may claim the run, and aborting on a database blip beats
+// two workers writing one run.
+func (w *RunWorker) renewLease(ctx context.Context, id uuid.UUID, cancelSimulation context.CancelCauseFunc, stop <-chan struct{}) {
 	t := time.NewTimer(w.heartbeat)
 	defer t.Stop()
 	for {
@@ -290,11 +304,17 @@ func (w *RunWorker) renewLease(ctx context.Context, id uuid.UUID, cancelSimulati
 			return
 		case <-t.C:
 		}
-		renewed, err := w.q.RenewScenarioRunLease(ctx, scenariosdb.RenewScenarioRunLeaseParams{
+		renewCtx, cancelRenew := context.WithTimeout(ctx, w.renewTimeout)
+		renewed, err := w.q.RenewScenarioRunLease(renewCtx, scenariosdb.RenewScenarioRunLeaseParams{
 			ID: id, LeaseOwner: &w.workerID, LeaseExpiresAt: ptr(w.now().Add(60 * time.Second)),
 		})
-		if err != nil || renewed == 0 {
-			cancelSimulation()
+		cancelRenew()
+		if err != nil {
+			cancelSimulation(errLeaseUnconfirmed)
+			return
+		}
+		if renewed == 0 {
+			cancelSimulation(nil)
 			return
 		}
 		t.Reset(w.heartbeat)

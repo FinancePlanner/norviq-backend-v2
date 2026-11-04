@@ -109,7 +109,7 @@ type tgHarness struct {
 	update int64
 }
 
-func newTGHarness(t *testing.T, cfg *telegram.Config, env map[string]string) *tgHarness {
+func newTGHarness(t *testing.T, cfg *telegram.Config, env map[string]string, mutate ...func(*server.Deps)) *tgHarness {
 	t.Helper()
 	th := &tgHarness{tg: newTGStub(t), client: &scripted{}, secret: "s3cret"}
 	if cfg == nil {
@@ -117,6 +117,9 @@ func newTGHarness(t *testing.T, cfg *telegram.Config, env map[string]string) *tg
 	}
 	f := Feature{Sources: stubSources, memo: stubMemo{}, Telegram: cfg, TelegramBaseURL: th.tg.srv.URL}
 	th.App = testutil.NewApp(t, []server.Feature{f}, func(d *server.Deps) {
+		for _, m := range mutate {
+			m(d)
+		}
 		p, err := ai.New(ai.Options{Env: ai.MapEnv(env), Logger: silent, DB: d.DB, HTTP: &http.Client{}})
 		if err != nil {
 			t.Fatal(err)

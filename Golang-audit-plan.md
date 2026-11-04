@@ -2,12 +2,76 @@
 
 Date: 2026-11-02
 Module: `norviq-api` (Go 1.27.3)
-Scope: this repository. Findings and an implementation plan only.
-Status: no production code, schema, configuration, or infrastructure was changed.
+Scope: this repository. Findings and an implementation plan.
+Status: see [Implementation status](#implementation-status-2026-11-04). The audit itself changed nothing.
 
 Staff review (2026-11-02): the roadmap in section B is the original proposal. It is not the work to implement. The approved work is [Revised roadmap](#revised-roadmap). Anything marked REVISE, MEASURE FIRST, or REJECT stays unshipped until that section says otherwise.
 
 This is a wire-compatible port of the Swift/Vapor API. Vapor names, Redis key formats, and the fail-open job lock are intentional parity. A change that alters those needs an explicit decision. `docs/MIGRATION.md` records the deviations that were already chosen.
+
+## Implementation status (2026-11-04)
+
+**Live state: production does not run this work yet.** `values-production.yaml` pins `b4d3015`, which predates all of it. Staging pins `1056b9f`, which has items 1 to 10. Both were confirmed on the running deployments.
+
+Revised roadmap items 1 to 10 are in the code. Item 2 needed one correction: a heartbeat database error marked the run `failed`, and the plan says it stays leased and reclaimable. `TestHeartbeatErrorCancelsAndLeavesTheRunReclaimable` failed before that fix.
+
+Item 5 and item 10 use a longer wait than the plan's 15 seconds. HTTP gets 15 seconds, then every drain shares what is left until 24 seconds, because 20 + 15 seconds of the old budget overran the 30 second grace period. Nothing in this list claims a measured speedup.
+
+Review of that work fixed three defects, each with a test that failed first: a tick no longer gets skipped when Postgres dropped the lock session (`TestTickRunsAfterTheBackendIsKilled`), a hung lease renewal now stops the simulation after 20 seconds instead of stalling the worker (`TestHungRenewalCancelsTheSimulation`), and `job_duration_seconds` has buckets up to 3600 seconds, so long ticks no longer all land in `+Inf` (`TestJobDurationsResolveLongTicks`).
+
+**Outside the ten items, kept.** `d988c4a` also shipped two idempotency changes the roadmap does not list. The 503 on a Redis `GET` error has an APPROVE verdict in P0.2, so its absence from the roadmap reads as an omission. The replay-header filter has no verdict. It stays because removing it brings back a replay that labels a plain body gzip, and `TestReplayHeaderKeepsOnlyHandlerHeaders` covers it. Rollback for either is a revert.
+
+**Accepted risk: one shared lock session.** Losing that connection releases every lock the process holds, and running ticks are not told. At one replica, only a rollout's surge pod could take a lock. Revisit this before raising the replica count.
+
+### Validation results
+
+| Check | Result | Evidence |
+|---|---|---|
+| `go test -race` for `joblock`, billing, scenarios | Pass, no data race | Whole module, disposable Postgres 16 and Redis |
+| Production `SCENARIO_PLANNING_ENABLED` | `"true"` | Live deployment |
+| Production `DATABASE_MAX_CONNECTIONS` | Unset, so 20 | Live deployment. `DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP` is a Vapor leftover that v2 ignores |
+| Postgres `max_connections` | 100 | Live `SHOW`, Postgres 18.4. The instance is shared by production and staging |
+| API replicas | 1, but `maxSurge: 1` | Live deployment |
+| Provider call counter | Added: `market_quote_provider_calls_total{provider}` | Counts calls after every cache missed. No production reading yet |
+| Telegram in-flight log | Added: `telegram_turn_started in_flight=N` | Info level, no chat or user id. No production reading yet |
+| Clients sending a key in parallel | iOS no. Web possible. MCP not shown | See below |
+| Staging `EXPLAIN` and row counts | Done, inconclusive alone | Every plan is under 0.2 ms, but staging holds 1 expense, 0 scenario runs and 0 targets. See below |
+| Production row counts | Done, **P1.2 closed** | Approved by the owner on 2026-11-04 as an exception to "never production": read-only aggregates, no `EXPLAIN`. See below |
+
+**Connection budget.** One pod is now 21 connections: 20 in the pool and the lock session. Two production pods during a rollout (42), staging (21) and about 10 others come to about 73 of 100.
+
+**Export boot sweep stays out.** One replica is not one process. `maxSurge: 1` runs two pods during every rollout, so a sweep in the new pod would fail live exports in the old one.
+
+**Parallel `Idempotency-Key`.** iOS guards the action with `isSubmitting` and reuses the key sequentially. Web forms carry a hidden key, and the pilot-follow comment expects a double submit, so two parallel requests are possible there. No trace shows how often. Per the review above, this does not justify the NX protocol. MCP sends one key per call and nothing shows it repeating a key concurrently.
+
+**Keys the API ignores.** Only banks, brokers, expense import, pilots and receipt import mount the idempotency middleware. MCP sends keys to `/v1/expenses`, `/v1/transactions`, `/v1/targets`, `/v1/watchlist`, `/v1/research`, `/v1/goals` and `/v1/budget/*`, and web sends one to `/v1/terminal-positions`. None of those replays, so a retried write there can double-write, despite the comment in `norviq-mcp/internal/api/client.go`. Not fixed here: it is outside the approved list.
+
+### Staging plans
+
+Run read-only with a 15 second statement timeout, using `EXPLAIN (ANALYZE, BUFFERS, SERIALIZE)`. Staging has 31 users, 1 expense, 0 scenario runs, 0 scenario definitions, 0 targets, 27 stocks, 61 watchlist items and 0 news items. The slowest query took 0.133 ms. That is what a nearly empty table costs, so it does not show that these queries are cheap under load.
+
+### Production row counts
+
+The plan says "never production", so staging could not settle P1.2. The owner approved one exception on 2026-11-04: read-only aggregates with a 15 second statement timeout, printing no user data or ids.
+
+Production has 38 users, 1 expense, 0 scenario runs, 0 scenario definitions, 0 targets, 23 stocks, 34 watchlist items and 0 news items. The largest single-user expense list is 184 bytes.
+
+**P1.2 is closed with no change: no query rewrite, no index.** There is no cost to reduce today. Quote batching, the symbol indexes and the targets index have the same answer for now, since `targets` and `news_items` are empty. Re-run these counts before reopening any of them.
+
+### Synthetic query plans
+
+These are not measurements of Norviq's data. The row counts are numbers chosen to stress the queries, on an unloaded laptop with Postgres 16 (production runs 18). They test only whether the plan shape is dangerous at that size.
+
+| Query | Synthetic rows | Plan | Execution |
+|---|---|---|---|
+| `ListExpensesRange`, heavy user, nil dates | 100,000 of 200,000 | Seq scan, half the table matches | 45 ms |
+| `ListExpensesRange`, typical user | 500 | Index scan | 0.5 ms |
+| `ListScenarioRuns`, heavy user | 2,000 of 6,000 | Seq scan and sort | 0.8 ms |
+| `ListScenarioDefinitions`, heavy user | 500 of 4,500 | Bitmap index scan and sort | 0.1 ms |
+| `UnresolvedTargets` | 10,000 of 100,000 | Seq scan | 5.5 ms |
+| `StockOwnersForSymbols`, 30 symbols | 1,200 of 200,000 | Parallel seq scan | 29 ms |
+
+The plans are cheap at these sizes, so none of them argues for an index. `EXPLAIN` on Postgres 16 does not detoast or send the rows, and that is where the cost went: reading the same rows with `COPY` produced 222 MB in 1.1 to 6.0 seconds for the heavy expense user, whose metadata was deliberately 2 KB per row, 39 MB in about 0.3 seconds for the heavy run list, and 80 KB for the typical user. A 222 MB response would threaten the pod's 450 MiB memory limit. No real user is near that today (see production row counts above).
 
 ## Adversarial review of the plan
 

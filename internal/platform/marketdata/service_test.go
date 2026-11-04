@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"norviq-api/internal/platform/cache"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/store/marketdatadb"
 	"norviq-api/internal/testutil"
 )
@@ -415,5 +417,59 @@ func TestRecentEarningsFromStub(t *testing.T) {
 	}
 	if !fx.cache.Has("market:earnings-recent:fmp:AAPL") || !fx.cache.Has("market:earnings:fmp:AAPL:5") {
 		t.Fatal("recent earnings keys")
+	}
+}
+
+// providerCalls reads market_quote_provider_calls_total for one provider.
+func providerCalls(t *testing.T, provider string) int {
+	t.Helper()
+	prefix := `market_quote_provider_calls_total{provider="` + provider + `"} `
+	for line := range strings.Lines(metrics.Shared.Render()) {
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			n, err := strconv.Atoi(strings.TrimSpace(rest))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+// The counter sees provider calls, not cache hits: it is what decides whether
+// misses dominate a tick. It changes neither call path.
+func TestQuoteCountsProviderCallsNotCacheHits(t *testing.T) {
+	fx := newFixture(t, true, true)
+	fx.svc.Tier = TierPremium
+	ts := float64(time.Now().Unix())
+	fx.stub.on("/quote", 200, map[string]any{"c": 101.5, "d": 1.5, "dp": 1.5, "h": 102, "l": 99, "o": 100, "pc": 100, "t": ts})
+	fx.stub.on("/stock/profile2", 200, map[string]any{"currency": "USD"})
+	ctx := context.Background()
+	finnhub, fmpCalls := providerCalls(t, "finnhub"), providerCalls(t, "fmp")
+
+	if _, err := fx.svc.Quote(ctx, "AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if got := providerCalls(t, "finnhub") - finnhub; got != 1 {
+		t.Fatalf("miss counted %d finnhub calls, want 1", got)
+	}
+	if _, err := fx.svc.Quote(ctx, "AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if got := providerCalls(t, "finnhub") - finnhub; got != 1 {
+		t.Fatalf("cache hit counted: %d finnhub calls, want 1", got)
+	}
+
+	// An empty quote falls back to FMP: one call each.
+	fx.stub.on("/quote", 200, map[string]any{"c": 0, "d": 0, "dp": 0, "h": 0, "l": 0, "o": 0, "pc": 0, "t": 0})
+	fx.stub.on("/stable/quote", 200, []map[string]any{{"symbol": "MSFT", "name": "Microsoft", "price": 400.5, "changePercentage": 1.2, "change": 4, "timestamp": 1730000000}})
+	if _, err := fx.svc.Quote(ctx, "MSFT"); err != nil {
+		t.Fatal(err)
+	}
+	if got := providerCalls(t, "finnhub") - finnhub; got != 2 {
+		t.Fatalf("fallback path counted %d finnhub calls, want 2", got)
+	}
+	if got := providerCalls(t, "fmp") - fmpCalls; got != 1 {
+		t.Fatalf("fallback path counted %d fmp calls, want 1", got)
 	}
 }

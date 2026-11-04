@@ -128,3 +128,24 @@ func TestJobDurationsByNameAndPoolStatsAtScrape(t *testing.T) {
 		t.Fatalf("pool read %d times for one scrape", reads)
 	}
 }
+
+// Long ticks are the ones worth measuring, so they need buckets of their own
+// rather than all landing in +Inf.
+func TestJobDurationsResolveLongTicks(t *testing.T) {
+	r := &Registry{}
+	r.RecordJobDuration("bank_sync_job", 45*time.Second)
+	out := r.Render()
+	for _, want := range []string{
+		`job_duration_seconds_bucket{job="bank_sync_job",le="30.000"} 0` + "\n",
+		`job_duration_seconds_bucket{job="bank_sync_job",le="60.000"} 1` + "\n",
+		`job_duration_seconds_bucket{job="bank_sync_job",le="3600.000"} 1` + "\n",
+		`job_duration_seconds_bucket{job="bank_sync_job",le="+Inf"} 1` + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(out, `http_request_duration_seconds_bucket{le="60.000"}`) {
+		t.Error("the HTTP histogram's buckets changed")
+	}
+}

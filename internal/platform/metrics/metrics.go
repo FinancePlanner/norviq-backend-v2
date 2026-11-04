@@ -32,6 +32,10 @@ func Enabled() bool { return config.Bool(os.Getenv("PROMETHEUS_ENABLED"), false)
 
 var bucketBounds = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
+// jobBucketBounds extends bucketBounds: a tick can run for minutes, and those
+// are the ones worth telling apart.
+var jobBucketBounds = [...]float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 900, 3600}
+
 // Registry is PrometheusMetrics: lock-free counters.
 type Registry struct {
 	httpRequestsTotal atomic.Int64
@@ -64,13 +68,17 @@ type Registry struct {
 	jobMu        sync.Mutex
 	jobDurations map[string]*histogram
 
+	// quoteCalls is market_quote_provider_calls_total, by provider name.
+	quoteMu    sync.Mutex
+	quoteCalls map[string]int64
+
 	// poolStats reads pgxpool.Stat when /metrics renders, never per request.
 	poolStats atomic.Pointer[func() PoolStats]
 }
 
 // histogram is one label's cumulative buckets, guarded by Registry.jobMu.
 type histogram struct {
-	buckets [11]int64
+	buckets [len(jobBucketBounds)]int64
 	sum     time.Duration
 	count   int64
 }
@@ -166,11 +174,22 @@ func (r *Registry) RecordJobDuration(job string, d time.Duration) {
 	}
 	h.sum += d
 	h.count++
-	for i, bound := range bucketBounds {
+	for i, bound := range jobBucketBounds {
 		if secs <= bound {
 			h.buckets[i]++
 		}
 	}
+}
+
+// RecordQuoteProviderCall counts one quote requested from a provider, after
+// every cache missed. The few provider names are a bounded label set.
+func (r *Registry) RecordQuoteProviderCall(provider string) {
+	r.quoteMu.Lock()
+	defer r.quoteMu.Unlock()
+	if r.quoteCalls == nil {
+		r.quoteCalls = map[string]int64{}
+	}
+	r.quoteCalls[provider]++
 }
 
 // RecordTaxCarryforwardReconciliation is
@@ -240,6 +259,7 @@ func (r *Registry) Render() string {
 	w("# TYPE tax_carryforward_applied_cents_total counter\ntax_carryforward_applied_cents_total %d\n", r.taxCarryforwardAppliedCents.Load())
 
 	r.renderJobDurations(w)
+	r.renderQuoteCalls(w)
 	if read := r.poolStats.Load(); read != nil {
 		ps := (*read)()
 		w("# TYPE pg_pool_acquire_total counter\npg_pool_acquire_total %d\n", ps.AcquireCount)
@@ -266,12 +286,26 @@ func (r *Registry) renderJobDurations(w func(string, ...any)) {
 	w("# TYPE job_duration_seconds histogram\n")
 	for _, job := range slices.Sorted(maps.Keys(r.jobDurations)) {
 		h := r.jobDurations[job]
-		for i, bound := range bucketBounds {
+		for i, bound := range jobBucketBounds {
 			w("job_duration_seconds_bucket{job=%q,le=\"%.3f\"} %d\n", job, bound, h.buckets[i])
 		}
 		w("job_duration_seconds_bucket{job=%q,le=\"+Inf\"} %d\n", job, h.count)
 		w("job_duration_seconds_sum{job=%q} %.6f\n", job, h.sum.Seconds())
 		w("job_duration_seconds_count{job=%q} %d\n", job, h.count)
+	}
+}
+
+// renderQuoteCalls writes market_quote_provider_calls_total, labels sorted.
+// Nothing is written before the first call.
+func (r *Registry) renderQuoteCalls(w func(string, ...any)) {
+	r.quoteMu.Lock()
+	defer r.quoteMu.Unlock()
+	if len(r.quoteCalls) == 0 {
+		return
+	}
+	w("# TYPE market_quote_provider_calls_total counter\n")
+	for _, provider := range slices.Sorted(maps.Keys(r.quoteCalls)) {
+		w("market_quote_provider_calls_total{provider=%q} %d\n", provider, r.quoteCalls[provider])
 	}
 }
 

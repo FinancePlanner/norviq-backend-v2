@@ -41,6 +41,11 @@ type LedgerTrade struct {
 	ExternalID   string
 	// StockID sells from this exact row; nil is the row for Symbol.
 	StockID *uuid.UUID
+	// Currency is the trade's own currency; blank is the account's base
+	// currency.
+	Currency string
+	// Fees is stored on the transaction as is; nil stores none.
+	Fees *float64
 }
 
 // LedgerTradeResult is LedgerTradeResult.
@@ -86,6 +91,9 @@ type AccountResolver func(ctx context.Context, db portfoliocoredb.DBTX, userID, 
 // back every trade in the batch.
 type LedgerTradeRecorder struct {
 	Now func() time.Time
+	// SkipCash records shares and transactions only: cash_balances is never
+	// read, checked or written.
+	SkipCash bool
 }
 
 const (
@@ -111,16 +119,19 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 	if err != nil {
 		return nil, err
 	}
-	cashRows, err := q.CashRow(ctx, stocksdb.CashRowParams{AccountID: account.ID, Currency: account.BaseCurrency})
-	if err != nil {
-		return nil, err
-	}
 	var cash stocksdb.CashBalance
-	exists := len(cashRows) > 0
-	if exists {
-		cash = cashRows[0]
-	} else {
-		cash = stocksdb.CashBalance{ID: uuid.New(), AccountID: account.ID, Currency: account.BaseCurrency, Balance: 0}
+	exists := false
+	if !r.SkipCash {
+		cashRows, err := q.CashRow(ctx, stocksdb.CashRowParams{AccountID: account.ID, Currency: account.BaseCurrency})
+		if err != nil {
+			return nil, err
+		}
+		exists = len(cashRows) > 0
+		if exists {
+			cash = cashRows[0]
+		} else {
+			cash = stocksdb.CashBalance{ID: uuid.New(), AccountID: account.ID, Currency: account.BaseCurrency, Balance: 0}
+		}
 	}
 
 	results := make([]LedgerTradeResult, 0, len(trades))
@@ -134,16 +145,20 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 				return nil, err
 			}
 			realized = &pnl
-			cash.Balance += t.Quantity * t.Price
+			if !r.SkipCash {
+				cash.Balance += t.Quantity * t.Price
+			}
 		case LedgerBuy:
 			cost := t.Quantity * t.Price
-			if !(cash.Balance+ledgerCashTolerance >= cost) {
+			if !r.SkipCash && !(cash.Balance+ledgerCashTolerance >= cost) {
 				return nil, &LedgerTradeError{Kind: "insufficientCash", Symbol: t.Symbol}
 			}
 			if remaining, err = r.applyBuy(ctx, q, t, userID, portfolioID, sourceProvider); err != nil {
 				return nil, err
 			}
-			cash.Balance -= cost
+			if !r.SkipCash {
+				cash.Balance -= cost
+			}
 		}
 		if t.InstrumentID != nil {
 			typ := TransactionTypeSell
@@ -151,15 +166,22 @@ func (r LedgerTradeRecorder) Record(ctx context.Context, db stocksdb.DBTX, trade
 				typ = TransactionTypeBuy
 			}
 			ext, qty, price := t.ExternalID, t.Quantity, t.Price
+			currency := t.Currency
+			if currency == "" {
+				currency = account.BaseCurrency
+			}
 			if _, err := q.InsertTransaction(ctx, stocksdb.InsertTransactionParams{
 				ID: uuid.New(), AccountID: account.ID, InstrumentID: *t.InstrumentID, ExternalID: &ext,
-				Type: typ, Quantity: &qty, Price: &price, Currency: account.BaseCurrency,
+				Type: typ, Quantity: &qty, Price: &price, Currency: currency, Fees: t.Fees,
 				TradeDate: t.TradeDate.UTC(), RealizedPnl: realized, Now: r.now(),
 			}); err != nil {
 				return nil, err
 			}
 		}
 		results = append(results, LedgerTradeResult{Symbol: t.Symbol, RemainingShares: remaining})
+	}
+	if r.SkipCash {
+		return results, nil
 	}
 	now := r.now()
 	asOf := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)

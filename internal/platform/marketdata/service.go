@@ -10,6 +10,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/platform/cache"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/store/marketdatadb"
 
 	"github.com/google/uuid"
@@ -212,6 +213,7 @@ func (s *Service) Quote(ctx context.Context, rawSymbol string) (QuoteResponse, e
 var errEmptyQuoteServedStale = errors.New("empty quote; serve stale row")
 
 func (s *Service) fetchQuote(ctx context.Context, symbol, providerName string, existing *marketdatadb.GetQuoteCacheRow) (QuoteResponse, error) {
+	metrics.Shared.RecordQuoteProviderCall(providerName)
 	fresh, err := s.Provider.Quote(ctx, symbol)
 	if err != nil {
 		return QuoteResponse{}, err
@@ -248,6 +250,7 @@ func (s *Service) fmpFallbackQuote(ctx context.Context, symbol string) *Quote {
 		s.logger().Info("market.quote fmp_fallback_skipped", "symbol", symbol, "reason", "tier", "tier", string(s.Tier))
 		return nil
 	}
+	metrics.Shared.RecordQuoteProviderCall(s.FMP.Name())
 	quotes, err := s.FMP.StockQuotes(ctx, []string{symbol})
 	if err != nil {
 		s.logger().Warn("market.quote fmp_fallback_failed", "symbol", symbol, "error", err)

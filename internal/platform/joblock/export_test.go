@@ -11,8 +11,16 @@ func NewSessionWithDial(dial func(ctx context.Context) (*pgx.Conn, error)) *Sess
 	return newSession(dial)
 }
 
-// BreakConn closes the session's connection as a network failure would,
-// leaving it in place for the next lock to notice.
+// BackendPID is the session connection's Postgres backend, for a test that
+// kills it from the server side.
+func (s *Session) BackendPID() uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.PgConn().PID()
+}
+
+// BreakConn closes the session's connection from the client side, leaving it
+// in place for the next lock to find.
 func (s *Session) BreakConn(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

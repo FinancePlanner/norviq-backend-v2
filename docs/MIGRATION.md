@@ -50,10 +50,14 @@ advisory lock on `hashtext(name)`, held for one tick), so replicas never run
 a tick at the same time. Every lock a process holds lives on one dedicated
 connection (`joblock.Session`, dialed outside the pool and redialed after
 it dies), so a tick never keeps a pool connection checked out while its body
-needs the pool.
+needs the pool. The cost: losing that connection releases every lock this
+process holds, and running ticks are not told. That is accepted at one replica,
+where only a rollout's surge pod could take a lock. Revisit it before raising
+the replica count.
 
-On shutdown, one budget measured from SIGTERM keeps the process inside the
-kubelet's default 30 second grace period (`cmd/api/main.go`): HTTP requests
+On shutdown, one budget measured from SIGTERM keeps the process inside 30
+seconds, the kubelet's default grace period (`cmd/api/main.go`; the chart sets
+45 with a 5 second preStop sleep, so this leaves room): HTTP requests
 get 15 seconds; Telegram turns, jobs and detached work (exports, group push
 fan-out, live achievement checks) share what is left until 24 seconds; the
 lock session and the pool then get 2 and 3 seconds to close. Names still
@@ -119,8 +123,9 @@ Vapor bugs were ported faithfully unless they are listed here or in
   between send and record can send one extra earnings push.
 - **Scenario run writes are fenced** on `lease_owner` and `state =
   'running'`: a reclaimed or user-canceled run is never completed or failed
-  by the worker that lost it, and a heartbeat that cannot renew cancels the
-  simulation.
+  by the worker that lost it. A heartbeat that finds the run gone cancels the
+  simulation. One that cannot reach the database also cancels it, but leaves
+  the run leased rather than failed, so another worker claims it after expiry.
 - The bugs that were ported faithfully, and the owner's decision on each (fix
   or keep), are in `docs/vapor-bugs/money.md`, `docs/vapor-bugs/portfolio.md`
   and `docs/vapor-bugs/social.md`. Tests that pin those decisions cite the

@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"norviq-api/internal/platform/joblock"
+	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/testutil"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -217,5 +220,80 @@ func TestSaturatedPoolIsNotReadAsAnOutage(t *testing.T) {
 	entered := false
 	if joblock.RunAsLeaderWithSession(context.Background(), pool, sess, logger, "x", func(context.Context) { entered = true }) || entered {
 		t.Fatal("a busy pool was read as a dead database and the tick ran unlocked")
+	}
+}
+
+// Every leader tick lands in job_duration_seconds under the job's name, and
+// only while Prometheus is on.
+func TestLeaderTickRecordsJobDuration(t *testing.T) {
+	pool := testutil.DB(t)
+	sess := joblock.NewSession(pool)
+	t.Cleanup(func() { sess.Close(context.Background()) })
+	body := func(context.Context) {}
+	// The registry is process-wide and outlives a -count iteration.
+	name := "duration_probe_" + uuid.NewString()
+	want := fmt.Sprintf("job_duration_seconds_count{job=%q} 1", name)
+
+	t.Setenv("PROMETHEUS_ENABLED", "false")
+	joblock.RunAsLeaderWithSession(context.Background(), pool, sess, logger, name, body)
+	if strings.Contains(metrics.Shared.Render(), name) {
+		t.Fatal("recorded a tick with Prometheus off")
+	}
+	t.Setenv("PROMETHEUS_ENABLED", "true")
+	joblock.RunAsLeaderWithSession(context.Background(), pool, sess, logger, name, body)
+	if !strings.Contains(metrics.Shared.Render(), want) {
+		t.Fatalf("missing %q", want)
+	}
+}
+
+// A connection killed from the server side still reports open until a statement
+// fails on it. That statement must not cost a tick: a daily job would lose its
+// day. The locks died with the backend, so redialing once is safe.
+func TestTickRunsAfterTheBackendIsKilled(t *testing.T) {
+	pool := testutil.DB(t)
+	sess := joblock.NewSession(pool)
+	t.Cleanup(func() { sess.Close(context.Background()) })
+	ctx := context.Background()
+	noop := func(context.Context) {}
+	if !joblock.RunAsLeaderWithSession(ctx, pool, sess, logger, "x", noop) {
+		t.Fatal("first tick")
+	}
+	pid := sess.BackendPID()
+	if _, err := pool.Exec(ctx, `SELECT pg_terminate_backend($1)`, int32(pid)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var alive bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1)`, int32(pid)).Scan(&alive); err != nil {
+			t.Fatal(err)
+		}
+		if !alive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("backend survived pg_terminate_backend")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !joblock.RunAsLeaderWithSession(ctx, pool, sess, logger, "x", noop) {
+		t.Fatal("tick was skipped after the backend died")
+	}
+	if got := sess.BackendPID(); got == pid {
+		t.Fatalf("still on backend %d", got)
+	}
+}
+
+// A real refusal from Postgres during the dial arrives wrapped by pgx, and must
+// still read as "the database answered": skip the tick, do not run unlocked.
+func TestRealPostgresRefusalOnDialSkips(t *testing.T) {
+	cfg := testutil.DB(t).Config().ConnConfig.Copy()
+	cfg.Database = "no_such_database"
+	sess := joblock.NewSessionWithDial(func(ctx context.Context) (*pgx.Conn, error) {
+		return pgx.ConnectConfig(ctx, cfg)
+	})
+	entered := false
+	if joblock.RunAsLeaderWithSession(context.Background(), deadPool(t), sess, logger, "x", func(context.Context) { entered = true }) || entered {
+		t.Fatal("ran unlocked after Postgres itself refused the connection")
 	}
 }

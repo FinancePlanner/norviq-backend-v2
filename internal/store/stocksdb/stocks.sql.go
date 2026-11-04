@@ -146,6 +146,36 @@ func (q *Queries) DuplicateStockInList(ctx context.Context, arg DuplicateStockIn
 	return items, nil
 }
 
+const existingTransactionExternalIDs = `-- name: ExistingTransactionExternalIDs :many
+SELECT external_id FROM transactions
+WHERE account_id = $1 AND external_id = ANY($2::text[])
+`
+
+type ExistingTransactionExternalIDsParams struct {
+	AccountID   uuid.UUID
+	ExternalIds []string
+}
+
+func (q *Queries) ExistingTransactionExternalIDs(ctx context.Context, arg ExistingTransactionExternalIDsParams) ([]*string, error) {
+	rows, err := q.db.Query(ctx, existingTransactionExternalIDs, arg.AccountID, arg.ExternalIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*string{}
+	for rows.Next() {
+		var external_id *string
+		if err := rows.Scan(&external_id); err != nil {
+			return nil, err
+		}
+		items = append(items, external_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAccount = `-- name: GetAccount :many
 SELECT id, user_id, external_id, broker, display_name, base_currency, created_at, updated_at, tax_wrapper, tax_jurisdiction, tax_owner_member_id, lot_selection_method, portfolio_id FROM accounts WHERE id = $1 LIMIT 1
 `
@@ -757,6 +787,17 @@ func (q *Queries) ListStocks(ctx context.Context, arg ListStocksParams) ([]Stock
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPortfolioListForTrades = `-- name: LockPortfolioListForTrades :exec
+SELECT id FROM portfolio_lists WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Serializes trade batches on a list for the rest of the transaction. NO KEY
+// keeps it from blocking other requests' foreign key checks on the list.
+func (q *Queries) LockPortfolioListForTrades(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockPortfolioListForTrades, id)
+	return err
 }
 
 const nonPilotAccountIDs = `-- name: NonPilotAccountIDs :many

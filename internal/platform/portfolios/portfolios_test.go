@@ -151,3 +151,193 @@ func TestManualAccountAndCash(t *testing.T) {
 		t.Fatalf("all cash %v %v", all, err)
 	}
 }
+
+func TestListIsIBKRSynced(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	ctx := context.Background()
+	db := app.Deps.DB
+	insertList := func(user uuid.UUID, name string, isDefault bool, age string) uuid.UUID {
+		t.Helper()
+		id := uuid.New()
+		if _, err := db.Exec(ctx, `INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, $3, $4, now() - $5::interval)`, id, user, name, isDefault, age); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	connect := func(user uuid.UUID, provider, status string, list *uuid.UUID) {
+		t.Helper()
+		if _, err := db.Exec(ctx, `INSERT INTO broker_connections (id, user_id, provider, status, portfolio_list_id, created_at) VALUES ($1, $2, $3, $4, $5, now())`, uuid.New(), user, provider, status, list); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := func(user, list uuid.UUID, expected bool, label string) {
+		t.Helper()
+		got, err := portfolios.ListIsIBKRSynced(ctx, db, user, list)
+		if err != nil || got != expected {
+			t.Fatalf("%s: %v %v, want %v", label, got, err, expected)
+		}
+	}
+	follow := func(user, list uuid.UUID) {
+		t.Helper()
+		pilot := uuid.New()
+		if _, err := db.Exec(ctx, `INSERT INTO pilots (id, kind, slug, display_name) VALUES ($1, 'fund', $2, 'P')`, pilot, "p-"+pilot.String()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `INSERT INTO pilot_follows (user_id, pilot_id, target_kind, portfolio_list_id) VALUES ($1, $2, 'portfolio', $3)`, user, pilot, list); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Bound to the list.
+	for _, status := range []string{"connected", "error"} {
+		user := createUser(t, app, "bound-"+status+"@example.com")
+		bound := insertList(user, "Bound", false, "1 day")
+		other := insertList(user, "Other", true, "2 days")
+		connect(user, "ibkr", status, &bound)
+		want(user, bound, true, status+" bound")
+		want(user, other, false, status+" other list")
+	}
+
+	// Unbound: the sync writes to the default list.
+	for _, status := range []string{"connected", "error"} {
+		user := createUser(t, app, "unbound-"+status+"@example.com")
+		def := insertList(user, "Default", true, "1 day")
+		other := insertList(user, "Other", false, "2 days")
+		connect(user, "ibkr", status, nil)
+		want(user, def, true, status+" unbound default")
+		want(user, other, false, status+" unbound non-default")
+	}
+
+	// Not live, or not IBKR.
+	for _, c := range []struct{ provider, status string }{{"ibkr", "disconnected"}, {"csv", "connected"}, {"csv", "error"}} {
+		user := createUser(t, app, "off-bound-"+c.provider+"-"+c.status+"@example.com")
+		def := insertList(user, "Default", true, "1 day")
+		connect(user, c.provider, c.status, &def)
+		want(user, def, false, c.provider+" "+c.status+" bound")
+
+		user = createUser(t, app, "off-unbound-"+c.provider+"-"+c.status+"@example.com")
+		def = insertList(user, "Default", true, "1 day")
+		connect(user, c.provider, c.status, nil)
+		want(user, def, false, c.provider+" "+c.status+" unbound")
+	}
+
+	// No list flagged default: the sync would promote the oldest, so that one
+	// counts, and nothing is written finding that out.
+	user := createUser(t, app, "nodefault@example.com")
+	oldest := insertList(user, "Oldest", false, "3 days")
+	newest := insertList(user, "Newest", false, "1 day")
+	connect(user, "ibkr", "connected", nil)
+	want(user, oldest, true, "promotion target")
+	want(user, newest, false, "not the promotion target")
+	var promoted bool
+	if err := db.QueryRow(ctx, `SELECT is_default FROM portfolio_lists WHERE id = $1`, oldest).Scan(&promoted); err != nil || promoted {
+		t.Fatalf("list was promoted: %v %v", promoted, err)
+	}
+
+	// A followed default is passed over by the sync, in favor of the oldest
+	// unfollowed list.
+	user = createUser(t, app, "followeddefault@example.com")
+	followedDefault := insertList(user, "Followed", true, "3 days")
+	fallback := insertList(user, "Fallback", false, "2 days")
+	follow(user, followedDefault)
+	connect(user, "ibkr", "connected", nil)
+	want(user, fallback, true, "fallback past followed default")
+	want(user, followedDefault, false, "followed default")
+
+	// Another user's connection says nothing about this list.
+	owner := createUser(t, app, "owner@example.com")
+	stranger := createUser(t, app, "stranger@example.com")
+	list := insertList(owner, "Mine", true, "1 day")
+	connect(stranger, "ibkr", "connected", &list)
+	want(owner, list, false, "stranger's connection")
+}
+
+func TestPeekManualAccount(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	ctx := context.Background()
+	db := app.Deps.DB
+	user := createUser(t, app, "peek@example.com")
+	list, err := portfolios.EnsureDefaultPortfolioListID(ctx, db, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	countAccounts := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM accounts WHERE user_id = $1`, user).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// None yet: nil, and none created.
+	if got, err := portfolios.PeekManualAccount(ctx, db, user, list); err != nil || got != nil {
+		t.Fatalf("empty: %+v %v", got, err)
+	}
+	if n := countAccounts(); n != 0 {
+		t.Fatalf("accounts %d", n)
+	}
+
+	// A legacy portfolio-less account is what FindOrCreate would adopt: peek
+	// returns it and leaves it unadopted.
+	legacy := uuid.New()
+	if _, err := db.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at) VALUES ($1, $2, 'legacy', 'manual', 'GBP', now())`, legacy, user); err != nil {
+		t.Fatal(err)
+	}
+	got, err := portfolios.PeekManualAccount(ctx, db, user, list)
+	if err != nil || got == nil || got.ID != legacy {
+		t.Fatalf("legacy: %+v %v", got, err)
+	}
+	var stillLegacy bool
+	if err := db.QueryRow(ctx, `SELECT portfolio_id IS NULL FROM accounts WHERE id = $1`, legacy).Scan(&stillLegacy); err != nil || !stillLegacy {
+		t.Fatalf("legacy adopted: %v %v", stillLegacy, err)
+	}
+
+	// An account on the portfolio wins, and is what FindOrCreate returns.
+	own := uuid.New()
+	if _, err := db.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, portfolio_id, created_at) VALUES ($1, $2, 'own', 'manual', 'EUR', $3, now())`, own, user, list); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = portfolios.PeekManualAccount(ctx, db, user, list); err != nil || got == nil || got.ID != own || got.BaseCurrency != "EUR" {
+		t.Fatalf("own: %+v %v", got, err)
+	}
+	found, err := portfolios.FindOrCreateManualAccount(ctx, db, user, list)
+	if err != nil || found.ID != own {
+		t.Fatalf("find: %+v %v", found, err)
+	}
+}
+
+// PeekAccountForManualEdit agrees with AccountForManualEdit: the pilot account
+// when the list has one, else the manual one.
+func TestPeekAccountForManualEdit(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	ctx := context.Background()
+	db := app.Deps.DB
+	user := createUser(t, app, "peekedit@example.com")
+	list, err := portfolios.EnsureDefaultPortfolioListID(ctx, db, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list); err != nil || got != nil {
+		t.Fatalf("empty: %+v %v", got, err)
+	}
+	manual, err := portfolios.FindOrCreateManualAccount(ctx, db, user, list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list); err != nil || got == nil || got.ID != manual.ID {
+		t.Fatalf("manual: %+v %v", got, err)
+	}
+	pilot := uuid.New()
+	if _, err := db.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, portfolio_id, created_at) VALUES ($1, $2, 'pilot-x', 'pilot', 'USD', $3, now())`, pilot, user, list); err != nil {
+		t.Fatal(err)
+	}
+	got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list)
+	if err != nil || got == nil || got.ID != pilot {
+		t.Fatalf("pilot: %+v %v", got, err)
+	}
+	edit, err := portfolios.AccountForManualEdit(ctx, db, user, list)
+	if err != nil || edit.ID != pilot {
+		t.Fatalf("edit: %+v %v", edit, err)
+	}
+}

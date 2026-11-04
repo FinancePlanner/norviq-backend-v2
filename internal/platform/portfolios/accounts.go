@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"norviq-api/internal/store/portfoliocoredb"
+	"norviq-api/internal/store/portfoliodb"
 
 	"github.com/google/uuid"
 )
@@ -14,6 +15,10 @@ const ManualBroker = "manual"
 
 // PilotBroker is PilotAccountResolver.broker.
 const PilotBroker = "pilot"
+
+// ManualAccountBaseCurrency is the base currency FindOrCreateManualAccount
+// gives a new manual account.
+const ManualAccountBaseCurrency = "USD"
 
 // TotalCashBalance is PortfolioCashResolver.totalCashBalance: the latest
 // balance per (account, currency), floored at zero, summed; plus the
@@ -103,10 +108,102 @@ func FindOrCreateManualAccount(ctx context.Context, db portfoliocoredb.DBTX, use
 		ExternalID:   external,
 		Broker:       ManualBroker,
 		DisplayName:  &display,
-		BaseCurrency: "USD",
+		BaseCurrency: ManualAccountBaseCurrency,
 		PortfolioID:  &portfolioID,
 		CreatedAt:    Now(),
 	})
+}
+
+// PeekManualAccount makes FindOrCreateManualAccount's lookups and writes
+// nothing: the account that call would use, including a legacy one it would
+// adopt, or nil when it would create one.
+func PeekManualAccount(ctx context.Context, db portfoliocoredb.DBTX, userID, portfolioID uuid.UUID) (*portfoliocoredb.Account, error) {
+	q := portfoliocoredb.New(db)
+	existing, err := q.AccountByUserPortfolioBroker(ctx, portfoliocoredb.AccountByUserPortfolioBrokerParams{UserID: userID, PortfolioID: &portfolioID, Broker: ManualBroker})
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		return &existing[0], nil
+	}
+	legacy, err := q.LegacyAccountByUserBroker(ctx, portfoliocoredb.LegacyAccountByUserBrokerParams{UserID: userID, Broker: ManualBroker})
+	if err != nil {
+		return nil, err
+	}
+	if len(legacy) > 0 {
+		return &legacy[0], nil
+	}
+	return nil, nil
+}
+
+// PeekAccountForManualEdit is AccountForManualEdit with PeekManualAccount: the
+// account that call would use, or nil when it would create one.
+func PeekAccountForManualEdit(ctx context.Context, db portfoliocoredb.DBTX, userID, portfolioID uuid.UUID) (*portfoliocoredb.Account, error) {
+	pilot, err := portfoliocoredb.New(db).AccountByUserPortfolioBroker(ctx, portfoliocoredb.AccountByUserPortfolioBrokerParams{UserID: userID, PortfolioID: &portfolioID, Broker: PilotBroker})
+	if err != nil {
+		return nil, err
+	}
+	if len(pilot) > 0 {
+		return &pilot[0], nil
+	}
+	return PeekManualAccount(ctx, db, userID, portfolioID)
+}
+
+// ListIsIBKRSynced reports whether a live IBKR sync writes to the list: a
+// connection in connected or error status (a failed run marks it error, and it
+// keeps its binding and can sync again) bound to the list, or unbound when the
+// list is where an unbound sync lands, per the brokers package's
+// holdingsTargetListID. Writes nothing.
+func ListIsIBKRSynced(ctx context.Context, db portfoliocoredb.DBTX, userID, listID uuid.UUID) (bool, error) {
+	target, err := peekDefaultPortfolioListID(ctx, db, userID)
+	if err != nil {
+		return false, err
+	}
+	ids, err := portfoliodb.New(db).BrokerConnectionsForList(ctx, portfoliodb.BrokerConnectionsForListParams{
+		UserID: userID, ListID: listID, IsDefaultTarget: target != nil && *target == listID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(ids) > 0, nil
+}
+
+// peekDefaultPortfolioListID is the list EnsureDefaultPortfolioListID would
+// settle on among the user's existing lists, without its promotions and
+// demotions; nil when it would have to create one.
+func peekDefaultPortfolioListID(ctx context.Context, db portfoliocoredb.DBTX, userID uuid.UUID) (*uuid.UUID, error) {
+	q := portfoliocoredb.New(db)
+	existing, err := q.DefaultPortfolioList(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		followed, err := IsFollowed(ctx, db, existing[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		if !followed {
+			return &existing[0].ID, nil
+		}
+	}
+	followedRaw, err := q.FollowedPortfolioListIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	followed := make([]uuid.UUID, 0, len(followedRaw))
+	for _, f := range followedRaw {
+		if f != nil {
+			followed = append(followed, *f)
+		}
+	}
+	fallback, err := q.OldestPortfolioListExcluding(ctx, portfoliocoredb.OldestPortfolioListExcludingParams{UserID: userID, Excluded: followed})
+	if err != nil {
+		return nil, err
+	}
+	if len(fallback) > 0 {
+		return &fallback[0].ID, nil
+	}
+	return nil, nil
 }
 
 // AccountForManualEdit is PortfolioAccountResolver.forManualEdit: the

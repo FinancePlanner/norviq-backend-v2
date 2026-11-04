@@ -126,6 +126,47 @@ func (q *Queries) AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) 
 	return items, nil
 }
 
+const brokerConnectionsForList = `-- name: BrokerConnectionsForList :many
+
+SELECT id FROM broker_connections
+WHERE user_id = $1
+  AND provider = 'ibkr'
+  AND status IN ('connected', 'error')
+  AND (
+    portfolio_list_id = $2::uuid
+    OR (portfolio_list_id IS NULL AND $3::boolean)
+  )
+`
+
+type BrokerConnectionsForListParams struct {
+	UserID          uuid.UUID
+	ListID          uuid.UUID
+	IsDefaultTarget bool
+}
+
+// MARK: live broker sync
+// The IBKR connections whose sync writes to this list: bound to it, or unbound
+// when it is the list an unbound sync resolves to (is_default_target).
+func (q *Queries) BrokerConnectionsForList(ctx context.Context, arg BrokerConnectionsForListParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, brokerConnectionsForList, arg.UserID, arg.ListID, arg.IsDefaultTarget)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countBarsOnDay = `-- name: CountBarsOnDay :one
 SELECT count(*) FROM market_price_bars
 WHERE instrument_key = ANY($1::text[])

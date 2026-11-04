@@ -3,6 +3,7 @@ package stocks
 import (
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"norviq-api/internal/httpx"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestStockListCursorRoundTrip(t *testing.T) {
@@ -118,4 +120,10 @@ func TestLedgerHTTPError(t *testing.T) {
 	if err := ledgerHTTPError(other); !errors.Is(err, other) {
 		t.Fatalf("passthrough %v", err)
 	}
+}
+
+// NewActionsForTest builds Actions on a stub market, for the external test
+// package. RecordTrades and PreviewTrades use only these fields.
+func NewActionsForTest(db *pgxpool.Pool, market MarketData, logger *slog.Logger) *Actions {
+	return &Actions{h: &handlers{db: db, market: market, logger: logger}}
 }

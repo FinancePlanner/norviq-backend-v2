@@ -165,3 +165,17 @@ FROM (
 ) x
 LEFT JOIN instruments i ON i.id = x.instrument_id
 GROUP BY i.symbol, x.currency;
+
+-- MARK: live broker sync
+
+-- name: BrokerConnectionsForList :many
+-- The IBKR connections whose sync writes to this list: bound to it, or unbound
+-- when it is the list an unbound sync resolves to (is_default_target).
+SELECT id FROM broker_connections
+WHERE user_id = sqlc.arg(user_id)
+  AND provider = 'ibkr'
+  AND status IN ('connected', 'error')
+  AND (
+    portfolio_list_id = sqlc.arg(list_id)::uuid
+    OR (portfolio_list_id IS NULL AND sqlc.arg(is_default_target)::boolean)
+  );

@@ -16,6 +16,10 @@ type Querier interface {
 	ActiveShareLinksForUser(ctx context.Context, userID uuid.UUID) ([]PortfolioShareLink, error)
 	// MarketPriceBarRepository.adjustedCloses.
 	AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) ([]AdjustedClosesRow, error)
+	// MARK: live broker sync
+	// The IBKR connections whose sync writes to this list: bound to it, or unbound
+	// when it is the list an unbound sync resolves to (is_default_target).
+	BrokerConnectionsForList(ctx context.Context, arg BrokerConnectionsForListParams) ([]uuid.UUID, error)
 	CountBarsOnDay(ctx context.Context, arg CountBarsOnDayParams) (int64, error)
 	CountNonPilotAccountsForPortfolio(ctx context.Context, arg CountNonPilotAccountsForPortfolioParams) (int64, error)
 	// MARK: portfolio lists

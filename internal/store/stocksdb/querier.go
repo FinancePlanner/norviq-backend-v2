@@ -20,6 +20,7 @@ type Querier interface {
 	DeleteStock(ctx context.Context, id uuid.UUID) error
 	DeleteTransaction(ctx context.Context, id uuid.UUID) error
 	DuplicateStockInList(ctx context.Context, arg DuplicateStockInListParams) ([]Stock, error)
+	ExistingTransactionExternalIDs(ctx context.Context, arg ExistingTransactionExternalIDsParams) ([]*string, error)
 	GetAccount(ctx context.Context, id uuid.UUID) ([]Account, error)
 	GetInstrument(ctx context.Context, id uuid.UUID) ([]Instrument, error)
 	GetTransaction(ctx context.Context, id uuid.UUID) ([]Transaction, error)
@@ -38,6 +39,9 @@ type Querier interface {
 	// DatabaseStocksRepository.list: newest first, keyset cursor on
 	// (created_at, id). A cursor without an id compares created_at only.
 	ListStocks(ctx context.Context, arg ListStocksParams) ([]Stock, error)
+	// Serializes trade batches on a list for the rest of the transaction. NO KEY
+	// keeps it from blocking other requests' foreign key checks on the list.
+	LockPortfolioListForTrades(ctx context.Context, id uuid.UUID) error
 	NonPilotAccountIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	SetStockShares(ctx context.Context, arg SetStockSharesParams) error
 	StockBySymbol(ctx context.Context, arg StockBySymbolParams) ([]Stock, error)

@@ -141,6 +141,15 @@ ORDER BY trade_date DESC;
 -- name: GetTransaction :many
 SELECT * FROM transactions WHERE id = $1 LIMIT 1;
 
+-- name: LockPortfolioListForTrades :exec
+-- Serializes trade batches on a list for the rest of the transaction. NO KEY
+-- keeps it from blocking other requests' foreign key checks on the list.
+SELECT id FROM portfolio_lists WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: ExistingTransactionExternalIDs :many
+SELECT external_id FROM transactions
+WHERE account_id = $1 AND external_id = ANY(sqlc.arg(external_ids)::text[]);
+
 -- name: InsertTransaction :one
 INSERT INTO transactions (
     id, account_id, instrument_id, external_id, type, quantity, price, currency,

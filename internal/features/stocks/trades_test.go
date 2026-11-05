@@ -215,7 +215,15 @@ func TestRecordTradesNewSymbolInserts(t *testing.T) {
 	if typ != "buy" || qty != 3 || tradePrice != 400 || tradeDate != "2024-03-10" || !strings.HasPrefix(ext, stocks.ManualExternalIDPrefix) {
 		t.Fatalf("transaction %s %s %v @ %v on %s", typ, ext, qty, tradePrice, tradeDate)
 	}
-	if n := e.count(t, `SELECT count(*) FROM user_activities WHERE user_id = $1 AND title = 'Screenshot trades' AND subtitle = '1 trades recorded'`, e.userID); n != 1 {
+	if n := e.count(t, `SELECT count(*) FROM user_activities WHERE user_id = $1 AND title = 'Screenshot trades' AND subtitle = '1 trade recorded'`, e.userID); n != 1 {
+		t.Fatalf("activity rows %d", n)
+	}
+}
+
+func TestRecordTradesActivityCountsPlural(t *testing.T) {
+	e := newTradesEnv(t)
+	e.record(t, buy("AAPL", 1, 100, "2024-03-10"), buy("MSFT", 1, 100, "2024-03-10"))
+	if n := e.count(t, `SELECT count(*) FROM user_activities WHERE user_id = $1 AND title = 'Screenshot trades' AND subtitle = '2 trades recorded'`, e.userID); n != 1 {
 		t.Fatalf("activity rows %d", n)
 	}
 }

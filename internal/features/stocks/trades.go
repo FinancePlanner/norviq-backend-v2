@@ -455,7 +455,7 @@ func (a *Actions) RecordTrades(ctx context.Context, userID uuid.UUID, listID *st
 		}
 		h.recordActivity(ctx, tx, activity.Record{
 			UserID: userID, Type: activity.TypeStockUpdated, Title: "Screenshot trades",
-			Subtitle: strconv.Itoa(len(trades)) + " trades recorded",
+			Subtitle: tradesRecordedSubtitle(len(trades)),
 			IsGrowth: true, Symbol: "arrow.left.arrow.right.circle.fill",
 		})
 		return nil
@@ -543,4 +543,11 @@ func (h *handlers) ledgerTrades(ctx context.Context, rows []tradeRow) ([]LedgerT
 func isUniqueViolation(err error) bool {
 	var pg *pgconn.PgError
 	return errors.As(err, &pg) && pg.Code == "23505"
+}
+
+func tradesRecordedSubtitle(n int) string {
+	if n == 1 {
+		return "1 trade recorded"
+	}
+	return strconv.Itoa(n) + " trades recorded"
 }

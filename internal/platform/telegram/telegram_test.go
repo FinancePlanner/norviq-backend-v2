@@ -137,6 +137,40 @@ func TestClientSendRetriesAndKeyboard(t *testing.T) {
 	}
 }
 
+// A URL in a reply must not make Telegram fetch it, including on the plain resend.
+func TestSendDisablesLinkPreviews(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var b map[string]any
+		_ = json.Unmarshal(raw, &b)
+		mu.Lock()
+		bodies = append(bodies, b)
+		n := len(bodies)
+		mu.Unlock()
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := &Client{Token: "TOK", BaseURL: srv.URL}
+	if err := c.Send(context.Background(), "5", Outbound{Text: "see https://attacker.example/?q=secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || bodies[1]["parse_mode"] != nil {
+		t.Fatalf("bodies = %+v", bodies)
+	}
+	for i, b := range bodies {
+		options, ok := b["link_preview_options"].(map[string]any)
+		if !ok || options["is_disabled"] != true {
+			t.Fatalf("body %d = %+v", i, b)
+		}
+	}
+}
+
 func TestValueJSON(t *testing.T) {
 	got := object{"text": str("a/b \"q\"\n<"), "chat_id": str("5"), "reply_markup": raw(`{"x":1}`)}.json()
 	want := `{"chat_id":"5","reply_markup":{"x":1},"text":"a\/b \"q\"\n<"}`

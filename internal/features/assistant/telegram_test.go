@@ -411,16 +411,58 @@ func TestTelegramVoiceNote(t *testing.T) {
 
 func TestParseConfirmationAnswer(t *testing.T) {
 	id := uuid.New()
+	approve := &confirmationAnswer{kind: answerApproveLatest}
+	decline := &confirmationAnswer{kind: answerDeclineLatest}
 	cases := map[string]*confirmationAnswer{
 		messagingConfirmPrefix + strings.ToUpper(id.String()): {kind: answerApprove, id: id},
 		messagingDeclinePrefix + id.String():                  {kind: answerDecline, id: id},
-		"no, please don't do that":                            {kind: answerDeclineLatest},
-		"ok go":                                               {kind: answerApproveLatest},
-		"don't":                                               {kind: answerDeclineLatest},
-		"don\u2019t do it":                                    {kind: answerDeclineLatest}, // Swift approved this through "do"
-		"'yes'":                                               {kind: answerApproveLatest},
-		"what did I spend":                                    nil,
-		"   ":                                                 nil,
+
+		"yes":               approve,
+		"Yes please":        approve,
+		"yes, please.":      approve,
+		"'yes'":             approve,
+		"ok go":             approve,
+		"go":                approve,
+		"do it":             approve,
+		"please do that":    approve,
+		"ok do it please":   approve, // four words, the most it takes
+		"no":                decline,
+		"Nope.":             decline,
+		"don't":             decline,
+		"don\u2019t do it":  decline, // Swift approved this through "do"
+		"no, don't do that": decline,
+		"stop it":           decline,
+		"cancel that":       decline,
+		"cancel it please":  decline,
+
+		// The sentences a word match used to take for an answer.
+		"what do I own":          nil,
+		"go through my spending": nil,
+		"no idea what I own":     nil,
+		"no worries":             nil,
+		"stop buying AAPL":       nil,
+		"do I own AAPL":          nil,
+		"ok but which one":       nil,
+		"what did I spend":       nil,
+
+		// Over four words, however agreeable.
+		"ok do it now please":      nil,
+		"yes yes yes yes yes":      nil,
+		"no, please don't do that": nil,
+
+		// Filler alone answers nothing, and neither does a mix.
+		"please": nil,
+		"it":     nil,
+		"that":   nil,
+		"yes no": nil,
+		"ok no":  nil,
+
+		// A digit is a word that isn't an answer.
+		"go 100": nil,
+		"no 3":   nil,
+
+		"   ": nil,
+		"'":   nil,
 	}
 	for in, want := range cases {
 		got := parseConfirmationAnswer(in)

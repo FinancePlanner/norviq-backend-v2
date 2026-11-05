@@ -248,6 +248,9 @@ func (c *Client) sendChunk(ctx context.Context, chatID, part string, keyboard *s
 		"chat_id":    str(chatID),
 		"text":       str(HTML(part)),
 		"parse_mode": str("HTML"),
+		// Telegram fetches a URL it previews, so a URL in a reply would otherwise
+		// reach whoever controls it, query string and all.
+		"link_preview_options": raw(`{"is_disabled":true}`),
 	}
 	if keyboard != nil {
 		body["reply_markup"] = raw(*keyboard)

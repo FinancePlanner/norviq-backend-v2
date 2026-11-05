@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -452,16 +453,27 @@ type confirmationAnswer struct {
 	id   uuid.UUID
 }
 
+const maxAnswerWords = 4
+
 var (
 	refusalWords  = []string{"no", "nope", "cancel", "stop", "don't", "dont", "decline", "abort", "nevermind"}
 	approvalWords = []string{"yes", "yep", "yeah", "confirm", "approve", "ok", "okay", "do", "go"}
+	// answerFiller can stand beside an answer but is never one.
+	answerFiller = []string{"please", "it", "that"}
+	// refusalFiller adds "do", so "don't do it" stays a refusal: there it is the
+	// thing refused, where alone it agrees.
+	refusalFiller = append([]string{"do"}, answerFiller...)
 )
 
-// parseConfirmationAnswer reads a button payload, else a typed yes/no.
-// Refusals win over approvals ("no, please don't do that"). Words are runs
-// of letters and apostrophes (a typographic one counts as '). Deliberate fix:
-// Swift split on letters only, so "don't" became "don" + "t", never matched
-// as a refusal, and "don't do it" approved through "do".
+// parseConfirmationAnswer reads a button payload, else a typed yes/no. A typed
+// answer is the whole message: at most four words, each an answer of one kind or
+// filler, with at least one answer. Anything else is a turn for the model and
+// leaves the card alone, because a sentence ("what do I own", "no idea", "go
+// through my spending") is not a decision and image text can seed the card it
+// would land on. Words are runs of letters, digits and apostrophes (a typographic
+// one counts as '), so a number stops a message being an answer. Deliberate fix:
+// Swift split on letters only, so "don't" became "don" + "t", never matched as a
+// refusal, and "don't do it" approved through "do".
 func parseConfirmationAnswer(text string) *confirmationAnswer {
 	trimmed := strings.TrimFunc(text, unicode.IsSpace)
 	if rest, ok := strings.CutPrefix(trimmed, messagingConfirmPrefix); ok {
@@ -475,30 +487,36 @@ func parseConfirmationAnswer(text string) *confirmationAnswer {
 		}
 	}
 	lower := strings.ReplaceAll(strings.ToLower(trimmed), "\u2019", "'")
-	words := strings.FieldsFunc(lower, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+	words := strings.FieldsFunc(lower, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	})
 	for i, w := range words {
 		words[i] = strings.Trim(w, "'")
 	}
-	if len(words) == 0 {
+	if len(words) == 0 || len(words) > maxAnswerWords {
 		return nil
 	}
-	has := func(set []string) bool {
-		for _, w := range words {
-			for _, s := range set {
-				if w == s {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if has(refusalWords) {
+	if onlyAnswers(words, refusalWords, refusalFiller) {
 		return &confirmationAnswer{kind: answerDeclineLatest}
 	}
-	if has(approvalWords) {
+	if onlyAnswers(words, approvalWords, answerFiller) {
 		return &confirmationAnswer{kind: answerApproveLatest}
 	}
 	return nil
+}
+
+// onlyAnswers: every word is an answer or filler, and at least one is an answer.
+func onlyAnswers(words, answers, filler []string) bool {
+	answered := false
+	for _, w := range words {
+		switch {
+		case slices.Contains(answers, w):
+			answered = true
+		case !slices.Contains(filler, w):
+			return false
+		}
+	}
+	return answered
 }
 
 // parseSwiftUUID is UUID(uuidString:): the 36-character hyphenated form only.

@@ -435,11 +435,12 @@ func TestParseConfirmationAnswer(t *testing.T) {
 		"cancel that":       decline,
 		"cancel it please":  decline,
 
-		// R26: the natural ways to say it.
+		// R26, R27: the natural ways to say it. "thanks" is filler for a decline
+		// only, because "ok thanks" is usually a sign-off.
 		"go ahead":   approve,
-		"yes thanks": approve,
-		"ok thanks":  approve,
 		"no thanks":  decline,
+		"yes thanks": nil,
+		"ok thanks":  nil,
 
 		// The sentences a word match used to take for an answer.
 		"what do I own":          nil,

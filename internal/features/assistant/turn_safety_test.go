@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -112,13 +113,13 @@ func TestTextTurnWithNoMarkerInWindowAppliesInline(t *testing.T) {
 		h := newTradesHarness(t)
 		inline(t, h, h.defaultList())
 	})
-	// The window is 20 rows: this turn's own, the fillers, then the image's reply
-	// and the image's user row.
+	// The scan is 21 rows: this turn's own, the fillers, then the image's reply and
+	// the image's user row.
 	t.Run("marker has aged out", func(t *testing.T) {
 		h := newTradesHarness(t)
 		list := h.defaultList()
 		h.imageReply("ok")
-		h.history(18)
+		h.history(19)
 		inline(t, h, list)
 	})
 	t.Run("marker on the assistant's row", func(t *testing.T) {
@@ -139,10 +140,58 @@ func TestMarkerAtTheEdgeOfTheWindowStillDefers(t *testing.T) {
 	h := newTradesHarness(t)
 	list := h.defaultList()
 	h.imageReply("ok")
-	h.history(17)
+	h.history(18)
 	turn := h.textTurn("add it", callTool("c1", "add_position", addNVDA), say("Added."))
 	if turn.Kind != "confirmation_required" || h.shares(list, "NVDA") != 0 {
 		t.Fatalf("turn = %+v", turn)
+	}
+}
+
+// The marker row is older than the reply it taints, so the reply stays in the
+// prompt one turn after the marker has left it. m=9 is that turn.
+func TestTaintLastsAsLongAsThePoisonedReplyIsInThePrompt(t *testing.T) {
+	const poison = "POISONED REPLY"
+	for m, want := range map[int]struct {
+		card, poisoned, marker bool
+	}{
+		7:  {card: true, poisoned: true, marker: true},
+		8:  {card: true, poisoned: true, marker: true},
+		9:  {card: true, poisoned: true, marker: false},
+		10: {card: false, poisoned: false, marker: false},
+	} {
+		t.Run(strconv.Itoa(m), func(t *testing.T) {
+			h := newTradesHarness(t)
+			h.imageReply(poison)
+			for range m {
+				h.textTurn("question", say("plain answer"))
+			}
+			turn := h.textTurn("next", callTool("c1", "add_goal", `{"title":"Injected"}`), say("Added."))
+			goals := h.count(`SELECT count(*) FROM goals WHERE user_id = $1`, h.user)
+			if want.card {
+				if turn.Kind != "confirmation_required" || turn.PendingAction == nil || goals != 0 {
+					t.Fatalf("kind %s, goals %d", turn.Kind, goals)
+				}
+			} else if turn.Kind != "message" || turn.PendingAction != nil || goals != 1 {
+				t.Fatalf("kind %s, goals %d", turn.Kind, goals)
+			}
+			prompt := h.client.seen[len(h.client.seen)-1]
+			if !want.card {
+				prompt = h.client.seen[len(h.client.seen)-2]
+			}
+			if len(prompt) > 21 {
+				t.Fatalf("sent %d messages, want the system prompt and at most 20 rows", len(prompt))
+			}
+			var sent strings.Builder
+			for i := range prompt {
+				sent.WriteString(prompt[i].ContentString() + "\n")
+			}
+			if got := strings.Contains(sent.String(), poison); got != want.poisoned {
+				t.Fatalf("poison in prompt = %v", got)
+			}
+			if got := strings.Contains(sent.String(), imageMarker); got != want.marker {
+				t.Fatalf("marker in prompt = %v", got)
+			}
+		})
 	}
 }
 
@@ -370,70 +419,79 @@ func TestStreamScopedImageRefusalFrame(t *testing.T) {
 	th.noTurnSpent(user)
 }
 
-// searchStub stands in for the market provider and records what reaches it.
-type searchStub struct {
+// lookupStub stands in for the market provider and records what reaches it.
+type lookupStub struct {
 	marketdata.Disabled
-	queries []string
+	inputs []string
 }
 
-func (s *searchStub) Search(_ context.Context, query string) ([]marketdata.SearchResult, error) {
-	s.queries = append(s.queries, query)
+func (s *lookupStub) Search(_ context.Context, query string) ([]marketdata.SearchResult, error) {
+	s.inputs = append(s.inputs, query)
 	return []marketdata.SearchResult{}, nil
 }
 
-func TestSearchQueryCapOnImageAndTaintedTurns(t *testing.T) {
-	h := newTradesHarness(t)
-	svc, err := market.SharedService(h.Deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stub := &searchStub{}
-	svc.Provider = stub
-	search := func(letter string, n int) ai.Message {
-		return callTool("c1", "search_symbols", `{"query":"`+strings.Repeat(letter, n)+`"}`)
-	}
-	toolReply := func(t *testing.T) string {
-		t.Helper()
-		last := h.client.seen[len(h.client.seen)-1]
-		reply := lastMessage(last)
-		if reply.Role != "tool" {
-			t.Fatalf("last message = %+v", reply)
-		}
-		return *reply.Content
-	}
-	image := func(t *testing.T, letter string, n int) string {
-		t.Helper()
-		h.client.replies = []ai.Message{search(letter, n), say("ok")}
-		if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "x", fakePNG(64)); r.Status != 200 {
-			t.Fatalf("image turn = %d %s", r.Status, r.Body)
-		}
-		return toolReply(t)
-	}
-	text := func(t *testing.T, letter string, n int) string {
-		t.Helper()
-		h.textTurn("look it up", search(letter, n), say("ok"))
-		return toolReply(t)
-	}
+func (s *lookupStub) Quote(ctx context.Context, symbol string) (marketdata.Quote, error) {
+	s.inputs = append(s.inputs, symbol)
+	return s.Disabled.Quote(ctx, symbol)
+}
 
-	// No image in the window: no cap.
-	if got := text(t, "A", 65); isErrorPayload(got) || len(stub.queries) != 1 {
-		t.Fatalf("clean text turn: %s, queries %v", got, stub.queries)
-	}
-	stub.queries = nil
+func TestLookupInputCapOnImageAndTaintedTurns(t *testing.T) {
+	for tool, key := range map[string]string{"search_symbols": "query", "get_quote": "symbol"} {
+		t.Run(tool, func(t *testing.T) {
+			h := newTradesHarness(t)
+			svc, err := market.SharedService(h.Deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub := &lookupStub{}
+			svc.Provider = stub
+			lookup := func(letter string, n int) ai.Message {
+				return callTool("c1", tool, `{"`+key+`":"`+strings.Repeat(letter, n)+`"}`)
+			}
+			toolReply := func() string {
+				reply := lastMessage(h.client.seen[len(h.client.seen)-1])
+				if reply.Role != "tool" {
+					t.Fatalf("last message = %+v", reply)
+				}
+				return *reply.Content
+			}
+			image := func(letter string, n int) string {
+				h.client.replies = []ai.Message{lookup(letter, n), say("ok")}
+				if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "x", fakePNG(64)); r.Status != 200 {
+					t.Fatalf("image turn = %d %s", r.Status, r.Body)
+				}
+				return toolReply()
+			}
+			text := func(letter string, n int) string {
+				h.textTurn("look it up", lookup(letter, n), say("ok"))
+				return toolReply()
+			}
+			refused := func(name, got string) {
+				t.Helper()
+				if !strings.Contains(got, "at most 64 characters") || len(stub.inputs) != 0 {
+					t.Fatalf("%s: %s, inputs %v", name, got, stub.inputs)
+				}
+			}
+			reached := func(name string) {
+				t.Helper()
+				if len(stub.inputs) != 1 {
+					t.Fatalf("%s: inputs %v", name, stub.inputs)
+				}
+				stub.inputs = nil
+			}
 
-	if got := image(t, "B", 65); !isErrorPayload(got) || !strings.Contains(got, "64") || len(stub.queries) != 0 {
-		t.Fatalf("image turn over the cap: %s, queries %v", got, stub.queries)
-	}
-	if got := image(t, "C", 64); isErrorPayload(got) || len(stub.queries) != 1 {
-		t.Fatalf("image turn at the cap: %s, queries %v", got, stub.queries)
-	}
-	stub.queries = nil
+			// No image in the window: no cap.
+			text("A", 65)
+			reached("clean text turn")
 
-	// The image is in the window now.
-	if got := text(t, "D", 65); !isErrorPayload(got) || !strings.Contains(got, "64") || len(stub.queries) != 0 {
-		t.Fatalf("tainted text turn over the cap: %s, queries %v", got, stub.queries)
-	}
-	if got := text(t, "E", 64); isErrorPayload(got) || len(stub.queries) != 1 {
-		t.Fatalf("tainted text turn at the cap: %s, queries %v", got, stub.queries)
+			refused("image turn over the cap", image("B", 65))
+			image("C", 64)
+			reached("image turn at the cap")
+
+			// The image is in the window now.
+			refused("tainted text turn over the cap", text("D", 65))
+			text("E", 64)
+			reached("tainted text turn at the cap")
+		})
 	}
 }

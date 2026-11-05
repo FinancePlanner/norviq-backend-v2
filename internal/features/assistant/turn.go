@@ -36,10 +36,13 @@ const (
 	// missing the other call's rows.
 	splitTradesError = "Call record_trades once, with every trade in one trades list. Nothing from this round was proposed; call any other change again afterwards."
 
-	// maxTaintedSearchQuery is the longest search_symbols query a turn with an
-	// image in its window may send. The query reaches a third party, so it must
-	// not carry much of what image text asked a model to read out.
-	maxTaintedSearchQuery = 64
+	// maxTaintedLookupInput is the longest search_symbols query or get_quote
+	// symbol a turn with an image in its window may send. Both reach a third
+	// party, so neither may carry much of what image text asked a model to read out.
+	maxTaintedLookupInput = 64
+
+	// historyWindow is how many stored rows the model sees.
+	historyWindow = 20
 )
 
 const assistantSystemPrompt = `You are Q, Norviq's personal-finance assistant. Be concise, practical, and cautious.
@@ -117,7 +120,9 @@ func toolMessage(content, callID, name string) ai.Message {
 // generate is AIAssistantTurnService.generate.
 func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, conversationID uuid.UUID, opt turnOptions) (turnResult, error) {
 	rows, err := h.q.RecentConversationMessages(ctx, assistantdb.RecentConversationMessagesParams{
-		ConversationID: conversationID, UserID: userID, Limit: 20,
+		// One more than the model sees: a marker row is older than the reply it
+		// taints, so that reply outlasts it in the window by one row.
+		ConversationID: conversationID, UserID: userID, Limit: historyWindow + 1,
 	})
 	if err != nil {
 		return turnResult{}, err
@@ -129,8 +134,9 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 	}
 	messages := []ai.Message{ai.Text("system", system)}
 	// A row with the marker means text the model read from an image can be in
-	// this window, in that row's reply or in anything since. A user typing the
-	// marker only makes the turn stricter.
+	// this window, in that row's reply or in anything since. It counts one row
+	// past the window for the same reason. A user typing the marker only makes
+	// the turn stricter.
 	tainted := len(opt.images) > 0
 	for i := len(rows) - 1; i >= 0; i-- {
 		content, err := h.pii.DecryptString(rows[i].ContentEncrypted)
@@ -140,7 +146,9 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 		if rows[i].Role == roleUser && strings.HasSuffix(content, imageMarker) {
 			tainted = true
 		}
-		messages = append(messages, ai.Text(rows[i].Role, content))
+		if i < historyWindow {
+			messages = append(messages, ai.Text(rows[i].Role, content))
+		}
 	}
 	if tainted && opt.mode != modeConfirmed {
 		opt.mode = modeDeferredEveryWrite
@@ -195,8 +203,8 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 			call := &calls[i]
 			name := call.Function.Name
 			if isReadTool(name) {
-				if tainted && name == searchSymbolsToolName && searchQueryTooLong(call.Function.Arguments) {
-					messages = append(messages, toolMessage(errorPayload("query is too long; use at most "+strconv.Itoa(maxTaintedSearchQuery)+" characters"), call.ID, name))
+				if tainted && lookupInputTooLong(name, call.Function.Arguments) {
+					messages = append(messages, toolMessage(errorPayload("query is too long; use at most "+strconv.Itoa(maxTaintedLookupInput)+" characters"), call.ID, name))
 					continue
 				}
 				emit(activityLabel(name))
@@ -296,10 +304,20 @@ func countCalls(calls []ai.ToolCall, name string) int {
 	return n
 }
 
-// searchQueryTooLong reads the query as search_symbols will.
-func searchQueryTooLong(arguments string) bool {
-	query, _ := parseArgs(arguments).trimmedString("query")
-	return utf8.RuneCountInString(query) > maxTaintedSearchQuery
+// lookupInputTooLong reads the input as the read tool will. Other tools have no
+// such input.
+func lookupInputTooLong(name, arguments string) bool {
+	var key string
+	switch name {
+	case searchSymbolsToolName:
+		key = "query"
+	case "get_quote":
+		key = "symbol"
+	default:
+		return false
+	}
+	input, _ := parseArgs(arguments).trimmedString(key)
+	return utf8.RuneCountInString(input) > maxTaintedLookupInput
 }
 
 // proposalResult persists a pending action for a deferred write.

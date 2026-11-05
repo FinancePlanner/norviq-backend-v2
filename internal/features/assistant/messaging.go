@@ -459,10 +459,11 @@ var (
 	refusalWords  = []string{"no", "nope", "cancel", "stop", "don't", "dont", "decline", "abort", "nevermind"}
 	approvalWords = []string{"yes", "yep", "yeah", "confirm", "approve", "ok", "okay", "do", "go"}
 	// answerFiller can stand beside an answer but is never one.
-	answerFiller = []string{"please", "it", "that", "ahead", "thanks"}
+	answerFiller = []string{"please", "it", "that", "ahead"}
 	// refusalFiller adds "do", so "don't do it" stays a refusal: there it is the
-	// thing refused, where alone it agrees.
-	refusalFiller = append([]string{"do"}, answerFiller...)
+	// thing refused, where alone it agrees. It adds "thanks" too, so "no thanks"
+	// refuses, while "ok thanks" is usually a sign-off and approves nothing.
+	refusalFiller = append([]string{"do", "thanks"}, answerFiller...)
 )
 
 // parseConfirmationAnswer reads a button payload, else a typed yes/no. A typed

@@ -109,6 +109,13 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		bodyLimit(10*1024*1024, bodyLimits),
 		echomw.Recover(),
 	)
+	// IdempotencyMiddleware(ttl: 86400), registered globally and only when Redis
+	// is configured (ConfigureBootstrap). It covers every route that has no
+	// group of its own; a route with its own prefix passes through both. Last in
+	// the chain, so it records the handler's plain body, before gzip.
+	if d.Limiter.Redis != nil {
+		e.Use(d.Limiter.Idempotency("idempotency"))
+	}
 
 	routes := &Routes{Root: e.Group(""), V1: e.Group("/v1"), bodyLimits: bodyLimits}
 	registerHealth(d, routes)

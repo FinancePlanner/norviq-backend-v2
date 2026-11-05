@@ -111,7 +111,7 @@ Mirror the group exactly as the Swift `boot(routes:)` builds it:
 | `FirstPartyOnlyMiddleware()` | `auth.FirstPartyOnly()` |
 | `AdminGuard.requireAdmin(req)` / `AdminOnlyMiddleware()` | `d.Admin.Require(c)` / `d.Admin.Middleware()` |
 | `RateLimitMiddleware(limit:interval:keyPrefix:)` | `d.Limiter.Limit(limit, interval, "same:prefix")`. Keep Vapor's key prefix: existing buckets in Redis use it |
-| `IdempotencyMiddleware(keyPrefix:)` | `d.Limiter.Idempotency("same:prefix")` |
+| `IdempotencyMiddleware(keyPrefix:)` | `d.Limiter.Idempotency("same:prefix")`. Vapor's global `IdempotencyMiddleware(ttl:)` is mounted in `server.New` with the default `idempotency` prefix |
 | `req.auth.require(SessionToken.self).userId` | `s, err := auth.Require(c)`; `s.UserID` |
 
 Order matters: Vapor applies group middleware in the order `grouped(...)`

@@ -109,6 +109,12 @@ Vapor bugs were ported faithfully unless they are listed here or in
   `Cache-Control`, `ETag`, `Last-Modified`) with `Set`; the global middleware
   sets the rest, so a replay no longer duplicates them or labels a plain
   body gzip. The cache write survives a client disconnect.
+- **Global idempotency was missing from the port until
+  `fix/idempotency-global-mount`** (`server.New`): Vapor mounted the middleware
+  on every route when Redis was configured, and the port kept only the grouped
+  mounts, so a repeated key on `/v1/expenses` and similar routes ran the write
+  again from the 2026-10-30 cutover. Keys from that window were never stored,
+  so a retry of a write from then is not replayed.
 - **Enable Banking pagination** fails a fetch whose provider sends a
   continuation key it already sent in that fetch (back to back or in a
   cycle), instead of looping until shutdown.

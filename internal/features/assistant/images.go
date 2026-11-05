@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -100,32 +101,35 @@ func imageRejected(status int, reason string) *httpx.Error {
 	return httpx.CodedAbort(status, codeImageRejected, reason)
 }
 
-// parseTurnBody reads a turn's text and images: a multipart form, or the JSON
-// body every client sent before images, which never carries any.
-func parseTurnBody(c *echo.Context) (string, []ai.Image, error) {
+// parseTurnBody reads a turn's text, images and client context: a multipart
+// form, or the JSON body every client sent before images, which never carries
+// any. A form's `context` field is the same JSON as the body's, and a malformed
+// one is dropped, as there, so it can't change how the images are judged.
+func parseTurnBody(c *echo.Context) (string, []ai.Image, clientContext, error) {
 	boundary, isMultipart, hasBoundary := multipartform.Boundary(c.Request().Header.Get(echo.HeaderContentType))
 	if !isMultipart {
 		var payload struct {
-			Content string `json:"content"`
+			Content string                `json:"content"`
+			Context *clientContextPayload `json:"context"`
 		}
 		if err := swiftjson.DecodeRequest(c, &payload); err != nil {
-			return "", nil, err
+			return "", nil, clientContext{}, err
 		}
-		return trimSwiftSpace(payload.Content), nil, nil
+		return trimSwiftSpace(payload.Content), nil, payload.Context.parsed(), nil
 	}
 	if !hasBoundary {
-		return "", nil, imageRejected(http.StatusBadRequest, "Could not read the uploaded form.")
+		return "", nil, clientContext{}, imageRejected(http.StatusBadRequest, "Could not read the uploaded form.")
 	}
 	body, err := multipartform.ReadBody(c.Request(), turnBodyLimit)
 	if err != nil {
-		return "", nil, err
+		return "", nil, clientContext{}, err
 	}
 	parts, err := multipartform.Parse(body, boundary)
 	if errors.Is(err, multipartform.ErrEmptyBoundary) || errors.Is(err, multipartform.ErrUnreadable) {
-		return "", nil, imageRejected(http.StatusBadRequest, "Could not read the uploaded form.")
+		return "", nil, clientContext{}, imageRejected(http.StatusBadRequest, "Could not read the uploaded form.")
 	}
 	if err != nil {
-		return "", nil, err
+		return "", nil, clientContext{}, err
 	}
 	// Each part is its own copy. Nothing else needs the form, and streamChat's
 	// buffer would otherwise stay reachable from the request for the whole turn.
@@ -136,9 +140,15 @@ func parseTurnBody(c *echo.Context) (string, []ai.Image, error) {
 	}
 	images, err := turnImages(multipartform.ImageFiles(parts))
 	if err != nil {
-		return "", nil, err
+		return "", nil, clientContext{}, err
 	}
-	return content, images, nil
+	var client clientContextPayload
+	if p := multipartform.Named(parts, "context"); p != nil {
+		if err := json.Unmarshal(p.Body, &client); err != nil {
+			client = clientContextPayload{}
+		}
+	}
+	return content, images, client.parsed(), nil
 }
 
 // turnImages validates the attachments. The type comes from the bytes alone:

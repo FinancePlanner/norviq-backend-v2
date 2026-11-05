@@ -62,6 +62,43 @@ func (q *Queries) InsertRetirementPlan(ctx context.Context, arg InsertRetirement
 	return err
 }
 
+const listRetirementPlansForOwner = `-- name: ListRetirementPlansForOwner :many
+SELECT rp.id, rp.portfolio_id, rp.rule_version, rp.input_json, rp.created_at, rp.updated_at
+FROM retirement_plans rp
+JOIN portfolio_lists pl ON pl.id = rp.portfolio_id
+WHERE pl.user_id = $1 AND pl.archived_at IS NULL
+ORDER BY rp.created_at DESC
+LIMIT 10
+`
+
+// The saved plans on a user's own active portfolios, for the assistant.
+func (q *Queries) ListRetirementPlansForOwner(ctx context.Context, userID uuid.UUID) ([]RetirementPlan, error) {
+	rows, err := q.db.Query(ctx, listRetirementPlansForOwner, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RetirementPlan{}
+	for rows.Next() {
+		var i RetirementPlan
+		if err := rows.Scan(
+			&i.ID,
+			&i.PortfolioID,
+			&i.RuleVersion,
+			&i.InputJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateRetirementPlan = `-- name: UpdateRetirementPlan :exec
 UPDATE retirement_plans
 SET rule_version = $2, input_json = $3, updated_at = $4

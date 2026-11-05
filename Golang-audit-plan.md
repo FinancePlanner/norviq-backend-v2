@@ -11,7 +11,7 @@ This is a wire-compatible port of the Swift/Vapor API. Vapor names, Redis key fo
 
 ## Implementation status (2026-11-04)
 
-**Live state: production does not run this work yet.** `values-production.yaml` pins `b4d3015`, which predates all of it. Staging pins `1056b9f`, which has items 1 to 10. Both were confirmed on the running deployments.
+**Live state: production runs this work.** `7f13fdf` was promoted to production on 2026-11-04 (infra #542), replacing `b4d3015`. It was healthy after a 5-minute check: no restarts, no job lock warnings, and one error, `FMP request failed`, which the previous image also logged. The new shutdown drain first runs at the next deploy, and the Telegram log had no turns to report yet.
 
 Revised roadmap items 1 to 10 are in the code. Item 2 needed one correction: a heartbeat database error marked the run `failed`, and the plan says it stays leased and reclaimable. `TestHeartbeatErrorCancelsAndLeavesTheRunReclaimable` failed before that fix.
 
@@ -44,7 +44,7 @@ Review of that work fixed three defects, each with a test that failed first: a t
 
 **Parallel `Idempotency-Key`.** iOS guards the action with `isSubmitting` and reuses the key sequentially. Web forms carry a hidden key, and the pilot-follow comment expects a double submit, so two parallel requests are possible there. No trace shows how often. Per the review above, this does not justify the NX protocol. MCP sends one key per call and nothing shows it repeating a key concurrently.
 
-**Keys the API ignores.** Only banks, brokers, expense import, pilots and receipt import mount the idempotency middleware. MCP sends keys to `/v1/expenses`, `/v1/transactions`, `/v1/targets`, `/v1/watchlist`, `/v1/research`, `/v1/goals` and `/v1/budget/*`, and web sends one to `/v1/terminal-positions`. None of those replays, so a retried write there can double-write, despite the comment in `norviq-mcp/internal/api/client.go`. Not fixed here: it is outside the approved list.
+**Keys the API ignores.** Only banks, brokers, expense import, pilots and receipt import mount the idempotency middleware. MCP sends keys to `/v1/expenses`, `/v1/transactions`, `/v1/targets`, `/v1/watchlist`, `/v1/research`, `/v1/goals` and `/v1/budget/*`, and web sends one to `/v1/terminal-positions`. None of those replays, so a retried write there can double-write, despite the comment in `norviq-mcp/internal/api/client.go`. This is a port regression: Vapor also mounted the middleware globally (`ConfigureBootstrap.swift`), and the port kept only the grouped mounts. `fix/idempotency-global-mount` restores it. Restoring it also restores a trap: MCP derives most keys from the user and the arguments, so a deliberate identical write within 24 hours replays the first response and writes nothing. Only the terminal scenario create buckets its key to avoid that.
 
 ### Staging plans
 

@@ -591,3 +591,18 @@ func TestRoutesFlagOn(t *testing.T) {
 		t.Fatalf("%+v", list)
 	}
 }
+
+func TestReaderHonoursTheEnabledFlag(t *testing.T) {
+	t.Setenv("RECAP_ENABLED", "")
+	f := newFixture(t, nil)
+	u := f.user(time.Now().Add(-70 * 24 * time.Hour))
+	reader := recaps.NewReader(f.Deps)
+	off, err := reader.List(context.Background(), u, time.Now())
+	if err != nil || len(off.Recaps) != 0 {
+		t.Fatalf("off = %+v, %v", off, err)
+	}
+	t.Setenv("RECAP_ENABLED", "true")
+	if _, err := reader.List(context.Background(), u, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}

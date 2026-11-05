@@ -347,3 +347,29 @@ func TestRetirementUpsertErrors(t *testing.T) {
 		t.Fatal("achievement check on a failed upsert")
 	}
 }
+
+func TestReaderListsOnlyPlansOnTheCallersPortfolios(t *testing.T) {
+	e := newEnv(t)
+	owner := e.CreateUser("reader-owner@example.com")
+	other := e.CreateUser("reader-other@example.com")
+	e.pro(owner)
+	p := e.portfolio(owner, "retirement")
+	if r := e.Do("PUT", "/v1/portfolios/"+strings.ToUpper(p.String())+"/retirement", e.Token(owner), planBody()); r.Status != 200 {
+		t.Fatalf("put = %d %s", r.Status, r.Body)
+	}
+	archived := e.portfolio(owner, "retirement")
+	if r := e.Do("PUT", "/v1/portfolios/"+strings.ToUpper(archived.String())+"/retirement", e.Token(owner), planBody()); r.Status != 200 {
+		t.Fatalf("put = %d %s", r.Status, r.Body)
+	}
+	e.exec(`UPDATE portfolio_lists SET archived_at = now() WHERE id = $1`, archived)
+
+	reader := retirement.NewReader(e.Deps)
+	mine, err := reader.Plans(context.Background(), owner)
+	if err != nil || len(mine) != 1 {
+		t.Fatalf("mine = %+v, %v", mine, err)
+	}
+	theirs, err := reader.Plans(context.Background(), other)
+	if err != nil || len(theirs) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

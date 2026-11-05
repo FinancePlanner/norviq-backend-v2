@@ -149,24 +149,32 @@ func (h *handler) overview(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	snap, err := h.ent.Resolve(ctx, s.UserID)
+	out, err := h.overviewFor(c.Request().Context(), s.UserID)
 	if err != nil {
 		return err
 	}
-	models, err := h.svc.q.ListActiveFinancialGoalsByTargetDate(ctx, s.UserID)
+	return httpx.OK(c, out)
+}
+
+// overviewFor is the body of GET /v1/financial-goals/overview.
+func (h *handler) overviewFor(ctx context.Context, userID uuid.UUID) (Overview, error) {
+	snap, err := h.ent.Resolve(ctx, userID)
 	if err != nil {
-		return err
+		return Overview{}, err
+	}
+	models, err := h.svc.q.ListActiveFinancialGoalsByTargetDate(ctx, userID)
+	if err != nil {
+		return Overview{}, err
 	}
 	items := make([]OverviewItem, 0, len(models))
 	for i := range models {
 		goal, err := h.svc.goalDTO(ctx, h.svc.q, &models[i])
 		if err != nil {
-			return err
+			return Overview{}, err
 		}
-		progress, err := h.svc.progress(ctx, &models[i], s.UserID, overrides{})
+		progress, err := h.svc.progress(ctx, &models[i], userID, overrides{})
 		if err != nil {
-			return err
+			return Overview{}, err
 		}
 		items = append(items, OverviewItem{ID: goal.ID, Goal: goal, Progress: progress})
 	}
@@ -180,7 +188,7 @@ func (h *handler) overview(c *echo.Context) error {
 	if !snap.IsPro() {
 		out.ActiveGoalLimit = intPtr(1)
 	}
-	return httpx.OK(c, out)
+	return out, nil
 }
 
 // primaryPortfolio is GoalPlanningController.primaryPortfolio.

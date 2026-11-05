@@ -710,3 +710,20 @@ func TestBanKeepsEarlierRevocation(t *testing.T) {
 		t.Fatal("pending invitation not revoked")
 	}
 }
+
+func TestReaderMembershipsCarryNamesAndRolesOnly(t *testing.T) {
+	e := newEnv(t)
+	owner := e.member("reader_owner")
+	stranger := e.member("reader_stranger")
+	e.create(owner, "$AAPL club", groups.TopicStock, ptr("AAPL"), groups.VisibilityPrivate)
+
+	reader := groups.NewReader(e.app.Deps)
+	mine, err := reader.Memberships(context.Background(), owner.id)
+	if err != nil || len(mine) != 1 || mine[0].Name != "$AAPL club" || mine[0].Role != "owner" {
+		t.Fatalf("mine = %+v, %v", mine, err)
+	}
+	theirs, err := reader.Memberships(context.Background(), stranger.id)
+	if err != nil || len(theirs) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

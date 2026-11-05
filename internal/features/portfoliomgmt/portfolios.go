@@ -10,6 +10,7 @@ import (
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
+	"norviq-api/internal/server"
 	"norviq-api/internal/store/portfoliocoredb"
 	"norviq-api/internal/store/portfoliomgmtdb"
 
@@ -55,23 +56,31 @@ func (h *handlers) list(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	if _, err := portfolios.EnsureDefaultPortfolioListID(ctx, h.db, s.UserID); err != nil {
+	items, err := h.listFor(c.Request().Context(), s.UserID)
+	if err != nil {
 		return err
+	}
+	return httpx.OK(c, PortfolioPage{Items: items})
+}
+
+// listFor is the body of GET /v1/portfolios.
+func (h *handlers) listFor(ctx context.Context, userID uuid.UUID) ([]Portfolio, error) {
+	if _, err := portfolios.EnsureDefaultPortfolioListID(ctx, h.db, userID); err != nil {
+		return nil, err
 	}
 	q := portfoliomgmtdb.New(h.db)
-	owned, err := q.OwnedPortfolioLists(ctx, s.UserID)
+	owned, err := q.OwnedPortfolioLists(ctx, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	sharedIDs, err := q.ActiveMembershipPortfolioIDs(ctx, s.UserID)
+	sharedIDs, err := q.ActiveMembershipPortfolioIDs(ctx, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var shared []portfoliomgmtdb.PortfolioList
 	if len(sharedIDs) > 0 {
 		if shared, err = q.PortfolioListsByIDs(ctx, sharedIDs); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	items := []Portfolio{}
@@ -86,13 +95,13 @@ func (h *handlers) list(c *echo.Context) error {
 			continue
 		}
 		seen[p.ID] = true
-		ac, err := h.access.Require(ctx, h.db, p.ID, s.UserID, portfolios.RequireOptions{})
+		ac, err := h.access.Require(ctx, h.db, p.ID, userID, portfolios.RequireOptions{})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		items = append(items, makeResponse(ac))
 	}
-	return httpx.OK(c, PortfolioPage{Items: items})
+	return items, nil
 }
 
 // createRequest is StockPlanShared.PortfolioCreateRequest.
@@ -719,4 +728,18 @@ func makeComparison(left portfolios.AccessContext, leftStocks []portfoliomgmtdb.
 		Holdings:    holdings,
 		GeneratedAt: portfolios.FormatISODateTime(portfolios.Now()),
 	}
+}
+
+// Reader lists portfolios for other features.
+type Reader struct{ h *handlers }
+
+// NewReader builds a Reader with Register's defaults.
+func NewReader(d *server.Deps) Reader {
+	ent := entitlements.NewFromEnv(d.DB)
+	return Reader{h: &handlers{db: d.DB, ent: ent, access: portfolios.Access{Entitlements: ent}, log: d.Logger}}
+}
+
+// List is GET /v1/portfolios for userID.
+func (r Reader) List(ctx context.Context, userID uuid.UUID) ([]Portfolio, error) {
+	return r.h.listFor(ctx, userID)
 }

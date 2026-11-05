@@ -36,9 +36,9 @@ const (
 	// missing the other call's rows.
 	splitTradesError = "Call record_trades once, with every trade in one trades list. Nothing from this round was proposed; call any other change again afterwards."
 
-	// maxTaintedLookupInput is the longest search_symbols query or get_quote
-	// symbol a turn with an image in its window may send. Both reach a third
-	// party, so neither may carry much of what image text asked a model to read out.
+	// maxTaintedLookupInput is the longest input in taintedLookupInputs a turn
+	// with an image in its window may send. Each reaches a third party, so none
+	// may carry much of what image text asked a model to read out.
 	maxTaintedLookupInput = 64
 
 	// historyWindow is how many stored rows the model sees.
@@ -69,7 +69,9 @@ type turnOptions struct {
 	readOnly        bool
 	// images ride on this turn's user message only. A turn with images uses
 	// modeDeferredEveryWrite and never reaches a free model.
-	images []ai.Image
+	images   []ai.Image
+	client   clientContext
+	extended bool
 }
 
 type turnResult struct {
@@ -127,7 +129,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 	if err != nil {
 		return turnResult{}, err
 	}
-	system := assistantSystemPrompt
+	system := h.promptFor(ctx, assistantSystemPrompt, userID, opt.client)
 	if len(opt.images) > 0 {
 		client = ai.ExcludeFreeRungs(client)
 		system += "\n\n" + imageTurnPrompt
@@ -150,8 +152,12 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 			messages = append(messages, ai.Text(rows[i].Role, content))
 		}
 	}
-	if tainted && opt.mode != modeConfirmed {
-		opt.mode = modeDeferredEveryWrite
+	if tainted {
+		// Image text must not get at the tax, retirement and group reads.
+		opt.extended = false
+		if opt.mode != modeConfirmed {
+			opt.mode = modeDeferredEveryWrite
+		}
 	}
 	if opt.transientPrompt != nil {
 		messages = append(messages, ai.Text("user", *opt.transientPrompt))
@@ -171,6 +177,9 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 		tools = imageTurnTools()
 	default:
 		tools = chatToolDefinitions(opt.mode)
+		if opt.extended {
+			tools = append(tools, extendedReadToolDefinitions()...)
+		}
 	}
 	offered := make(map[string]bool, len(tools))
 	for i := range tools {
@@ -202,7 +211,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 		for i := range calls {
 			call := &calls[i]
 			name := call.Function.Name
-			if isReadTool(name) {
+			if isReadTool(name) || (opt.extended && isExtendedTool(name)) {
 				if tainted && lookupInputTooLong(name, call.Function.Arguments) {
 					messages = append(messages, toolMessage(errorPayload("query is too long; use at most "+strconv.Itoa(maxTaintedLookupInput)+" characters"), call.ID, name))
 					continue
@@ -304,20 +313,29 @@ func countCalls(calls []ai.ToolCall, name string) int {
 	return n
 }
 
-// lookupInputTooLong reads the input as the read tool will. Other tools have no
-// such input.
+// taintedLookupInputs are the read-tool arguments sent on to a third party.
+// Extended tools have none: their only inputs pick the user's own rows.
+var taintedLookupInputs = map[string][]string{
+	searchSymbolsToolName: {"query"},
+	"get_quote":           {"symbol"},
+	"get_news":            {"symbol"},
+	"get_earnings":        {"symbol", "from", "to"},
+}
+
+// lookupInputTooLong reads the inputs as the read tool will.
 func lookupInputTooLong(name, arguments string) bool {
-	var key string
-	switch name {
-	case searchSymbolsToolName:
-		key = "query"
-	case "get_quote":
-		key = "symbol"
-	default:
+	keys := taintedLookupInputs[name]
+	if len(keys) == 0 {
 		return false
 	}
-	input, _ := parseArgs(arguments).trimmedString(key)
-	return utf8.RuneCountInString(input) > maxTaintedLookupInput
+	args := parseArgs(arguments)
+	for _, key := range keys {
+		input, _ := args.trimmedString(key)
+		if utf8.RuneCountInString(input) > maxTaintedLookupInput {
+			return true
+		}
+	}
+	return false
 }
 
 // proposalResult persists a pending action for a deferred write.

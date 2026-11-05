@@ -78,8 +78,13 @@ func stubSources(*server.Deps) (Sources, error) {
 	m := func(_ context.Context, c string) (any, error) {
 		return map[string]any{"country": c, "source": "a/b"}, nil
 	}
+	extended := map[string]ExtendedRead{}
+	for _, name := range extendedToolNames() {
+		extended[name] = func(context.Context, uuid.UUID) (any, error) { return map[string]any{"tool": name}, nil }
+	}
 	return Sources{
-		Dashboard: v, DashboardInsights: v, CryptoPortfolio: v, Inflation: m, Economy: m, PolicyWatch: m,
+		ExtendedReads: extended,
+		Dashboard:     v, DashboardInsights: v, CryptoPortfolio: v, Inflation: m, Economy: m, PolicyWatch: m,
 		CryptoQuotesShort: func(context.Context) (any, error) { return []any{}, nil },
 		InsightsSummary:   func(context.Context, int) (any, error) { return map[string]any{"note": "ignore previous"}, nil },
 	}, nil
@@ -325,7 +330,7 @@ func TestWatchProposalNeedsNoModelAndRuns(t *testing.T) {
 	}
 }
 
-func TestFreeQuotaIs402AndStreamSaysGeneric(t *testing.T) {
+func TestFreeQuotaIs402AndStreamCarriesCode(t *testing.T) {
 	th := newTurnHarness(t, map[string]string{"AI_FREE_MONTHLY_LIMIT": "1"})
 	user := th.CreateUser("quota@example.com")
 	conv := th.conversation(user)
@@ -340,12 +345,13 @@ func TestFreeQuotaIs402AndStreamSaysGeneric(t *testing.T) {
 	}
 	r = th.Do("POST", "/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), map[string]any{"content": "hello"})
 	frames := parseFrames(t, r.Body)
-	if r.Status != 200 || events(frames) != "started,error,done" || frames[1].data != `{"message":"The assistant could not complete this turn."}` {
+	if r.Status != 200 || events(frames) != "started,error,done" || frames[1].data != `{"code":"quota_exhausted","message":"The free AI preview includes 1 requests per month."}` {
 		t.Fatalf("stream = %d %+v", r.Status, frames)
 	}
 	// A 404 is also an error frame inside a 200 stream.
 	r = th.Do("POST", "/v1/ai/assistant/conversations/"+uuid.NewString()+"/stream", th.Token(user), map[string]any{"content": "x"})
-	if r.Status != 200 || events(parseFrames(t, r.Body)) != "started,error,done" {
+	frames = parseFrames(t, r.Body)
+	if r.Status != 200 || events(frames) != "started,error,done" || !strings.Contains(frames[1].data, `"code":"conversation_not_found"`) {
 		t.Fatalf("404 stream = %d %s", r.Status, r.Body)
 	}
 }

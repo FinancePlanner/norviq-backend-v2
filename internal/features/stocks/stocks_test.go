@@ -975,3 +975,44 @@ func TestLedgerBooksAgainstLatestCashRow(t *testing.T) {
 		t.Fatalf("stale %v", c)
 	}
 }
+
+func TestListHoldingsSpansPortfoliosAndStaysWithTheCaller(t *testing.T) {
+	e := newEnv(t)
+	owner, token := e.user(uniqueEmail("holdings"))
+	_, otherToken := e.user(uniqueEmail("holdings-other"))
+	first := e.createStock(t, token, stockBody("AAPL", 1, 100, "2024-01-01"))
+	e.createStock(t, otherToken, stockBody("MSFT", 1, 100, "2024-01-01"))
+
+	// A second list, so a default-list-only read would miss this holding.
+	second := uuid.New()
+	if _, err := e.app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO portfolio_lists (id, user_id, name, created_at, updated_at) VALUES ($1, $2, 'Second', now(), now())`, second, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, category, created_at, updated_at)
+		 VALUES ($1, $2, $3, 'NVDA', 2, 50, '2024-01-01', 'stock', now(), now())`, uuid.New(), owner, second); err != nil {
+		t.Fatal(err)
+	}
+
+	actions, err := stocks.NewActions(e.app.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := actions.ListHoldings(context.Background(), owner, nil, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols := map[string]string{}
+	for _, h := range got {
+		symbols[h.Symbol] = h.ID
+	}
+	if len(got) != 2 || symbols["AAPL"] != first.ID || symbols["NVDA"] == "" {
+		t.Fatalf("holdings = %+v", got)
+	}
+
+	capped, err := actions.ListHoldings(context.Background(), owner, nil, 1)
+	if err != nil || len(capped) != 1 {
+		t.Fatalf("capped = %+v, %v", capped, err)
+	}
+}

@@ -308,3 +308,25 @@ func (s *Service) SetShowcase(ctx context.Context, userID uuid.UUID, items []Sho
 	}
 	return s.List(ctx, userID, lang, now)
 }
+
+// Digest is one achievement in the short form other features read.
+type Digest struct {
+	Title       string  `json:"title"`
+	Category    string  `json:"category"`
+	State       string  `json:"state"`
+	CurrentTier *string `json:"currentTier,omitempty"`
+}
+
+// Digest lists achievements without their artwork and tier ladders.
+func (s *Service) Digest(ctx context.Context, userID uuid.UUID, lang Language, now time.Time) ([]Digest, error) {
+	full, err := s.List(ctx, userID, lang, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Digest, 0, len(full.Achievements))
+	for i := range full.Achievements {
+		a := &full.Achievements[i]
+		out = append(out, Digest{Title: a.Title, Category: a.Category, State: a.State, CurrentTier: a.CurrentTier})
+	}
+	return out, nil
+}

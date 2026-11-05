@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 
+	"norviq-api/internal/features/earnings"
 	"norviq-api/internal/features/tax"
 	"norviq-api/internal/server"
 
@@ -43,11 +44,27 @@ type Sources struct {
 	// nil, limit:cursor: nil), for the Telegram /news command.
 	ThesisFeed func(ctx context.Context, userID uuid.UUID, limit int) (any, error)
 
+	// Holdings lists the user's positions, across every portfolio unless
+	// portfolioID is given. Portfolios lists their portfolios.
+	Holdings   func(ctx context.Context, userID uuid.UUID, portfolioID *string, limit int) (any, error)
+	Portfolios func(ctx context.Context, userID uuid.UUID) (any, error)
+	// MarketBrief is the latest published brief in a language.
+	MarketBrief func(ctx context.Context, language string) (any, error)
+	// Earnings is the earnings calendar.
+	Earnings func(ctx context.Context, q earnings.Query) ([]earnings.ItemResponse, error)
+
+	// ExtendedReads are the read tools restricted to in-app sessions, by tool
+	// name. A missing entry reports that tool as unavailable.
+	ExtendedReads map[string]ExtendedRead
+
 	// Tax is taxService.dashboard; Register fills it from the tax package.
 	Tax tax.DashboardFunc
 }
 
 // SourcesFunc builds Sources at Register time.
+// ExtendedRead reads one user's data for an extended tool.
+type ExtendedRead func(ctx context.Context, userID uuid.UUID) (any, error)
+
 type SourcesFunc func(d *server.Deps) (Sources, error)
 
 func (s *Sources) hasDashboard() bool { return s.Dashboard != nil && s.DashboardInsights != nil }

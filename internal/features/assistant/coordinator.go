@@ -98,7 +98,7 @@ func (h *handlers) persistReply(ctx context.Context, userID, conversationID uuid
 // A turn with images goes straight to the model: text inside an image is
 // untrusted, so it never takes the memo or watch shortcuts and every write it
 // leads to waits for the user's confirmation.
-func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, images []ai.Image, scoped bool, onEvent eventSink) (turnOutcome, error) {
+func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, images []ai.Image, scoped bool, client clientContext, onEvent eventSink) (turnOutcome, error) {
 	hasImages := len(images) > 0
 	if hasImages && content == "" {
 		content = defaultImagePrompt
@@ -136,7 +136,7 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 			return turnOutcome{}, err
 		}
 	}
-	opt := turnOptions{mode: confirmationModeFor(scoped), onEvent: onEvent}
+	opt := turnOptions{mode: confirmationModeFor(scoped), onEvent: onEvent, client: client}
 	if hasImages {
 		content += imageMarker
 		opt.mode, opt.images = modeDeferredEveryWrite, images
@@ -156,6 +156,7 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		}
 		out.text, out.memo = "Memo on "+card.Symbol+" is ready.", &card
 	} else {
+		opt.extended = !hasImages && h.extendedToolsAllowed(ctx, scoped, client, conversationID)
 		res, err := h.runTurn(ctx, resolved, userID, conversationID, opt)
 		if err != nil {
 			return turnOutcome{}, err

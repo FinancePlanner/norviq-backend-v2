@@ -319,3 +319,28 @@ func (j Job) Run(ctx context.Context, d *server.Deps) {
 		timer.Reset(interval)
 	}
 }
+
+// LatestReader reads what GET /v1/market/brief serves by default, for callers
+// outside this feature. It leaves out `previous`, which only the share screen
+// uses.
+func (f Feature) LatestReader(d *server.Deps) (func(ctx context.Context, language string) (Response, error), error) {
+	s, err := f.settings()
+	if err != nil {
+		return nil, err
+	}
+	enabled, repo := s.IsEnabled(), f.repository(d)
+	return func(ctx context.Context, raw string) (Response, error) {
+		language := ResolveLanguage(&raw)
+		if !enabled {
+			return emptyResponse(language, false), nil
+		}
+		latest, err := repo.Latest(ctx, language)
+		if err != nil {
+			return Response{}, err
+		}
+		if latest == nil {
+			return emptyResponse(language, true), nil
+		}
+		return *latest, nil
+	}, nil
+}

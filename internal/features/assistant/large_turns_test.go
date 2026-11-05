@@ -404,7 +404,7 @@ func TestParseTurnBodyDropsTheRawForm(t *testing.T) {
 	req.Header.Set("Content-Type", contentType)
 	c := echo.New().NewContext(req, httptest.NewRecorder())
 
-	content, images, err := parseTurnBody(c)
+	content, images, _, err := parseTurnBody(c)
 	if err != nil {
 		t.Fatal(err)
 	}

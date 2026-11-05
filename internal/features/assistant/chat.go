@@ -81,13 +81,14 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	if err != nil {
 		return turnResponse{}, err
 	}
-	content, images, err := parseTurnBody(c)
+	content, images, client, err := parseTurnBody(c)
 	if err != nil {
 		return turnResponse{}, err
 	}
 	if len(images) > 0 {
+		// Coded, so /stream doesn't report this as conversation_not_found.
 		if !h.imagesEnabled {
-			return turnResponse{}, httpx.NotFound("")
+			return turnResponse{}, imageRejected(http.StatusNotFound, "Images aren't available right now.")
 		}
 		// As the screenshot import: images spend Norviq's AI budget.
 		if s.Scope != nil {
@@ -98,7 +99,7 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 		}
 	}
 
-	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), images, s.Scope != nil, onEvent)
+	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), images, s.Scope != nil, client, onEvent)
 	if err != nil {
 		return turnResponse{}, err
 	}
@@ -170,12 +171,16 @@ func (h *handlers) streamChat(c *echo.Context) error {
 	case errors.As(err, &abort) && abort.Reason == ai.ConsentRequiredReason:
 		h.d.Logger.Info("ai_assistant.stream_refused", "reason", "ai_consent_required")
 		// Old iOS shows the message verbatim, so it is copy, not the reason.
-		_ = sse.data("error", map[string]string{"message": aiConsentStreamMessage, "code": ai.ConsentRequiredReason})
+		_ = sse.data("error", map[string]string{"message": aiConsentStreamMessage, "code": "ai_consent_required"})
 	case errors.As(err, &abort) && abort.Status == http.StatusFailedDependency:
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed")
 		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": "user_credential_rejected"})
 	case errors.As(err, &upgrade):
 		_ = sse.data("error", map[string]string{"message": upgrade.Reason(), "code": "upgrade_required"})
+	case errors.As(err, &abort) && abort.Status == http.StatusNotFound:
+		_ = sse.data("error", map[string]string{"message": "This conversation no longer exists.", "code": "conversation_not_found"})
+	case errors.As(err, &abort) && abort.Status == http.StatusPaymentRequired:
+		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": "quota_exhausted"})
 	default:
 		h.d.Logger.Error("ai_assistant.stream_failed", "error", truncateError(err, 300))
 		_ = sse.data("error", map[string]string{"message": "The assistant could not complete this turn."})
@@ -323,7 +328,7 @@ func (h *handlers) aiChat(c *echo.Context) error {
 func (h *handlers) streamAIChat(ctx context.Context, history []ai.Message, userID uuid.UUID, sse *sseWriter) error {
 	client := h.ai.Default
 	tools := chatToolDefinitions(modeInline)
-	messages := append([]ai.Message{ai.Text("system", aiChatSystemPrompt)}, history...)
+	messages := append([]ai.Message{ai.Text("system", h.promptFor(ctx, aiChatSystemPrompt, userID, clientContext{}))}, history...)
 	for range maxToolRounds {
 		message, err := client.Chat(ctx, messages, tools, "")
 		if err != nil {

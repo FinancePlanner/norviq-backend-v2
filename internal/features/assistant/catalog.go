@@ -223,7 +223,7 @@ var catalog = func() []actionDef {
 			destructive: true,
 		},
 		{
-			name: "record_trades",
+			name: recordTradesToolName,
 			description: "Propose the executed buys and sells visible in the attached image. The user reviews them on a card " +
 				"before anything is saved. This is record-keeping and does not place an order.",
 			properties: map[string]ai.Parameter{

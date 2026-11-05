@@ -194,7 +194,25 @@ func (h *handlers) confirmAction(c *echo.Context) error {
 	if !ok {
 		return httpx.BadRequest("")
 	}
-	res, err := h.confirm(c.Request().Context(), id, s.UserID)
+	ctx := c.Request().Context()
+	action, err := h.q.GetOwnedPendingAction(ctx, assistantdb.GetOwnedPendingActionParams{ID: id, UserID: s.UserID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("")
+	}
+	if err != nil {
+		return err
+	}
+	var res confirmResult
+	if action.ToolName == recordTradesToolName {
+		// This tool alone takes a body: the rows the user reviewed.
+		body, readErr := io.ReadAll(c.Request().Body)
+		if readErr != nil {
+			return readErr
+		}
+		res, err = h.confirmTrades(ctx, &action, s.UserID, body)
+	} else {
+		res, err = h.confirm(ctx, id, s.UserID)
+	}
 	if err != nil {
 		return err
 	}

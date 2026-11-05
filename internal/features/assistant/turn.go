@@ -201,6 +201,19 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 				messages = append(messages, toolMessage(unknownToolPayload, call.ID, name))
 
 			case dispNeedsConfirmation:
+				var proposal turnResult
+				if name == recordTradesToolName {
+					var problem string
+					if proposal, problem, err = h.tradesProposal(ctx, args, userID, conversationID); err != nil {
+						return turnResult{}, err
+					}
+					if problem != "" {
+						messages = append(messages, toolMessage(errorPayload(problem), call.ID, name))
+						continue
+					}
+				} else if proposal, err = h.proposalResult(ctx, name, call.Function.Arguments, userID, conversationID); err != nil {
+					return turnResult{}, err
+				}
 				if len(calls) > 1 {
 					var dropped []string
 					for j := range calls {
@@ -210,7 +223,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 					}
 					h.d.Logger.Info("ai_turn_dropped_sibling_calls", "kept", name, "dropped", dropped)
 				}
-				return h.proposalResult(ctx, name, call.Function.Arguments, userID, conversationID)
+				return proposal, nil
 
 			case dispRun:
 				if !def.readOnly {
@@ -242,7 +255,11 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 // proposalResult persists a pending action for a deferred write.
 func (h *handlers) proposalResult(ctx context.Context, name, arguments string, userID, conversationID uuid.UUID) (turnResult, error) {
 	stored := strippingConfirm(arguments)
-	summary := confirmationSummary(name, parseArgs(stored))
+	return h.storeProposal(ctx, name, stored, confirmationSummary(name, parseArgs(stored)), userID, conversationID)
+}
+
+// storeProposal inserts the pending action a turn ends on.
+func (h *handlers) storeProposal(ctx context.Context, name, stored, summary string, userID, conversationID uuid.UUID) (turnResult, error) {
 	row, err := h.insertPendingAction(ctx, userID, &conversationID, name, stored, summary, statusPending, h.now().Add(pendingActionTTL))
 	if err != nil {
 		return turnResult{}, err

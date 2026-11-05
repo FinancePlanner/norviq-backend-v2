@@ -295,6 +295,10 @@ func (h *handlers) confirm(ctx context.Context, actionID, userID uuid.UUID) (con
 	return result, nil
 }
 
+func errActionUnavailable() *httpx.Error {
+	return httpx.Abort(http.StatusConflict, "Action is no longer available for confirmation.")
+}
+
 func (h *handlers) claimAction(ctx context.Context, actionID, userID uuid.UUID) (assistantdb.AiPendingAction, uuid.UUID, error) {
 	tx, err := h.d.DB.Begin(ctx)
 	if err != nil {
@@ -311,7 +315,7 @@ func (h *handlers) claimAction(ctx context.Context, actionID, userID uuid.UUID) 
 	}
 	now := h.now()
 	if action.Status != statusPending || !action.ExpiresAt.After(now) {
-		return action, uuid.Nil, httpx.Abort(http.StatusConflict, "Action is no longer available for confirmation.")
+		return action, uuid.Nil, errActionUnavailable()
 	}
 	auditID := uuid.New()
 	if err := q.InsertActionAudit(ctx, assistantdb.InsertActionAuditParams{

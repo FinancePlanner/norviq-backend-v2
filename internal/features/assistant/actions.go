@@ -84,6 +84,7 @@ func statusPayload(status string) string {
 const (
 	unknownToolPayload       = `{"error":"unknown tool"}`
 	needsConfirmationPayload = `{"status":"needs_confirmation","message":"Ask the user to confirm, then call again with confirm=true."}`
+	actionFailedReason       = "That action could not be completed."
 )
 
 // execute is ActionCatalog.execute.
@@ -107,7 +108,7 @@ func (s *actionServices) execute(ctx context.Context, name string, args actionAr
 		return errorPayload(reason)
 	}
 	s.logger("action_failed", "name", name, "error", err)
-	return errorPayload("That action could not be completed.")
+	return errorPayload(actionFailedReason)
 }
 
 // abortReason is `catch let abort as any AbortError { abort.reason }`.
@@ -607,7 +608,8 @@ func (s *actionServices) setTerminalScenario(ctx context.Context, userID uuid.UU
 
 // MARK: copy (ActionCatalog+Summaries.swift)
 
-// confirmationSummary is ActionCatalog.confirmationSummary.
+// confirmationSummary is ActionCatalog.confirmationSummary. record_trades has
+// no copy here: its summary names the list, so tradesSummary writes it.
 func confirmationSummary(name string, args actionArgs) string {
 	if s, ok := summaryCopy(canonicalName(name), args); ok {
 		return s
@@ -668,8 +670,6 @@ func summaryCopy(name string, a actionArgs) (string, bool) {
 	case "delete_trade":
 		return "Permanently delete trade record " + shortID(a) + ". " +
 			"This affects realized profit/loss and tax reports.", true
-	case "record_trades":
-		return "Record these trades.", true
 	case "add_goal":
 		return "Add the goal " + quoted(a, "title") + ".", true
 	case "update_goal":

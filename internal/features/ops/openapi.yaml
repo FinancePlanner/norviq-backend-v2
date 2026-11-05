@@ -6535,10 +6535,21 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AIMessageRequest'
+              allOf:
+                - $ref: '#/components/schemas/AIMessageRequest'
+                - type: object
+                  properties:
+                    context:
+                      description: Optional hint for this turn only, never stored. Unknown values are dropped. Sending it marks a client that shows the current AI consent copy.
+                      type: object
+                      properties:
+                        screen: {type: string, description: An AI view scope such as home or expenses.}
+                        timeZone: {type: string, description: IANA time zone.}
+                        locale: {type: string, enum: [en, pt-PT]}
+                        inputMode: {type: string, enum: [voice, text]}
       responses:
         '200':
-          description: Assistant turn event stream
+          description: Assistant turn event stream. An error event may carry a code of ai_consent_required, quota_exhausted, upgrade_required, conversation_not_found, or user_credential_rejected.
           content:
             text/event-stream:
               schema:
@@ -17636,6 +17647,9 @@ components:
         title:
           type: string
           nullable: true
+        bindMessaging:
+          type: boolean
+          description: When false, linked chats such as Telegram stay on their current conversation. Defaults to true.
 
     AIMessageRequest:
       type: object

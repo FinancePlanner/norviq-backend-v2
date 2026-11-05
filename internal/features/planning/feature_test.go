@@ -342,3 +342,31 @@ func TestServiceHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderSummaryIsTheCallersAndCapsScenarios(t *testing.T) {
+	a := newApp(t)
+	owner := a.CreateUser("reader-owner@example.com")
+	other := a.CreateUser("reader-other@example.com")
+	tok := a.Token(owner)
+	for i := range 12 {
+		res := a.Do(http.MethodPost, "/v1/planning/scenarios", tok, map[string]any{
+			"name": "S" + strconv.Itoa(i), "kind": "retirement", "input": map[string]any{"retirement": need()},
+		})
+		if res.Status != http.StatusCreated {
+			t.Fatalf("status %d %s", res.Status, res.Body)
+		}
+	}
+	feature := planning.Feature{Quotes: func(*server.Deps) (portfolio.QuoteSource, error) { return stubQuotes{price: 50}, nil }}
+	reader, err := feature.Reader(a.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := reader.Summary(context.Background(), owner)
+	if err != nil || len(mine.Scenarios) != 10 {
+		t.Fatalf("mine = %d scenarios, %v", len(mine.Scenarios), err)
+	}
+	theirs, err := reader.Summary(context.Background(), other)
+	if err != nil || len(theirs.Scenarios) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

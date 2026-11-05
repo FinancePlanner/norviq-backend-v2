@@ -559,3 +559,24 @@ func TestStartingCapitalFallbackWarningsAreUnique(t *testing.T) {
 		t.Fatalf("progress %v %q", progress.CurrentValue, progress.Warnings)
 	}
 }
+
+func TestReaderOverviewIsTheCallersGoals(t *testing.T) {
+	e := newEnv(t, nil)
+	user, token := e.user("reader")
+	other, _ := e.user("reader-other")
+	e.grantPro(user)
+	e.create(token, goalBody("House", e.portfolio(user, "House"), 0, 0))
+
+	reader, err := goalplanning.Feature{Quotes: stubQuotes{}}.Reader(e.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := reader.Overview(context.Background(), user)
+	if err != nil || len(mine.Items) != 1 || mine.Items[0].Goal.Name != "House" {
+		t.Fatalf("mine = %+v, %v", mine, err)
+	}
+	theirs, err := reader.Overview(context.Background(), other)
+	if err != nil || len(theirs.Items) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

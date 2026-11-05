@@ -33,6 +33,21 @@ func (j Jurisdiction) valid() bool {
 	return false
 }
 
+// ParseJurisdiction accepts a jurisdiction's exact code.
+func ParseJurisdiction(raw string) (Jurisdiction, bool) {
+	j := Jurisdiction(raw)
+	return j, j.valid()
+}
+
+// JurisdictionCodes lists AllJurisdictions as strings.
+func JurisdictionCodes() []string {
+	out := make([]string, 0, len(AllJurisdictions))
+	for _, j := range AllJurisdictions {
+		out = append(out, string(j))
+	}
+	return out
+}
+
 // SupportLevel is TaxSupportLevel.
 type SupportLevel string
 

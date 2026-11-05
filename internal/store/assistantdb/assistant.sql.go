@@ -79,6 +79,17 @@ func (q *Queries) ClaimDueWatches(ctx context.Context, batch int32) ([]uuid.UUID
 	return items, nil
 }
 
+const conversationHasMessagingLink = `-- name: ConversationHasMessagingLink :one
+SELECT EXISTS (SELECT 1 FROM messaging_links WHERE conversation_id = $1)
+`
+
+func (q *Queries) ConversationHasMessagingLink(ctx context.Context, conversationID *uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, conversationHasMessagingLink, conversationID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const countTipsSince = `-- name: CountTipsSince :one
 SELECT count(*) FROM ai_tips WHERE user_id = $1 AND created_at >= $2
 `

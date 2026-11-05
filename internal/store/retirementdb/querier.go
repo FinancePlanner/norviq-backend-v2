@@ -15,6 +15,8 @@ type Querier interface {
 	// RetirementPlanRecord.query.filter(portfolioId).first(): no ORDER BY.
 	GetRetirementPlanByPortfolio(ctx context.Context, portfolioID uuid.UUID) (RetirementPlan, error)
 	InsertRetirementPlan(ctx context.Context, arg InsertRetirementPlanParams) error
+	// The saved plans on a user's own active portfolios, for the assistant.
+	ListRetirementPlansForOwner(ctx context.Context, userID uuid.UUID) ([]RetirementPlan, error)
 	// Fluent save of an assigned record: every assigned field plus updated_at.
 	UpdateRetirementPlan(ctx context.Context, arg UpdateRetirementPlanParams) error
 	UpdateRetirementPlanRuleVersion(ctx context.Context, arg UpdateRetirementPlanRuleVersionParams) error

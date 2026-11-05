@@ -50,6 +50,8 @@ type turnOptions struct {
 	onEvent         eventSink
 	transientPrompt *string
 	readOnly        bool
+	client          clientContext
+	extended        bool
 }
 
 type turnResult struct {
@@ -105,7 +107,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 	if err != nil {
 		return turnResult{}, err
 	}
-	messages := []ai.Message{ai.Text("system", assistantSystemPrompt)}
+	messages := []ai.Message{ai.Text("system", h.promptFor(ctx, assistantSystemPrompt, userID, opt.client))}
 	for i := len(rows) - 1; i >= 0; i-- {
 		content, err := h.pii.DecryptString(rows[i].ContentEncrypted)
 		if err != nil {
@@ -127,6 +129,9 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 		tools = readToolDefinitions()
 	} else {
 		tools = chatToolDefinitions(opt.mode)
+		if opt.extended {
+			tools = append(tools, extendedReadToolDefinitions()...)
+		}
 	}
 	inlineWrites := 0
 
@@ -153,7 +158,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 		for i := range calls {
 			call := &calls[i]
 			name := call.Function.Name
-			if isReadTool(name) {
+			if isReadTool(name) || (opt.extended && isExtendedTool(name)) {
 				emit(activityLabel(name))
 				out, err := h.reads.execute(ctx, name, call.Function.Arguments, userID)
 				if err != nil {

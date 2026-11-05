@@ -6,12 +6,14 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"norviq-api/internal/config"
 	"norviq-api/internal/features/accountdeletion"
 	"norviq-api/internal/features/achievements"
 	"norviq-api/internal/features/activity"
@@ -405,7 +407,132 @@ func assistantSources(d *server.Deps) (assistant.Sources, error) {
 	src.StockNews = func(ctx context.Context, symbol string, limit int) (any, error) {
 		return archive.News(ctx, symbol, &limit)
 	}
+	wireQuickAssistantSources(d, &src)
 	return src, nil
+}
+
+// wireQuickAssistantSources fills the read sources added for the quick
+// assistant. These are optional by design: a source that cannot be built is
+// logged and left nil, so the tool reports itself unavailable and the API still
+// boots with AI chat working.
+func wireQuickAssistantSources(d *server.Deps, src *assistant.Sources) {
+	if held, err := stocks.NewActions(d); err != nil {
+		d.Logger.Error("assistant_source_unavailable", "source", "holdings", "error", err)
+	} else {
+		src.Holdings = func(ctx context.Context, userID uuid.UUID, portfolioID *string, limit int) (any, error) {
+			return held.ListHoldings(ctx, userID, portfolioID, limit)
+		}
+	}
+
+	reader := portfoliomgmt.NewReader(d)
+	src.Portfolios = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return reader.List(ctx, userID)
+	}
+
+	if read, err := (marketbrief.Feature{}).LatestReader(d); err != nil {
+		d.Logger.Error("assistant_source_unavailable", "source", "market_brief", "error", err)
+	} else {
+		src.MarketBrief = func(ctx context.Context, language string) (any, error) {
+			return read(ctx, language)
+		}
+	}
+
+	if calendar, err := earnings.CalendarFromEnv(&http.Client{Timeout: 30 * time.Second}); err != nil {
+		d.Logger.Error("assistant_source_unavailable", "source", "earnings", "error", err)
+	} else {
+		src.Earnings = calendar.Fetch
+	}
+	src.ExtendedReads = extendedAssistantReads(d)
+}
+
+// extendedAssistantReads builds the readers behind the extended tools. A feature
+// that is off, or fails to build, gets no entry: its tool reports itself
+// unavailable.
+func extendedAssistantReads(d *server.Deps) map[string]assistant.ExtendedRead {
+	const maxRows = 30
+	reads := map[string]assistant.ExtendedRead{}
+	unavailable := func(source string, err error) {
+		d.Logger.Error("assistant_source_unavailable", "source", source, "error", err)
+	}
+
+	if goalplanning.RoutesEnabled() {
+		if reader, err := (goalplanning.Feature{}).Reader(d); err != nil {
+			unavailable("goals", err)
+		} else {
+			reads["get_financial_goals"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+				return reader.Overview(ctx, userID)
+			}
+		}
+	}
+
+	retirementPlans := retirement.NewReader(d)
+	reads["get_retirement_projection"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return retirementPlans.Plans(ctx, userID)
+	}
+
+	if reader, err := (planning.Feature{}).Reader(d); err != nil {
+		unavailable("planning", err)
+	} else {
+		reads["get_planning_summary"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+			return reader.Summary(ctx, userID)
+		}
+	}
+
+	settings, err := config.Load[rebalancing.Settings]()
+	switch {
+	case err != nil:
+		unavailable("rebalancing", err)
+	case config.Bool(settings.Enabled, true):
+		if md, err := rebalancing.SharedMarket(d); err != nil {
+			unavailable("rebalancing", err)
+		} else {
+			svc := rebalancing.NewService(d, md)
+			reads["get_rebalancing_status"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+				dashboard, err := svc.Dashboard(ctx, userID)
+				if err != nil {
+					return nil, err
+				}
+				alerts, err := svc.Alerts(ctx, userID)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"dashboard": dashboard, "alerts": alerts}, nil
+			}
+		}
+	}
+
+	targets := watchlist.NewActions(d)
+	reads["list_price_targets"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return targets.ListTargets(ctx, userID, maxRows)
+	}
+
+	notes := research.NewReader(d)
+	reads["list_research_notes"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return notes.Recent(ctx, userID, maxRows)
+	}
+
+	recapList := recaps.NewReader(d)
+	reads["get_latest_recap"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+		return recapList.List(ctx, userID, time.Now())
+	}
+
+	if achievementhooks.Enabled() {
+		if svc, err := achievements.NewService(d); err != nil {
+			unavailable("achievements", err)
+		} else {
+			reads["list_achievements"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+				return svc.Digest(ctx, userID, achievements.LanguageFrom(""), time.Now())
+			}
+		}
+	}
+
+	if groups.Enabled() {
+		memberships := groups.NewReader(d)
+		reads["list_groups"] = func(ctx context.Context, userID uuid.UUID) (any, error) {
+			return memberships.Memberships(ctx, userID)
+		}
+	}
+	return reads
 }
 
 // Jobs tracks running jobs for shutdown.

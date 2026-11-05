@@ -71,3 +71,20 @@ func (a *Actions) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	}
 	return a.h.q.DeleteWatchlistItem(ctx, item.ID)
 }
+
+// TargetResponse is a price target as the routes render it.
+type TargetResponse = targetResponse
+
+// ListTargets lists the user's price targets. It has no Pro gate, unlike the
+// route: the in-app assistant answers free users from this data by decision.
+func (a *Actions) ListTargets(ctx context.Context, userID uuid.UUID, limit int) ([]TargetResponse, error) {
+	targets, err := a.h.q.ListTargets(ctx, watchlistdb.ListTargetsParams{UserID: userID, Lim: int32(limit)}) // #nosec G115 -- callers pass a small constant
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TargetResponse, len(targets))
+	for i := range targets {
+		out[i] = makeTargetResponse(targets[i])
+	}
+	return out, nil
+}

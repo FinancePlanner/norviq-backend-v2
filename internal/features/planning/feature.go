@@ -43,16 +43,7 @@ type Feature struct {
 // Name implements server.Feature.
 func (Feature) Name() string { return "planning" }
 
-// Register implements server.Feature.
-func (f Feature) Register(d *server.Deps, r *server.Routes) error {
-	qf := f.Quotes
-	if qf == nil {
-		qf = func(d *server.Deps) (portfolio.QuoteSource, error) { return market.SharedService(d) }
-	}
-	quotes, err := qf(d)
-	if err != nil {
-		return err
-	}
+func (f Feature) newHandler(d *server.Deps, quotes portfolio.QuoteSource) *handler {
 	h := &handler{
 		db: d.DB, q: planningdb.New(d.DB), logger: d.Logger, now: f.Now,
 		valuation: portfolio.ValuationService{Quotes: quotes, Logger: d.Logger},
@@ -60,6 +51,23 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if h.now == nil {
 		h.now = time.Now
 	}
+	return h
+}
+
+func (f Feature) quotes(d *server.Deps) (portfolio.QuoteSource, error) {
+	if f.Quotes != nil {
+		return f.Quotes(d)
+	}
+	return market.SharedService(d)
+}
+
+// Register implements server.Feature.
+func (f Feature) Register(d *server.Deps, r *server.Routes) error {
+	quotes, err := f.quotes(d)
+	if err != nil {
+		return err
+	}
+	h := f.newHandler(d, quotes)
 	g := r.V1.Group("/planning", d.Auth.Scoped(), auth.Guard())
 	read := auth.RequireScope(auth.ScopePlanningRead)
 	g.GET("/prefill", h.prefill, read)
@@ -321,20 +329,28 @@ func (h *handler) prefill(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := c.Request().Context()
-	value, err := h.portfolioValue(ctx, s.UserID)
+	out, err := h.prefillFor(c.Request().Context(), s.UserID)
 	if err != nil {
 		return err
 	}
-	out := Prefill{Currency: "EUR", PortfolioValue: value, MonthlyByPillar: map[string]float64{}, HasPortfolio: value > 0}
-	if err := h.budgetPrefill(ctx, s.UserID, &out); err != nil {
-		return err
+	return httpx.OK(c, out)
+}
+
+// prefillFor is the body of GET /v1/planning/prefill.
+func (h *handler) prefillFor(ctx context.Context, userID uuid.UUID) (Prefill, error) {
+	value, err := h.portfolioValue(ctx, userID)
+	if err != nil {
+		return Prefill{}, err
 	}
-	if out.SuggestedRetirementAge, err = h.existingRetirementAge(ctx, s.UserID); err != nil {
-		return err
+	out := Prefill{Currency: "EUR", PortfolioValue: value, MonthlyByPillar: map[string]float64{}, HasPortfolio: value > 0}
+	if err := h.budgetPrefill(ctx, userID, &out); err != nil {
+		return Prefill{}, err
+	}
+	if out.SuggestedRetirementAge, err = h.existingRetirementAge(ctx, userID); err != nil {
+		return Prefill{}, err
 	}
 	out.HasBudget = out.MonthlyCostOfLife != nil
-	return httpx.OK(c, out)
+	return out, nil
 }
 
 func (h *handler) portfolioValue(ctx context.Context, userID uuid.UUID) (float64, error) {
@@ -494,19 +510,28 @@ func (h *handler) listScenarios(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	rows, err := h.q.ListPlanningScenarios(c.Request().Context(), s.UserID)
+	out, err := h.scenariosFor(c.Request().Context(), s.UserID)
 	if err != nil {
 		return err
+	}
+	return httpx.OK(c, out)
+}
+
+// scenariosFor is the body of GET /v1/planning/scenarios.
+func (h *handler) scenariosFor(ctx context.Context, userID uuid.UUID) ([]Scenario, error) {
+	rows, err := h.q.ListPlanningScenarios(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]Scenario, 0, len(rows))
 	for i := range rows {
 		sc, err := scenarioFrom(&rows[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		out = append(out, sc)
 	}
-	return httpx.OK(c, out)
+	return out, nil
 }
 
 // requireScenario is requireScenario(_:).

@@ -759,3 +759,23 @@ func TestEarningsCalendarFetch(t *testing.T) {
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The assistant reads targets without the HTTP route's Pro gate, by decision:
+// see the quick assistant plan. This records that it is deliberate.
+func TestActionsListTargetsSkipsTheProGateAndStaysWithTheCaller(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(true)
+	other, _ := e.user(false)
+	expect(t, e.Do("POST", "/v1/targets", token, map[string]any{"symbol": "aapl", "scenario": "BULL", "targetPrice": 250.5}), 201, "")
+	e.exec(`DELETE FROM entitlements WHERE user_id = $1`, userID)
+
+	actions := watchlist.NewActions(e.Deps)
+	mine, err := actions.ListTargets(context.Background(), userID, 50)
+	if err != nil || len(mine) != 1 {
+		t.Fatalf("mine = %+v, %v", mine, err)
+	}
+	theirs, err := actions.ListTargets(context.Background(), other, 50)
+	if err != nil || len(theirs) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

@@ -57,7 +57,8 @@ func (h *handlers) createConversation(c *echo.Context) error {
 		return err
 	}
 	var payload struct {
-		Title *string `json:"title"`
+		Title         *string `json:"title"`
+		BindMessaging *bool   `json:"bindMessaging"`
 	}
 	if err := swiftjson.DecodeRequest(c, &payload); err != nil {
 		return err
@@ -80,11 +81,14 @@ func (h *handlers) createConversation(c *echo.Context) error {
 	}
 	achievementhooks.Schedule(s.UserID)
 	// MessagingConversations.bindLinks: starting fresh in the app starts
-	// fresh in every linked chat too.
-	if err := h.q.BindMessagingLinks(ctx, assistantdb.BindMessagingLinksParams{
-		UserID: s.UserID, ConversationID: &id,
-	}); err != nil {
-		return err
+	// fresh in every linked chat too, unless the client asks to keep this
+	// conversation out of them.
+	if payload.BindMessaging == nil || *payload.BindMessaging {
+		if err := h.q.BindMessagingLinks(ctx, assistantdb.BindMessagingLinksParams{
+			UserID: s.UserID, ConversationID: &id,
+		}); err != nil {
+			return err
+		}
 	}
 	ts := apijson.FormatTime(now)
 	return httpx.Created(c, conversationResponse{

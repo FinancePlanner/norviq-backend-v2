@@ -5,9 +5,11 @@
 package assistant
 
 import (
+	"os"
 	"time"
 
 	"norviq-api/internal/auth"
+	"norviq-api/internal/config"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/tax"
@@ -45,6 +47,9 @@ type Feature struct {
 func (Feature) Name() string { return "assistant" }
 
 type handlers struct {
+	// extendedTools is ASSISTANT_EXTENDED_TOOLS_ENABLED.
+	extendedTools bool
+
 	d   *server.Deps
 	q   *assistantdb.Queries
 	pii *crypto.PII
@@ -93,6 +98,7 @@ func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*ha
 	}
 	h := &handlers{
 		d: d, q: q, pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now, src: src, actions: acts,
+		extendedTools: config.Bool(os.Getenv(extendedToolsEnv), false),
 	}
 	h.reads = &readTools{src: &h.src, expenses: acts.expenses, market: mkt, db: d.DB, now: now}
 	var news memoNewsFunc

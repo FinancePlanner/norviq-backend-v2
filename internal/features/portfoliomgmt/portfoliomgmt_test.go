@@ -744,3 +744,21 @@ func TestMembersInJoinOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderListsOnlyTheCallersPortfolios(t *testing.T) {
+	e := newEnv(t)
+	owner := e.app.CreateUser("reader-owner@example.com")
+	other := e.app.CreateUser("reader-other@example.com")
+	reader := portfoliomgmt.NewReader(e.app.Deps)
+	mine, err := reader.List(context.Background(), owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := reader.List(context.Background(), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mine) != 1 || !mine[0].IsDefault || len(theirs) != 1 || mine[0].ID == theirs[0].ID {
+		t.Fatalf("mine = %+v, theirs = %+v", mine, theirs)
+	}
+}

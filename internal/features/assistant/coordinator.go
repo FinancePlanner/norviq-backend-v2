@@ -94,7 +94,7 @@ func (h *handlers) persistReply(ctx context.Context, userID, conversationID uuid
 // runCoordinator is AIAssistantTurnCoordinator.run. requireConsent is
 // AIConsent.require for the caller: the request check (with the legacy-iOS
 // grace) over HTTP, the strict check for Telegram's synthetic request.
-func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, scoped bool, onEvent eventSink) (turnOutcome, error) {
+func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, scoped bool, client clientContext, onEvent eventSink) (turnOutcome, error) {
 	if content == "" || graphemeLen(content) > maxMessageCharacters {
 		return turnOutcome{}, httpx.BadRequest("Message must contain 1 to 12,000 characters.")
 	}
@@ -137,7 +137,8 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		out.text, out.memo = "Memo on "+card.Symbol+" is ready.", &card
 	} else {
 		res, err := h.runTurn(ctx, resolved, userID, conversationID, turnOptions{
-			mode: confirmationModeFor(scoped), onEvent: onEvent,
+			mode: confirmationModeFor(scoped), onEvent: onEvent, client: client,
+			extended: h.extendedToolsAllowed(ctx, scoped, client, conversationID),
 		})
 		if err != nil {
 			return turnOutcome{}, err

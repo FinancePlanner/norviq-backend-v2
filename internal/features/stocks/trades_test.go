@@ -636,23 +636,177 @@ func TestRecordTradesRefusesEmptyAndOversizedBatches(t *testing.T) {
 	}
 }
 
-// A stopped follow leaves its pilot account on the list, and the recorder
-// books there, so duplicate detection has to look there too.
+// seedStoppedFollow leaves what a stopped follow leaves on the list: its pilot
+// account with cash, and a simulated holding. It returns the account's id.
+func (e *tradesEnv) seedStoppedFollow(t *testing.T) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	account := uuid.New()
+	if _, err := e.app.Deps.DB.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, portfolio_id, created_at)
+		VALUES ($1, $2, $3, 'pilot', 'EUR', $4, now())`, account, e.userID, "pilot-"+e.userID.String(), e.listID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Deps.DB.Exec(ctx, `INSERT INTO cash_balances (id, account_id, currency, balance, as_of, created_at)
+		VALUES ($1, $2, 'EUR', 500, '2024-01-01', now())`, uuid.New(), account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.app.Deps.DB.Exec(ctx, `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id, source_provider)
+		VALUES ($1, $2, 'AAPL', 10, 100, '2024-01-01', now(), $3, 'pilot')`, uuid.New(), e.userID, e.listID); err != nil {
+		t.Fatal(err)
+	}
+	return account
+}
+
+// A stopped follow leaves its pilot account on the list. Saved trades still
+// book on the plain manual account (ruling R9): history lists it, so they stay
+// editable and deletable, and duplicate detection looks there too.
 func TestRecordTradesDuplicateOnStoppedFollowListIsRowError(t *testing.T) {
 	e := newTradesEnv(t)
 	ctx := context.Background()
-	if _, err := e.app.Deps.DB.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, portfolio_id, created_at)
-		VALUES ($1, $2, $3, 'pilot', 'EUR', $4, now())`, uuid.New(), e.userID, "pilot-"+e.userID.String(), e.listID); err != nil {
-		t.Fatal(err)
+	pilotAccount := e.seedStoppedFollow(t)
+	rows := []stocks.TradeInput{buy("MSFT", 10, 100, "2024-03-10")}
+
+	// The pilot account is not this save's account: no manual one exists yet.
+	if p := e.preview(t, rows...); p.BaseCurrency != "" {
+		t.Fatalf("preview before save: %+v", p)
 	}
-	rows := []stocks.TradeInput{buy("AAPL", 10, 100, "2024-03-10")}
 	e.record(t, rows...)
+
 	_, err := e.actions.RecordTrades(ctx, e.userID, e.list, rows)
 	if !hasIssue(rowsError(t, err).Issues, 0, stocks.TradeIssueAlreadyRecorded) {
 		t.Fatalf("%v", err)
 	}
-	if p := e.preview(t, rows...); p.BaseCurrency != "EUR" || !hasIssue(p.Issues, 0, stocks.TradeIssueAlreadyRecorded) {
+	if p := e.preview(t, rows...); p.BaseCurrency != "USD" || !hasIssue(p.Issues, 0, stocks.TradeIssueAlreadyRecorded) {
 		t.Fatalf("%+v", p)
+	}
+	if n := e.count(t, `SELECT count(*) FROM transactions WHERE account_id = $1`, pilotAccount); n != 0 {
+		t.Fatalf("pilot account transactions %d", n)
+	}
+
+	// In history, and editable and deletable from there.
+	r := e.app.Do("GET", "/v1/transactions", e.token, nil)
+	if r.Status != 200 {
+		t.Fatalf("list %d %s", r.Status, r.Body)
+	}
+	var history []stocks.TransactionResponse
+	r.JSON(t, &history)
+	if len(history) != 1 || history[0].InstrumentID != "MSFT" || history[0].Quantity == nil || *history[0].Quantity != 10 {
+		t.Fatalf("history %s", r.Body)
+	}
+	if r := e.app.Do("PATCH", "/v1/transactions/"+history[0].ID, e.token, map[string]any{"price": 101}); r.Status != 200 {
+		t.Fatalf("patch %d %s", r.Status, r.Body)
+	}
+	if r := e.app.Do("DELETE", "/v1/transactions/"+history[0].ID, e.token, nil); r.Status != http.StatusNoContent {
+		t.Fatalf("delete %d %s", r.Status, r.Body)
+	}
+	e.record(t, rows...)
+}
+
+// Holdings live on the list whichever account books the trade, so trades on a
+// stopped-follow list merge into and sell from what is there, at the right cost.
+func TestRecordTradesStoppedFollowListKeepsHoldingsAndRealized(t *testing.T) {
+	e := newTradesEnv(t)
+	pilotAccount := e.seedStoppedFollow(t)
+
+	if res := e.record(t, buy("AAPL", 10, 200, "2024-03-10")); res != (stocks.TradesResult{Merged: 1}) {
+		t.Fatalf("buy %+v", res)
+	}
+	shares, price, date, found := e.holding(t, "AAPL")
+	if !found || !approx(shares, 20) || !approx(price, 150) || date != "2024-01-01" {
+		t.Fatalf("after buy: %v @ %v from %v (found %v)", shares, price, date, found)
+	}
+	if res := e.record(t, sell("AAPL", 5, 170, "2024-03-11")); res != (stocks.TradesResult{Sold: 1}) {
+		t.Fatalf("sell %+v", res)
+	}
+	if shares, price, _, _ = e.holding(t, "AAPL"); !approx(shares, 15) || !approx(price, 150) {
+		t.Fatalf("after sell: %v @ %v", shares, price)
+	}
+	realized := e.float(t, `SELECT tx.realized_pnl FROM transactions tx JOIN accounts a ON a.id = tx.account_id
+		WHERE a.user_id = $1 AND a.portfolio_id = $2 AND a.broker = 'manual' AND tx.type = 'sell'`, e.userID, e.listID)
+	if !approx(realized, 100) { // (170-150) x 5
+		t.Fatalf("realized %v, want 100", realized)
+	}
+	if n := e.count(t, `SELECT count(*) FROM transactions WHERE account_id = $1`, pilotAccount); n != 0 {
+		t.Fatalf("pilot account transactions %d", n)
+	}
+	if c := e.float(t, `SELECT balance FROM cash_balances WHERE account_id = $1`, pilotAccount); c != 500 {
+		t.Fatalf("pilot cash %v", c)
+	}
+}
+
+func (e *tradesEnv) holdingLatched(t *testing.T) bool {
+	t.Helper()
+	return e.count(t, `SELECT count(*) FROM onboarding_state WHERE user_id = $1 AND first_holding_at IS NOT NULL`, e.userID) == 1
+}
+
+// seedHolding writes a stock row straight to the table, which latches nothing.
+func (e *tradesEnv) seedHolding(t *testing.T, symbol string, shares, price float64) {
+	t.Helper()
+	if _, err := e.app.Deps.DB.Exec(context.Background(), `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, $3, $4, $5, '2024-01-01', now(), $6)`, uuid.New(), e.userID, symbol, shares, price, e.listID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRecordTradesFirstHoldingLatchesOnboarding(t *testing.T) {
+	e := newTradesEnv(t)
+	if e.holdingLatched(t) {
+		t.Fatal("latched before any save")
+	}
+	e.record(t, buy("AAPL", 10, 100, "2024-03-10"))
+	if !e.holdingLatched(t) {
+		t.Fatal("first_holding_at not set")
+	}
+	if n := e.count(t, `SELECT holding_count FROM usage_counters WHERE user_id = $1`, e.userID); n != 1 {
+		t.Fatalf("holding_count %d", n)
+	}
+}
+
+func TestRecordTradesMergedBuyLatchesOnboarding(t *testing.T) {
+	e := newTradesEnv(t)
+	e.seedHolding(t, "AAPL", 5, 100)
+	if res := e.record(t, buy("AAPL", 5, 100, "2024-03-10")); res != (stocks.TradesResult{Merged: 1}) {
+		t.Fatalf("%+v", res)
+	}
+	if !e.holdingLatched(t) {
+		t.Fatal("first_holding_at not set")
+	}
+}
+
+func TestRecordTradesSellOnlyBatchDoesNotLatch(t *testing.T) {
+	e := newTradesEnv(t)
+	e.seedHolding(t, "AAPL", 5, 100)
+	if res := e.record(t, sell("AAPL", 2, 100, "2024-03-10")); res != (stocks.TradesResult{Sold: 1}) {
+		t.Fatalf("%+v", res)
+	}
+	if e.holdingLatched(t) {
+		t.Fatal("sell-only batch latched first_holding_at")
+	}
+}
+
+// Once the transaction commits the save stands: a failing follow-up is logged,
+// never returned, or the caller would report saved trades as failed.
+func TestRecordTradesFollowUpFailuresDoNotFailTheSave(t *testing.T) {
+	e := newTradesEnv(t)
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`CREATE FUNCTION refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$`,
+		`CREATE TRIGGER refuse_onboarding BEFORE INSERT OR UPDATE ON onboarding_state FOR EACH ROW EXECUTE FUNCTION refuse_write()`,
+		`CREATE TRIGGER refuse_usage BEFORE INSERT OR UPDATE ON usage_counters FOR EACH ROW EXECUTE FUNCTION refuse_write()`,
+	} {
+		if _, err := e.app.Deps.DB.Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := e.record(t, buy("AAPL", 10, 100, "2024-03-10"))
+	if res != (stocks.TradesResult{Inserted: 1}) {
+		t.Fatalf("%+v", res)
+	}
+	if shares, _, _, found := e.holding(t, "AAPL"); !found || shares != 10 {
+		t.Fatalf("shares %v (found %v)", shares, found)
+	}
+	if e.holdingLatched(t) {
+		t.Fatal("trigger did not refuse the latch, so this test proves nothing")
 	}
 }
 

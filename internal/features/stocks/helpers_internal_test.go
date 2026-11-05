@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"norviq-api/internal/features/badges"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/store/badgesdb"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -123,7 +126,10 @@ func TestLedgerHTTPError(t *testing.T) {
 }
 
 // NewActionsForTest builds Actions on a stub market, for the external test
-// package. RecordTrades and PreviewTrades use only these fields.
+// package.
 func NewActionsForTest(db *pgxpool.Pool, market MarketData, logger *slog.Logger) *Actions {
-	return &Actions{h: &handlers{db: db, market: market, logger: logger}}
+	return &Actions{h: &handlers{
+		db: db, market: market, logger: logger, ent: entitlements.NewFromEnv(db),
+		badges: &badges.Service{Q: badgesdb.New(db), Logger: logger.Warn},
+	}}
 }

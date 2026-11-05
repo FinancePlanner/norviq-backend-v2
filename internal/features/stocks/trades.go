@@ -373,7 +373,7 @@ func (a *Actions) PreviewTrades(ctx context.Context, userID uuid.UUID, listID *s
 	if err != nil {
 		return TradesPreview{}, err
 	}
-	account, err := portfolios.PeekAccountForManualEdit(ctx, h.db, userID, *list)
+	account, err := portfolios.PeekManualAccount(ctx, h.db, userID, *list)
 	if err != nil {
 		return TradesPreview{}, err
 	}
@@ -436,7 +436,10 @@ func (a *Actions) RecordTrades(ctx context.Context, userID uuid.UUID, listID *st
 		if err := stocksdb.New(tx).LockPortfolioListForTrades(ctx, *list); err != nil {
 			return err
 		}
-		booked, err := LedgerTradeRecorder{SkipCash: true}.Record(ctx, tx, trades, userID, *list, nil, portfolios.AccountForManualEdit)
+		// A nil resolver is the plain manual account, never a stopped follow's
+		// pilot account: history hides that one and RemovePilotLeftovers deletes
+		// it. It is preferred only for simulation cash, which SkipCash rules out.
+		booked, err := LedgerTradeRecorder{SkipCash: true}.Record(ctx, tx, trades, userID, *list, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -459,6 +462,7 @@ func (a *Actions) RecordTrades(ctx context.Context, userID uuid.UUID, listID *st
 	})
 	switch {
 	case err == nil:
+		h.afterTradesSaved(ctx, userID, result)
 		return result, nil
 	case isUniqueViolation(err):
 		return TradesResult{}, h.lostSaveRace(ctx, userID, *list, rows)
@@ -466,10 +470,24 @@ func (a *Actions) RecordTrades(ctx context.Context, userID uuid.UUID, listID *st
 	return TradesResult{}, ledgerHTTPError(err)
 }
 
+// afterTradesSaved runs what other holding writes run once they commit. The
+// save stands by now, so a failure here is logged and never returned. Only a
+// buy leaves a holding behind to latch.
+func (h *handlers) afterTradesSaved(ctx context.Context, userID uuid.UUID, result TradesResult) {
+	if result.Inserted+result.Merged == 0 {
+		return
+	}
+	if err := h.syncHoldings(ctx, userID); err != nil {
+		h.logger.Warn("holdings count sync failed", "user", userID.String(), "error", err)
+	}
+	h.reconcileBadges(ctx, userID)
+	h.latchHolding(ctx, userID)
+}
+
 // checkTradesToSave is checkTrades against the account the recorder will book
 // on, with any issue returned as a *TradeRowsError.
 func (h *handlers) checkTradesToSave(ctx context.Context, userID, listID uuid.UUID, rows []TradeInput) ([]tradeRow, error) {
-	account, err := portfolios.PeekAccountForManualEdit(ctx, h.db, userID, listID)
+	account, err := portfolios.PeekManualAccount(ctx, h.db, userID, listID)
 	if err != nil {
 		return nil, err
 	}

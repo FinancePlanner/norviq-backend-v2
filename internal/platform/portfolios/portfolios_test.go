@@ -306,38 +306,3 @@ func TestPeekManualAccount(t *testing.T) {
 		t.Fatalf("find: %+v %v", found, err)
 	}
 }
-
-// PeekAccountForManualEdit agrees with AccountForManualEdit: the pilot account
-// when the list has one, else the manual one.
-func TestPeekAccountForManualEdit(t *testing.T) {
-	app := testutil.NewApp(t, nil)
-	ctx := context.Background()
-	db := app.Deps.DB
-	user := createUser(t, app, "peekedit@example.com")
-	list, err := portfolios.EnsureDefaultPortfolioListID(ctx, db, user)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list); err != nil || got != nil {
-		t.Fatalf("empty: %+v %v", got, err)
-	}
-	manual, err := portfolios.FindOrCreateManualAccount(ctx, db, user, list)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list); err != nil || got == nil || got.ID != manual.ID {
-		t.Fatalf("manual: %+v %v", got, err)
-	}
-	pilot := uuid.New()
-	if _, err := db.Exec(ctx, `INSERT INTO accounts (id, user_id, external_id, broker, base_currency, portfolio_id, created_at) VALUES ($1, $2, 'pilot-x', 'pilot', 'USD', $3, now())`, pilot, user, list); err != nil {
-		t.Fatal(err)
-	}
-	got, err := portfolios.PeekAccountForManualEdit(ctx, db, user, list)
-	if err != nil || got == nil || got.ID != pilot {
-		t.Fatalf("pilot: %+v %v", got, err)
-	}
-	edit, err := portfolios.AccountForManualEdit(ctx, db, user, list)
-	if err != nil || edit.ID != pilot {
-		t.Fatalf("edit: %+v %v", edit, err)
-	}
-}

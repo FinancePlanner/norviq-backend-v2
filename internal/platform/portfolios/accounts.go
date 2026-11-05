@@ -136,19 +136,6 @@ func PeekManualAccount(ctx context.Context, db portfoliocoredb.DBTX, userID, por
 	return nil, nil
 }
 
-// PeekAccountForManualEdit is AccountForManualEdit with PeekManualAccount: the
-// account that call would use, or nil when it would create one.
-func PeekAccountForManualEdit(ctx context.Context, db portfoliocoredb.DBTX, userID, portfolioID uuid.UUID) (*portfoliocoredb.Account, error) {
-	pilot, err := portfoliocoredb.New(db).AccountByUserPortfolioBroker(ctx, portfoliocoredb.AccountByUserPortfolioBrokerParams{UserID: userID, PortfolioID: &portfolioID, Broker: PilotBroker})
-	if err != nil {
-		return nil, err
-	}
-	if len(pilot) > 0 {
-		return &pilot[0], nil
-	}
-	return PeekManualAccount(ctx, db, userID, portfolioID)
-}
-
 // ListIsIBKRSynced reports whether a live IBKR sync writes to the list: a
 // connection in connected or error status (a failed run marks it error, and it
 // keeps its binding and can sync again) bound to the list, or unbound when the

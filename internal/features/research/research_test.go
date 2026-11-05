@@ -155,3 +155,21 @@ func TestUnreadableStoredLinksAreOmitted(t *testing.T) {
 		t.Fatalf("body = %s", r.Body)
 	}
 }
+
+func TestReaderRecentIsTheCallersAndCapped(t *testing.T) {
+	e := newEnv(t)
+	owner, token := e.user()
+	other, _ := e.user()
+	for _, symbol := range []string{"AAPL", "MSFT", "NVDA"} {
+		expect(t, e.Do("POST", "/v1/research", token, map[string]any{"symbol": symbol, "thesis": "note"}), 201, "")
+	}
+	reader := research.NewReader(e.Deps)
+	mine, err := reader.Recent(context.Background(), owner, 2)
+	if err != nil || len(mine) != 2 {
+		t.Fatalf("mine = %+v, %v", mine, err)
+	}
+	theirs, err := reader.Recent(context.Background(), other, 2)
+	if err != nil || len(theirs) != 0 {
+		t.Fatalf("theirs = %+v, %v", theirs, err)
+	}
+}

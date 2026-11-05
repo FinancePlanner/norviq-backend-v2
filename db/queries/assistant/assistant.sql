@@ -211,3 +211,6 @@ WHERE user_id = $1 AND occurred_on >= sqlc.arg(month_start) AND occurred_on < sq
 
 -- name: BudgetSnapshotForMonth :one
 SELECT net_salary FROM budget_snapshots WHERE user_id = $1 AND month_start = $2 LIMIT 1;
+
+-- name: ConversationHasMessagingLink :one
+SELECT EXISTS (SELECT 1 FROM messaging_links WHERE conversation_id = $1);

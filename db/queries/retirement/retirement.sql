@@ -21,3 +21,12 @@ WHERE id = $1;
 UPDATE retirement_plans
 SET rule_version = $2, updated_at = $3
 WHERE id = $1;
+
+-- name: ListRetirementPlansForOwner :many
+-- The saved plans on a user's own active portfolios, for the assistant.
+SELECT rp.id, rp.portfolio_id, rp.rule_version, rp.input_json, rp.created_at, rp.updated_at
+FROM retirement_plans rp
+JOIN portfolio_lists pl ON pl.id = rp.portfolio_id
+WHERE pl.user_id = $1 AND pl.archived_at IS NULL
+ORDER BY rp.created_at DESC
+LIMIT 10;

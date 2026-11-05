@@ -78,6 +78,25 @@ func readToolDefinitions() []ai.Tool {
 		}, "query"),
 		readTool("get_crypto_portfolio", "The user's crypto holdings with live prices and 24-hour changes.", nil),
 		readTool("get_insights", "Latest first-party market-sentiment insights summary.", nil),
+		readTool("list_holdings",
+			"Every stock and ETF position the user holds, across all portfolios unless one is named, with the position id that sell_position and delete_position need. Cost basis only: use get_financial_overview for live value and performance.",
+			map[string]ai.Parameter{
+				"portfolio_id": param("string", "Restrict to one portfolio, by the id from list_portfolios."),
+				"limit":        param("integer", "Maximum rows, from 1 to 200."),
+			}),
+		readTool("list_portfolios", "The portfolios the user owns or shares, with name, purpose, and base currency.", nil),
+		readTool("get_market_brief", "The latest published daily market brief.", map[string]ai.Parameter{
+			"language": enumParam("Language of the brief.", []string{"en", "pt-PT"}),
+		}),
+		readTool("get_earnings", "Company earnings dates and results from the calendar, for the next two weeks unless dates are given.", map[string]ai.Parameter{
+			"symbol": param("string", "Ticker, for example AAPL."),
+			"from":   param("string", "Start date, YYYY-MM-DD."),
+			"to":     param("string", "End date, YYYY-MM-DD."),
+		}),
+		readTool("get_news", "Recent news for a ticker, or the user's personal news feed when no ticker is given.", map[string]ai.Parameter{
+			"symbol": param("string", "Ticker, for example AAPL."),
+			"limit":  param("integer", "Maximum articles, from 1 to 20."),
+		}),
 	}
 }
 
@@ -117,7 +136,8 @@ func (a actionArgs) readInt(key string) (int, bool) {
 	return a.int(key)
 }
 
-func clampInt(v, lo, hi int) int { return min(max(v, lo), hi) }
+// clampLimit keeps a row count from the model between 1 and hi.
+func clampLimit(v, hi int) int { return min(max(v, 1), hi) }
 
 // macroCountry is MacroCountry(query:), throwing Abort(.badRequest).
 func macroCountry(a actionArgs) (string, error) {
@@ -174,7 +194,7 @@ func (r *readTools) execute(ctx context.Context, name, arguments string, userID 
 		if n, ok := args.readInt("limit"); ok {
 			limit = n
 		}
-		items, _, err := r.expenses.GetExpenses(ctx, r.db, userID, from, to, clampInt(limit, 1, 200), nil)
+		items, _, err := r.expenses.GetExpenses(ctx, r.db, userID, from, to, clampLimit(limit, 200), nil)
 		if err != nil {
 			return "", err
 		}
@@ -196,7 +216,7 @@ func (r *readTools) execute(ctx context.Context, name, arguments string, userID 
 		if n, ok := args.readInt("months"); ok {
 			count = n
 		}
-		count = clampInt(count, 1, 24)
+		count = clampLimit(count, 24)
 		if len(reports) > count {
 			reports = reports[len(reports)-count:]
 		}
@@ -273,6 +293,12 @@ func (r *readTools) execute(ctx context.Context, name, arguments string, userID 
 		}
 		return `{"untrusted_data":` + enc + "}", nil
 	}
+	if out, known, err := r.executeCore(ctx, name, args, userID); known {
+		return out, err
+	}
+	if isExtendedTool(name) {
+		return r.executeExtended(ctx, name, args, userID)
+	}
 	return `{"error":"unknown read tool"}`, nil
 }
 
@@ -305,6 +331,36 @@ func activityLabel(tool string) string {
 		return "Looking up the market…"
 	case "get_insights":
 		return "Reading market insights…"
+	case "get_financial_goals":
+		return "Reading your goals…"
+	case "get_tax_summary":
+		return "Reading your tax position…"
+	case "get_retirement_projection":
+		return "Reading your retirement plan…"
+	case "get_planning_summary":
+		return "Reading your plans…"
+	case "get_rebalancing_status":
+		return "Checking portfolio drift…"
+	case "list_price_targets":
+		return "Reading your price targets…"
+	case "list_research_notes":
+		return "Reading your research notes…"
+	case "get_latest_recap":
+		return "Reading your recap…"
+	case "list_achievements":
+		return "Reading your achievements…"
+	case "list_groups":
+		return "Reading your groups…"
+	case "list_holdings":
+		return "Reading your holdings…"
+	case "list_portfolios":
+		return "Reading your portfolios…"
+	case "get_market_brief":
+		return "Reading the market brief…"
+	case "get_earnings":
+		return "Checking earnings dates…"
+	case "get_news":
+		return "Reading the news…"
 	case "get_current_inflation":
 		return "Reading current inflation…"
 	case "get_economy_snapshot":

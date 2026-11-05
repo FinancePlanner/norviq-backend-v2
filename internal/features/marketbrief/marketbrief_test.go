@@ -654,3 +654,23 @@ func TestLiveGeneratorAgainstStubs(t *testing.T) {
 		t.Fatalf("assistant prefill: %v", msgs)
 	}
 }
+
+func TestLatestReaderHonoursTheEnabledFlag(t *testing.T) {
+	h := newHarness(t, false)
+	read, err := marketbrief.Feature{Settings: &marketbrief.Settings{}}.LatestReader(h.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := read(context.Background(), "pt-PT")
+	if err != nil || got.Enabled || got.Language != "pt-PT" {
+		t.Fatalf("disabled = %+v, %v", got, err)
+	}
+	read, err = marketbrief.Feature{Settings: &marketbrief.Settings{Enabled: "1"}}.LatestReader(h.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = read(context.Background(), "en")
+	if err != nil || !got.Enabled || got.TradingDate != nil {
+		t.Fatalf("enabled with no brief = %+v, %v", got, err)
+	}
+}

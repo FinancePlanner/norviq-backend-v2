@@ -20,6 +20,7 @@ type Querier interface {
 	// this hash, marked redeemed in the same transaction.
 	ClaimLinkCode(ctx context.Context, arg ClaimLinkCodeParams) (uuid.UUID, error)
 	ClaimMessagingUpdate(ctx context.Context, arg ClaimMessagingUpdateParams) error
+	ConversationHasMessagingLink(ctx context.Context, conversationID *uuid.UUID) (bool, error)
 	CountTipsSince(ctx context.Context, arg CountTipsSinceParams) (int64, error)
 	DeleteConversation(ctx context.Context, id uuid.UUID) error
 	// Retention (AIAssistantRetentionJob).

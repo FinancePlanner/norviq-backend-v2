@@ -435,6 +435,12 @@ func TestParseConfirmationAnswer(t *testing.T) {
 		"cancel that":       decline,
 		"cancel it please":  decline,
 
+		// R26: the natural ways to say it.
+		"go ahead":   approve,
+		"yes thanks": approve,
+		"ok thanks":  approve,
+		"no thanks":  decline,
+
 		// The sentences a word match used to take for an answer.
 		"what do I own":          nil,
 		"go through my spending": nil,
@@ -446,11 +452,14 @@ func TestParseConfirmationAnswer(t *testing.T) {
 		"what did I spend":       nil,
 
 		// Over four words, however agreeable.
-		"ok do it now please":      nil,
-		"yes yes yes yes yes":      nil,
-		"no, please don't do that": nil,
+		"go ahead and delete everything": nil,
+		"ok do it now please":            nil,
+		"yes yes yes yes yes":            nil,
+		"no, please don't do that":       nil,
 
 		// Filler alone answers nothing, and neither does a mix.
+		"thanks": nil,
+		"ahead":  nil,
 		"please": nil,
 		"it":     nil,
 		"that":   nil,

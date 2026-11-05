@@ -459,7 +459,7 @@ var (
 	refusalWords  = []string{"no", "nope", "cancel", "stop", "don't", "dont", "decline", "abort", "nevermind"}
 	approvalWords = []string{"yes", "yep", "yeah", "confirm", "approve", "ok", "okay", "do", "go"}
 	// answerFiller can stand beside an answer but is never one.
-	answerFiller = []string{"please", "it", "that"}
+	answerFiller = []string{"please", "it", "that", "ahead", "thanks"}
 	// refusalFiller adds "do", so "don't do it" stays a refusal: there it is the
 	// thing refused, where alone it agrees.
 	refusalFiller = append([]string{"do"}, answerFiller...)

@@ -55,6 +55,9 @@ type Querier interface {
 	InsertTip(ctx context.Context, arg InsertTipParams) error
 	// Standing tasks (AIAssistantWatch, AIAssistantWatchJob).
 	InsertWatch(ctx context.Context, arg InsertWatchParams) error
+	// The card a typed yes or no answers. A record_trades card is left out: it saves
+	// only reviewed rows, which free text can't carry, and the words match ordinary
+	// sentences.
 	LatestPendingActionInConversation(ctx context.Context, arg LatestPendingActionInConversationParams) (uuid.UUID, error)
 	ListConversationMessages(ctx context.Context, arg ListConversationMessagesParams) ([]AiMessage, error)
 	// AIAssistantController, PositionMemoService, AIAssistantTurnCoordinator and

@@ -256,11 +256,19 @@ func (h *handlers) cancelAction(c *echo.Context) error {
 	if row.Status != statusPending {
 		return httpx.Abort(http.StatusConflict, "Action is no longer pending.")
 	}
-	now := h.now()
-	if err := h.q.SetPendingActionStatus(ctx, assistantdb.SetPendingActionStatusParams{
-		ID: row.ID, Status: statusCancelled, UpdatedAt: &now,
+	// The read above can lose to a confirm, so the write is conditional, and the
+	// answer comes from what the row says now.
+	if err := h.q.CancelPendingActionIfPending(ctx, assistantdb.CancelPendingActionIfPendingParams{
+		Now: h.now(), ID: row.ID, UserID: s.UserID,
 	}); err != nil {
 		return err
+	}
+	row, err = h.q.GetOwnedPendingAction(ctx, assistantdb.GetOwnedPendingActionParams{ID: id, UserID: s.UserID})
+	if err != nil {
+		return err
+	}
+	if row.Status != statusCancelled {
+		return httpx.Abort(http.StatusConflict, "Action is no longer pending.")
 	}
 	return httpx.NoContent(c)
 }

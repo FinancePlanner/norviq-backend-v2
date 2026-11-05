@@ -83,10 +83,10 @@ type turnHarness struct {
 	h      *handlers
 }
 
-func newTurnHarness(t *testing.T, env map[string]string) *turnHarness {
+func newTurnHarness(t *testing.T, env map[string]string, mutate ...func(*server.Deps)) *turnHarness {
 	t.Helper()
 	th := &turnHarness{client: &scripted{}}
-	th.App = testutil.NewApp(t, []server.Feature{Feature{Sources: stubSources, memo: stubMemo{}, Env: func(k string) string { return env[k] }}}, func(d *server.Deps) {
+	mutate = append(mutate, func(d *server.Deps) {
 		p, err := ai.New(ai.Options{Env: ai.MapEnv(env), Logger: silent, DB: d.DB, HTTP: &http.Client{}})
 		if err != nil {
 			t.Fatal(err)
@@ -94,6 +94,7 @@ func newTurnHarness(t *testing.T, env map[string]string) *turnHarness {
 		p.Default, p.Router = th.client, nil
 		aiplatform.SetPlatform(d, p)
 	})
+	th.App = testutil.NewApp(t, []server.Feature{Feature{Sources: stubSources, memo: stubMemo{}, Env: func(k string) string { return env[k] }}}, mutate...)
 	h, err := newHandlers(th.Deps, nil, stubSources)
 	if err != nil {
 		t.Fatal(err)

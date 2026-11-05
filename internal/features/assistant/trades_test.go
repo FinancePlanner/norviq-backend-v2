@@ -1,18 +1,25 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
+	"norviq-api/internal/platform/telegram"
+	"norviq-api/internal/server"
+	"norviq-api/internal/store/assistantdb"
 	"norviq-api/internal/store/portfoliocoredb"
 	"norviq-api/internal/testutil"
 
@@ -67,9 +74,9 @@ type tradesHarness struct {
 	token string
 }
 
-func newTradesHarness(t *testing.T) *tradesHarness {
+func newTradesHarness(t *testing.T, mutate ...func(*server.Deps)) *tradesHarness {
 	t.Helper()
-	th := newTurnHarness(t, imagesOn)
+	th := newTurnHarness(t, imagesOn, mutate...)
 	user, conv := th.proConversation("trades@example.com")
 	h := &tradesHarness{turnHarness: th, user: user, conv: conv, token: th.Token(user)}
 	for _, symbol := range []string{"AAPL", "MSFT", "NVDA", "BRK.B"} {
@@ -509,6 +516,7 @@ func TestConfirmNoBodyRefusedCardStaysPending(t *testing.T) {
 	for name, body := range map[string]any{
 		"none":          nil,
 		"blank":         []byte("  \n"),
+		"null":          []byte(" null\n"),
 		"object":        []byte(`{}`),
 		"null trades":   []byte(`{"trades":null}`),
 		"only the list": []byte(`{"portfolioListId":"` + uuid.NewString() + `"}`),
@@ -867,15 +875,252 @@ func TestConfirmRaceFailureSettlesFailed(t *testing.T) {
 	})
 }
 
-// Telegram's "yes" reaches h.confirm with no rows to save. Nothing books.
+// A caller of h.confirm has no reviewed rows to save, so it gets the refusal
+// before the claim, as an abort messaging can relay, and the card stays pending.
 func TestExecutorRefusesRecordTrades(t *testing.T) {
 	h := newTradesHarness(t)
 	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
-	if _, err := h.h.confirm(context.Background(), uuid.MustParse(action.ID), h.user); err == nil {
-		t.Fatal("executor ran record_trades")
+	_, err := h.h.confirm(context.Background(), uuid.MustParse(action.ID), h.user)
+	if reason, isAbort := abortReason(err); !isAbort || reason != noBodyRefusal {
+		t.Fatalf("confirm = %v", err)
 	}
-	if h.transactions() != 0 || h.count(`SELECT count(*) FROM stocks WHERE user_id = $1`, h.user) != 0 {
-		t.Fatal("executor booked trades")
+	h.stillPending(action, 0)
+	if n := h.count(`SELECT count(*) FROM stocks WHERE user_id = $1`, h.user); n != 0 {
+		t.Fatalf("stocks = %d", n)
+	}
+	if r := h.confirm(action, reviewedBody(reviewed("AAPL", "buy", 1, 100, "2024-03-10"))); r.Status != 200 {
+		t.Fatalf("web confirm after = %d %s", r.Status, r.Body)
+	}
+}
+
+// Free text on Telegram never acts on a trades card: approval and refusal words
+// occur in ordinary sentences, and only a client showing the rows can save them.
+func TestTelegramFreeTextLeavesTradesCardPending(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	conv := uuid.MustParse(h.conv)
+	link := &assistantdb.MessagingLink{UserID: h.user, ConversationID: &conv}
+	m := newMessenger(h.h)
+	for _, text := range []string{"yes", "go", "what do I own", "no", "stop", "don't"} {
+		const answer = "A normal answer."
+		seen := h.client.calls()
+		h.client.replies = []ai.Message{say(answer)}
+		out, err := m.assistantTurn(context.Background(), telegram.InboundMessage{Text: text}, link, nil)
+		if err != nil {
+			t.Fatalf("%q: %v", text, err)
+		}
+		if out.Text != answer || h.client.calls() != seen+1 {
+			t.Fatalf("%q: reply %q, model calls %d", text, out.Text, h.client.calls()-seen)
+		}
+		h.stillPending(action, 0)
+	}
+
+	// An explicit confirm names the card, so it gets the reason and no turn.
+	seen := h.client.calls()
+	out, err := m.assistantTurn(context.Background(), telegram.InboundMessage{Text: messagingConfirmPrefix + action.ID}, link, nil)
+	if err != nil || out.Text != noBodyRefusal || h.client.calls() != seen {
+		t.Fatalf("explicit confirm: %q, %v, model calls %d", out.Text, err, h.client.calls()-seen)
+	}
+	h.stillPending(action, 0)
+}
+
+// Every other card keeps answering to free text, including an older one under a
+// trades card, which stays pending.
+func TestTelegramFreeTextStillResolvesOtherCards(t *testing.T) {
+	h := newTradesHarness(t)
+	h.client.replies = []ai.Message{callTool("c1", "add_goal", `{"title":"Trip"}`)}
+	r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "goal", fakePNG(64))
+	var turn turnResponse
+	r.JSON(t, &turn)
+	if turn.PendingAction == nil || turn.PendingAction.ToolName != "add_goal" {
+		t.Fatalf("turn = %d %s", r.Status, r.Body)
+	}
+	trades := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	conv := uuid.MustParse(h.conv)
+	link := &assistantdb.MessagingLink{UserID: h.user, ConversationID: &conv}
+	out, err := newMessenger(h.h).assistantTurn(context.Background(), telegram.InboundMessage{Text: "yes"}, link, nil)
+	if err != nil || out.Text != "Goal created." {
+		t.Fatalf("yes = %q, %v", out.Text, err)
+	}
+	h.stillPending(trades, 0)
+}
+
+// syncedLog is a log the handler and the test both reach.
+type syncedLog struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *syncedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *syncedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// A settle that fails leaves a card stuck at confirmed, so the log is what ties
+// that card to the save it did or did not finish.
+func TestConfirmSettleFailureIsLogged(t *testing.T) {
+	failSettle := func(h *tradesHarness) {
+		h.T.Helper()
+		h.exec(`CREATE FUNCTION refuse_settle() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'settle down'; END $$`)
+		h.exec(`CREATE TRIGGER refuse_settle BEFORE UPDATE ON ai_action_audits FOR EACH ROW EXECUTE FUNCTION refuse_settle()`)
+	}
+	logged := func(t *testing.T) (*syncedLog, func(*server.Deps)) {
+		t.Helper()
+		log := &syncedLog{}
+		return log, func(d *server.Deps) { d.Logger = slog.New(slog.NewTextHandler(log, nil)) }
+	}
+	row := reviewedBody(reviewed("AAPL", "buy", 1, 100, "2024-03-10"))
+
+	t.Run("after a committed save", func(t *testing.T) {
+		log, mutate := logged(t)
+		h := newTradesHarness(t, mutate)
+		action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+		failSettle(h)
+
+		if r := h.confirm(action, row); r.Status != 500 {
+			t.Fatalf("confirm = %d %s", r.Status, r.Body)
+		}
+		if h.transactions() != 1 || h.actionStatus(action) != statusConfirmed {
+			t.Fatalf("transactions %d, status %s", h.transactions(), h.actionStatus(action))
+		}
+		got := log.String()
+		if !strings.Contains(got, "ai_record_trades_settle_failed") || !strings.Contains(got, strings.ToLower(action.ID)) || !strings.Contains(got, "status="+statusCompleted) {
+			t.Fatalf("log = %s", got)
+		}
+	})
+	t.Run("after a failed save", func(t *testing.T) {
+		log, mutate := logged(t)
+		h := newTradesHarness(t, mutate)
+		action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+		failSettle(h)
+		h.exec(`CREATE FUNCTION refuse_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'no row'; END $$`)
+		h.exec(`CREATE TRIGGER refuse_row BEFORE INSERT ON transactions FOR EACH ROW EXECUTE FUNCTION refuse_row()`)
+
+		h.refused(h.confirm(action, row), actionFailedReason)
+		if h.transactions() != 0 || h.actionStatus(action) != statusConfirmed {
+			t.Fatalf("transactions %d, status %s", h.transactions(), h.actionStatus(action))
+		}
+		got := log.String()
+		if !strings.Contains(got, "ai_record_trades_settle_failed") || !strings.Contains(got, strings.ToLower(action.ID)) || !strings.Contains(got, "status="+statusFailed) {
+			t.Fatalf("log = %s", got)
+		}
+		if !strings.Contains(got, "http_status=422") {
+			t.Fatalf("refusal not logged as 422: %s", got)
+		}
+	})
+}
+
+// waitFor polls until cond holds, for a state another goroutine reaches.
+func (h *tradesHarness) waitFor(what string, cond func() bool) {
+	h.T.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			h.T.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// What the user approved finishes even if they close the tab after the claim.
+// The trigger holds the save open long enough to drop the client mid-commit.
+func TestConfirmFinishesSaveAfterClientLeaves(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	id := uuid.MustParse(action.ID)
+	row, err := h.h.q.GetOwnedPendingAction(context.Background(), assistantdb.GetOwnedPendingActionParams{ID: id, UserID: h.user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.exec(`CREATE FUNCTION slow_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$`)
+	h.exec(`CREATE TRIGGER slow_row BEFORE INSERT ON transactions FOR EACH ROW EXECUTE FUNCTION slow_row()`)
+
+	ctx, leave := context.WithCancel(context.Background())
+	defer leave()
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.h.confirmTrades(ctx, &row, h.user, []byte(`{"trades":[{"symbol":"AAPL","side":"buy","quantity":1,"price":100,"tradeDate":"2024-03-10"}]}`))
+		done <- err
+	}()
+	h.waitFor("the claim", func() bool { return h.actionStatus(action) == statusConfirmed })
+	leave()
+	if err := <-done; err != nil {
+		t.Fatalf("confirm = %v", err)
+	}
+	if h.transactions() != 1 {
+		t.Fatalf("transactions = %d", h.transactions())
+	}
+	h.settledAs(action, statusCompleted)
+}
+
+func TestCancelCompletedActionLeavesItCompleted(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	if r := h.confirm(action, reviewedBody(reviewed("AAPL", "buy", 1, 100, "2024-03-10"))); r.Status != 200 {
+		t.Fatalf("confirm = %d %s", r.Status, r.Body)
+	}
+	if r := h.Do("POST", "/v1/ai/assistant/actions/"+action.ID+"/cancel", h.token, nil); r.Status != 409 {
+		t.Fatalf("cancel = %d %s", r.Status, r.Body)
+	}
+	h.settledAs(action, statusCompleted)
+}
+
+func TestCancelPendingActionStillWorks(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	if r := h.Do("POST", "/v1/ai/assistant/actions/"+action.ID+"/cancel", h.token, nil); r.Status != 204 {
+		t.Fatalf("cancel = %d %s", r.Status, r.Body)
+	}
+	if got := h.actionStatus(action); got != statusCancelled {
+		t.Fatalf("status = %s", got)
+	}
+	if r := h.confirm(action, reviewedBody(reviewed("AAPL", "buy", 1, 100, "2024-03-10"))); r.Status != 409 {
+		t.Fatalf("confirm after cancel = %d %s", r.Status, r.Body)
+	}
+}
+
+// A cancel that read pending and then loses to a confirm must not overwrite the
+// result on a card whose trades were booked. The row lock stands in for the
+// confirm: the cancel's read passes, its write waits, and the card settles first.
+func TestCancelLosingRaceToConfirmLeavesItCompleted(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	id := uuid.MustParse(action.ID)
+	ctx := context.Background()
+	tx, err := h.Deps.DB.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM ai_pending_actions WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *testutil.Response, 1)
+	go func() {
+		done <- h.Do("POST", "/v1/ai/assistant/actions/"+action.ID+"/cancel", h.token, nil)
+	}()
+	h.waitFor("the cancel to block on the row", func() bool {
+		return h.count(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`) > 0
+	})
+	if _, err := tx.Exec(ctx, `UPDATE ai_pending_actions SET status = 'completed' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if got := h.actionStatus(action); got != statusCompleted {
+		t.Fatalf("status = %s", got)
+	}
+	if r.Status != 409 {
+		t.Fatalf("cancel = %d %s", r.Status, r.Body)
 	}
 }
 

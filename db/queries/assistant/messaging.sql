@@ -43,9 +43,13 @@ WHERE id = @id AND user_id = @user_id AND expires_at > @now::timestamptz
 LIMIT 1;
 
 -- name: LatestPendingActionInConversation :one
+-- The card a typed yes or no answers. A record_trades card is left out: it saves
+-- only reviewed rows, which free text can't carry, and the words match ordinary
+-- sentences.
 SELECT id FROM ai_pending_actions
 WHERE user_id = @user_id AND conversation_id = @conversation_id
   AND status = 'pending' AND expires_at > @now::timestamptz
+  AND tool_name <> 'record_trades'
 ORDER BY created_at DESC
 LIMIT 1;
 

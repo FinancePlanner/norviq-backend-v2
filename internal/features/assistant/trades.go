@@ -281,6 +281,9 @@ func (e *tradesRefusal) ResponseBody() (status int, body any) {
 	return http.StatusUnprocessableEntity, e
 }
 
+// StatusCode is what the access log reads; without it a refusal logs as a 500.
+func (e *tradesRefusal) StatusCode() int { return http.StatusUnprocessableEntity }
+
 func refuseTrades(reason string) *tradesRefusal {
 	return &tradesRefusal{Reason: reason, RowErrors: []tradeRowError{}}
 }
@@ -298,7 +301,7 @@ func refuseTradeRows(rows *stocks.TradeRowsError) *tradesRefusal {
 // reviewed rows at all, as a build that predates the card does.
 func parseReviewedTrades(body []byte) (*reviewedTrades, []stocks.TradeInput, error) {
 	var payload reviewedTrades
-	if len(bytes.TrimSpace(body)) == 0 {
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return &payload, nil, nil
 	}
 	if err := swiftjson.Decode(body, &payload); err != nil {
@@ -395,16 +398,28 @@ func (h *handlers) confirmTrades(ctx context.Context, action *assistantdb.AiPend
 	if err != nil {
 		return confirmResult{}, err
 	}
-	// Claimed: the card must settle even if the client has gone away.
-	settleCtx := context.WithoutCancel(ctx)
+	// Claimed: what the user approved finishes, and the card settles, even if
+	// the client has gone away.
+	ctx = context.WithoutCancel(ctx)
 	if _, err := h.actions.stocks.RecordTrades(ctx, userID, &listID, rows); err != nil {
-		_ = h.settleAction(settleCtx, action.ID, auditID, statusFailed)
+		_ = h.settleTrades(ctx, action.ID, auditID, statusFailed)
 		return confirmResult{}, h.tradesSaveFailure(err)
 	}
-	if err := h.settleAction(settleCtx, action.ID, auditID, statusCompleted); err != nil {
+	if err := h.settleTrades(ctx, action.ID, auditID, statusCompleted); err != nil {
 		return confirmResult{}, err
 	}
 	return confirmResult{message: completionMessage(recordTradesToolName)}, nil
+}
+
+// settleTrades logs a settle that failed. The card stays at confirmed either
+// way, so the logged status is what says whether its trades were saved:
+// completed means they were committed.
+func (h *handlers) settleTrades(ctx context.Context, actionID, auditID uuid.UUID, status string) error {
+	err := h.settleAction(ctx, actionID, auditID, status)
+	if err != nil {
+		h.d.Logger.Error("ai_record_trades_settle_failed", "action_id", actionID.String(), "status", status, "error", err)
+	}
+	return err
 }
 
 // tradesSaveFailure is the 422 for a save that failed after the claim: the

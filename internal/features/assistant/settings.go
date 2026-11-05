@@ -264,6 +264,9 @@ func (h *handlers) cancelAction(c *echo.Context) error {
 		return err
 	}
 	row, err = h.q.GetOwnedPendingAction(ctx, assistantdb.GetOwnedPendingActionParams{ID: id, UserID: s.UserID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("")
+	}
 	if err != nil {
 		return err
 	}

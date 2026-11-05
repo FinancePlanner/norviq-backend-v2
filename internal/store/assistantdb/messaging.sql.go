@@ -120,10 +120,9 @@ func (q *Queries) InsertMessagingLink(ctx context.Context, arg InsertMessagingLi
 }
 
 const latestPendingActionInConversation = `-- name: LatestPendingActionInConversation :one
-SELECT id FROM ai_pending_actions
+SELECT id, tool_name FROM ai_pending_actions
 WHERE user_id = $1 AND conversation_id = $2
   AND status = 'pending' AND expires_at > $3::timestamptz
-  AND tool_name <> 'record_trades'
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -134,14 +133,16 @@ type LatestPendingActionInConversationParams struct {
 	Now            time.Time
 }
 
-// The card a typed yes or no answers. A record_trades card is left out: it saves
-// only reviewed rows, which free text can't carry, and the words match ordinary
-// sentences.
-func (q *Queries) LatestPendingActionInConversation(ctx context.Context, arg LatestPendingActionInConversationParams) (uuid.UUID, error) {
+type LatestPendingActionInConversationRow struct {
+	ID       uuid.UUID
+	ToolName string
+}
+
+func (q *Queries) LatestPendingActionInConversation(ctx context.Context, arg LatestPendingActionInConversationParams) (LatestPendingActionInConversationRow, error) {
 	row := q.db.QueryRow(ctx, latestPendingActionInConversation, arg.UserID, arg.ConversationID, arg.Now)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i LatestPendingActionInConversationRow
+	err := row.Scan(&i.ID, &i.ToolName)
+	return i, err
 }
 
 const liveOwnedConversation = `-- name: LiveOwnedConversation :one

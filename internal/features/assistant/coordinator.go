@@ -271,16 +271,16 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 
 // confirm is AIAssistantTurnCoordinator.confirm: claim, execute, settle.
 //
-// record_trades is refused before the claim: it saves only reviewed rows, which
-// this path doesn't have (see confirmTrades), so the card stays pending. The
-// refusal is an *httpx.Error so messaging can relay it. An unknown id falls
-// through to the claim's 404.
+// A live record_trades card is refused before the claim: it saves only reviewed
+// rows, which this path doesn't have (see confirmTrades), so the card stays
+// pending. The refusal is an *httpx.Error so messaging can relay it. An unknown
+// id falls through to the claim's 404, and a finished or expired card to its 409.
 func (h *handlers) confirm(ctx context.Context, actionID, userID uuid.UUID) (confirmResult, error) {
 	pending, err := h.q.GetOwnedPendingAction(ctx, assistantdb.GetOwnedPendingActionParams{ID: actionID, UserID: userID})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return confirmResult{}, err
 	}
-	if err == nil && pending.ToolName == recordTradesToolName {
+	if err == nil && pending.ToolName == recordTradesToolName && pending.Status == statusPending && pending.ExpiresAt.After(h.now()) {
 		return confirmResult{}, httpx.Unprocessable(tradesNoBodyReason)
 	}
 	action, auditID, err := h.claimAction(ctx, actionID, userID)

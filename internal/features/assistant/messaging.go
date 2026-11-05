@@ -510,8 +510,12 @@ func parseSwiftUUID(s string) (uuid.UUID, bool) {
 	return id, err == nil
 }
 
+// latestPendingAction is the card a typed yes or no answers: the newest one, or
+// none when the newest is record_trades. That card saves only reviewed rows,
+// which free text can't carry, and it must not let the words reach past it to an
+// older card the user is no longer looking at.
 func (m *messenger) latestPendingAction(ctx context.Context, userID, conversationID uuid.UUID) (*uuid.UUID, error) {
-	id, err := m.h.q.LatestPendingActionInConversation(ctx, assistantdb.LatestPendingActionInConversationParams{
+	latest, err := m.h.q.LatestPendingActionInConversation(ctx, assistantdb.LatestPendingActionInConversationParams{
 		UserID: userID, ConversationID: &conversationID, Now: m.h.now(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -520,7 +524,10 @@ func (m *messenger) latestPendingAction(ctx context.Context, userID, conversatio
 	if err != nil {
 		return nil, err
 	}
-	return &id, nil
+	if latest.ToolName == recordTradesToolName {
+		return nil, nil
+	}
+	return &latest.ID, nil
 }
 
 func (m *messenger) resolveConfirmation(ctx context.Context, a confirmationAnswer, userID, conversationID uuid.UUID) (telegram.Outbound, error) {

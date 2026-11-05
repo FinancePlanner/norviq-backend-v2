@@ -924,25 +924,85 @@ func TestTelegramFreeTextLeavesTradesCardPending(t *testing.T) {
 	h.stillPending(action, 0)
 }
 
-// Every other card keeps answering to free text, including an older one under a
-// trades card, which stays pending.
-func TestTelegramFreeTextStillResolvesOtherCards(t *testing.T) {
-	h := newTradesHarness(t)
+// goalCard runs an image turn that proposes a goal, the kind of card image text
+// can seed and the user can ignore.
+func (h *tradesHarness) goalCard() *pendingActionResponse {
+	h.T.Helper()
 	h.client.replies = []ai.Message{callTool("c1", "add_goal", `{"title":"Trip"}`)}
 	r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "goal", fakePNG(64))
 	var turn turnResponse
-	r.JSON(t, &turn)
+	r.JSON(h.T, &turn)
 	if turn.PendingAction == nil || turn.PendingAction.ToolName != "add_goal" {
-		t.Fatalf("turn = %d %s", r.Status, r.Body)
+		h.T.Fatalf("turn = %d %s", r.Status, r.Body)
 	}
-	trades := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	return turn.PendingAction
+}
+
+func (h *tradesHarness) telegramSays(text string) string {
+	h.T.Helper()
 	conv := uuid.MustParse(h.conv)
 	link := &assistantdb.MessagingLink{UserID: h.user, ConversationID: &conv}
-	out, err := newMessenger(h.h).assistantTurn(context.Background(), telegram.InboundMessage{Text: "yes"}, link, nil)
-	if err != nil || out.Text != "Goal created." {
-		t.Fatalf("yes = %q, %v", out.Text, err)
+	out, err := newMessenger(h.h).assistantTurn(context.Background(), telegram.InboundMessage{Text: text}, link, nil)
+	if err != nil {
+		h.T.Fatalf("%q: %v", text, err)
 	}
+	return out.Text
+}
+
+// A typed word answers the newest card or nothing. Under a trades card it must
+// not reach past it to an older one: that card can be a permanent delete, seeded
+// by image text the user ignored.
+func TestTelegramTradesCardShadowsOlderCards(t *testing.T) {
+	h := newTradesHarness(t)
+	goal := h.goalCard()
+	trades := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	for _, text := range []string{"yes", "what do I own", "no"} {
+		const answer = "A normal answer."
+		seen := h.client.calls()
+		h.client.replies = []ai.Message{say(answer)}
+		if got := h.telegramSays(text); got != answer || h.client.calls() != seen+1 {
+			t.Fatalf("%q: reply %q, model calls %d", text, got, h.client.calls()-seen)
+		}
+		h.stillPending(trades, 0)
+		h.stillPending(goal, 0)
+		if n := h.count(`SELECT count(*) FROM goals WHERE user_id = $1`, h.user); n != 0 {
+			t.Fatalf("%q: goals = %d", text, n)
+		}
+	}
+}
+
+func TestTelegramFreeTextAnswersNewerCardOverTradesCard(t *testing.T) {
+	h := newTradesHarness(t)
+	trades := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	goal := h.goalCard()
+	if got := h.telegramSays("yes"); got != "Goal created." {
+		t.Fatalf("yes = %q", got)
+	}
+	h.settledAs(goal, statusCompleted)
 	h.stillPending(trades, 0)
+}
+
+// Only a live card gets the review copy. A finished one answers as any other
+// finished card does.
+func TestTelegramExplicitConfirmOnFinishedTradesCard(t *testing.T) {
+	const gone = "That action has expired or was already handled. Ask me again if you still want it."
+	h := newTradesHarness(t)
+
+	expired := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	h.exec(`UPDATE ai_pending_actions SET expires_at = now() - interval '1 minute' WHERE id = $1`, uuid.MustParse(expired.ID))
+	if got := h.telegramSays(messagingConfirmPrefix + expired.ID); got != gone {
+		t.Fatalf("expired = %q", got)
+	}
+	h.stillPending(expired, 0)
+
+	completed := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	if r := h.confirm(completed, reviewedBody(reviewed("AAPL", "buy", 1, 100, "2024-03-10"))); r.Status != 200 {
+		t.Fatalf("confirm = %d %s", r.Status, r.Body)
+	}
+	if got := h.telegramSays(messagingConfirmPrefix + completed.ID); got != gone {
+		t.Fatalf("completed = %q", got)
+	}
+	h.settledAs(completed, statusCompleted)
 }
 
 // syncedLog is a log the handler and the test both reach.
@@ -1086,21 +1146,19 @@ func TestCancelPendingActionStillWorks(t *testing.T) {
 	}
 }
 
-// A cancel that read pending and then loses to a confirm must not overwrite the
-// result on a card whose trades were booked. The row lock stands in for the
-// confirm: the cancel's read passes, its write waits, and the card settles first.
-func TestCancelLosingRaceToConfirmLeavesItCompleted(t *testing.T) {
-	h := newTradesHarness(t)
-	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+// raceCancel runs a cancel whose read passes and whose write waits on the row
+// lock held here, then applies the rival statement and lets the write go.
+func (h *tradesHarness) raceCancel(action *pendingActionResponse, rival string) *testutil.Response {
+	h.T.Helper()
 	id := uuid.MustParse(action.ID)
 	ctx := context.Background()
 	tx, err := h.Deps.DB.Begin(ctx)
 	if err != nil {
-		t.Fatal(err)
+		h.T.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM ai_pending_actions WHERE id = $1 FOR UPDATE`, id); err != nil {
-		t.Fatal(err)
+		h.T.Fatal(err)
 	}
 	done := make(chan *testutil.Response, 1)
 	go func() {
@@ -1109,17 +1167,34 @@ func TestCancelLosingRaceToConfirmLeavesItCompleted(t *testing.T) {
 	h.waitFor("the cancel to block on the row", func() bool {
 		return h.count(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`) > 0
 	})
-	if _, err := tx.Exec(ctx, `UPDATE ai_pending_actions SET status = 'completed' WHERE id = $1`, id); err != nil {
-		t.Fatal(err)
+	if _, err := tx.Exec(ctx, rival, id); err != nil {
+		h.T.Fatal(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
+		h.T.Fatal(err)
 	}
-	r := <-done
+	return <-done
+}
+
+// A cancel that read pending and then loses to a confirm must not overwrite the
+// result on a card whose trades were booked.
+func TestCancelLosingRaceToConfirmLeavesItCompleted(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	r := h.raceCancel(action, `UPDATE ai_pending_actions SET status = 'completed' WHERE id = $1`)
 	if got := h.actionStatus(action); got != statusCompleted {
 		t.Fatalf("status = %s", got)
 	}
 	if r.Status != 409 {
+		t.Fatalf("cancel = %d %s", r.Status, r.Body)
+	}
+}
+
+func TestCancelOfRowDeletedMeanwhileIs404(t *testing.T) {
+	h := newTradesHarness(t)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	r := h.raceCancel(action, `DELETE FROM ai_pending_actions WHERE id = $1`)
+	if r.Status != 404 {
 		t.Fatalf("cancel = %d %s", r.Status, r.Body)
 	}
 }

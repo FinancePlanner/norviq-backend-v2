@@ -106,7 +106,7 @@ func New(d *Deps, features []Feature) (*Server, error) {
 		middleware.SecurityHeaders(d.Config.IsProduction()),
 		echomw.GzipWithConfig(echomw.GzipConfig{MinLength: 1024}),
 		middleware.RequestLog(d.Logger),
-		bodyLimit(10*1024*1024, bodyLimits),
+		bodyLimit(DefaultBodyLimit, bodyLimits),
 		echomw.Recover(),
 	)
 
@@ -283,6 +283,9 @@ func registerHealth(d *Deps, r *Routes) {
 	r.V1.GET("", func(c *echo.Context) error { return c.String(http.StatusOK, "It works!") })
 	r.V1.GET("/hello", func(c *echo.Context) error { return c.String(http.StatusOK, "Hello, world!") })
 }
+
+// DefaultBodyLimit is the body cap on every route without its own.
+const DefaultBodyLimit = 10 * 1024 * 1024
 
 // bodyLimit is echo's BodyLimit at def bytes, except on routes given their
 // own cap with AllowLargeBody. Echo routes before global middleware, so

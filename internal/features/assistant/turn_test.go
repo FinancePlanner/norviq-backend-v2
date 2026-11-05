@@ -32,9 +32,17 @@ type scripted struct {
 	replies []ai.Message
 	seen    [][]ai.Message
 	tools   [][]ai.Tool
+	// before, when set, runs ahead of each call, outside the lock, so a test can
+	// hold a turn in the model or fail it.
+	before func(ctx context.Context, messages []ai.Message) error
 }
 
-func (s *scripted) Chat(_ context.Context, messages []ai.Message, tools []ai.Tool, _ string) (ai.Message, error) {
+func (s *scripted) Chat(ctx context.Context, messages []ai.Message, tools []ai.Tool, _ string) (ai.Message, error) {
+	if s.before != nil {
+		if err := s.before(ctx, messages); err != nil {
+			return ai.Message{}, err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seen = append(s.seen, append([]ai.Message{}, messages...))

@@ -66,6 +66,9 @@ type handlers struct {
 
 	// imagesEnabled is ASSISTANT_IMAGES_ENABLED: whether a turn may attach images.
 	imagesEnabled bool
+	// largeTurns holds a slot per running large image turn; see holdLargeTurnSlot.
+	// The server registers one handlers, so this is process-wide.
+	largeTurns chan struct{}
 }
 
 func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*handlers, error) {
@@ -102,6 +105,7 @@ func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*ha
 	}
 	h := &handlers{
 		d: d, q: q, pii: pii, ai: p, ent: entitlements.NewFromEnv(d.DB), now: now, src: src, actions: acts,
+		largeTurns: make(chan struct{}, maxLargeTurns),
 	}
 	h.reads = &readTools{src: &h.src, expenses: acts.expenses, market: mkt, db: d.DB, now: now}
 	var news memoNewsFunc
@@ -173,9 +177,10 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 			// routes keep that cap and nothing buffers 16 MB for a disabled feature.
 			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/chat", turnBodyLimit)
 			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/stream", turnBodyLimit)
-			// After the authenticator in write, so the bucket is per user.
+			// After the authenticator in write, so the bucket is per user. The slot
+			// comes after the limiter, so a flood the limiter stops never holds one.
 			turn = append(append([]echo.MiddlewareFunc{}, write...),
-				onlyMultipart(d.Limiter.Limit(imageTurnsPerMinute, time.Minute, imageTurnLimitKey)))
+				onlyMultipart(d.Limiter.Limit(imageTurnsPerMinute, time.Minute, imageTurnLimitKey), h.holdLargeTurnSlot))
 		}
 		r.V1.POST(a+"/conversations/:id/chat", h.chat, turn...)
 		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, turn...)

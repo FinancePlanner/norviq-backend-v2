@@ -111,6 +111,14 @@ func TestClassifyImageRejection(t *testing.T) {
 		eq(t, f.UserFacingMessage(), "Your openai model can't read images. Try without the image, or change the model in Settings → AI providers.")
 		eq(t, f.ErrorCode(), "user_credential_image_unsupported")
 	}
+	// OpenRouter's answer on a text-only model, which is also what a wrong
+	// base URL or model name looks like, so the copy can't claim to know.
+	f, ok := ClassifyImageRejection(&UpstreamError{Status: 404}, cred)
+	if !ok || f.Kind != "image_not_accepted" {
+		t.Fatalf("404: %#v %v", f, ok)
+	}
+	eq(t, f.UserFacingMessage(), "Your openai model didn't accept this image. It may not read images, or its name or base URL may be wrong. Try without the image, or check Settings → AI providers.")
+	eq(t, f.ErrorCode(), "user_credential_image_unsupported")
 	for _, status := range []int{401, 429, 500} {
 		if _, ok := ClassifyImageRejection(&UpstreamError{Status: status}, cred); ok {
 			t.Fatalf("status %d should not classify", status)
@@ -144,12 +152,21 @@ func TestExcludeFreeRungs(t *testing.T) {
 	eq(t, len(paid.requests()), 1)
 	eq(t, len(free.requests()), 0)
 
-	onlyFree := &FallbackClient{Rungs: []Rung{mk("free", "x:free", free)}, Logger: quiet}
-	if _, ok := ExcludeFreeRungs(onlyFree).(DisabledClient); !ok {
-		t.Fatal("all-free chain should be disabled")
-	}
-	if _, ok := ExcludeFreeRungs(&OpenAIClient{Model: "x:free"}).(DisabledClient); !ok {
-		t.Fatal("bare free client should be disabled")
+	// Every spelling IsFreeModelSlug counts as free, first in the chain so a
+	// rung left behind would answer.
+	for _, slug := range []string{"openrouter/free", " OpenRouter/Free ", "x:FREE ", "x:free"} {
+		chain := &FallbackClient{Rungs: []Rung{mk("free", slug, free), mk("paid", "gpt-x", paid)}, Logger: quiet}
+		fc, ok := ExcludeFreeRungs(chain).(*FallbackClient)
+		if !ok || len(fc.Rungs) != 1 || fc.Rungs[0].Tier.Model != "gpt-x" {
+			t.Fatalf("%q: %#v", slug, fc)
+		}
+		onlyFree := &FallbackClient{Rungs: []Rung{mk("free", slug, free)}, Logger: quiet}
+		if _, ok := ExcludeFreeRungs(onlyFree).(DisabledClient); !ok {
+			t.Fatalf("%q: all-free chain should be disabled", slug)
+		}
+		if _, ok := ExcludeFreeRungs(&OpenAIClient{Model: slug}).(DisabledClient); !ok {
+			t.Fatalf("%q: bare free client should be disabled", slug)
+		}
 	}
 	paidClient := &OpenAIClient{Model: "gpt-x"}
 	if ExcludeFreeRungs(paidClient) != ChatClient(paidClient) {

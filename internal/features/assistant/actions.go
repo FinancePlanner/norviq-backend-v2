@@ -668,6 +668,8 @@ func summaryCopy(name string, a actionArgs) (string, bool) {
 	case "delete_trade":
 		return "Permanently delete trade record " + shortID(a) + ". " +
 			"This affects realized profit/loss and tax reports.", true
+	case "record_trades":
+		return "Record these trades.", true
 	case "add_goal":
 		return "Add the goal " + quoted(a, "title") + ".", true
 	case "update_goal":
@@ -708,6 +710,8 @@ func completionCopy(name string) (string, bool) {
 		return "Position record deleted.", true
 	case "record_trade":
 		return "Trade recorded.", true
+	case "record_trades":
+		return "Trades recorded.", true
 	case "delete_trade":
 		return "Trade record deleted.", true
 	case "add_goal":

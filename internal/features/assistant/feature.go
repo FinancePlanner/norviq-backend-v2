@@ -5,9 +5,12 @@
 package assistant
 
 import (
+	"net/http"
+	"os"
 	"time"
 
 	"norviq-api/internal/auth"
+	"norviq-api/internal/config"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/features/tax"
@@ -37,6 +40,9 @@ type Feature struct {
 	Telegram        *telegram.Config
 	TelegramBaseURL string
 
+	// Env overrides os.Getenv (tests).
+	Env func(string) string
+
 	// memo is PositionMemoService; tests inject one.
 	memo memoGenerator
 }
@@ -57,6 +63,9 @@ type handlers struct {
 	reads   *readTools
 	memo    memoGenerator
 	bot     *telegramBot // nil without a configured Telegram bot
+
+	// imagesEnabled is ASSISTANT_IMAGES_ENABLED: whether a turn may attach images.
+	imagesEnabled bool
 }
 
 func newHandlers(d *server.Deps, now func() time.Time, sources SourcesFunc) (*handlers, error) {
@@ -112,6 +121,11 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.memo != nil {
 		h.memo = f.memo
 	}
+	env := f.Env
+	if env == nil {
+		env = os.Getenv
+	}
+	h.imagesEnabled = config.Bool(env(imagesEnabledEnv), false)
 	tg := f.Telegram
 	if tg == nil {
 		tg = telegram.Load(nil, d.Config.IsProduction(), d.Logger)
@@ -153,6 +167,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// they are registered only once every read source and the memo writer
 	// are wired; until then they answer 404.
 	if h.turnsReady() {
+		// Three images outrun the app-wide body cap.
+		r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/chat", turnBodyLimit)
+		r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/stream", turnBodyLimit)
 		r.V1.POST(a+"/conversations/:id/chat", h.chat, write...)
 		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, write...)
 		// /v1/ai/chat: SessionToken only, first-party, no scope middleware.

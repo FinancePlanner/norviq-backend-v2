@@ -413,7 +413,7 @@ func (m *messenger) assistantTurn(ctx context.Context, in telegram.InboundMessag
 		return telegram.Outbound{}, err
 	}
 
-	outcome, err := m.h.runCoordinator(ctx, strict, userID, conversationID, text, false, nil)
+	outcome, err := m.h.runCoordinator(ctx, strict, userID, conversationID, text, nil, false, nil)
 	if err != nil {
 		reason, isAbort := abortReason(err)
 		if !isAbort {

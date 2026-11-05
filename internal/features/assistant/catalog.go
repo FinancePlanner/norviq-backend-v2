@@ -19,6 +19,11 @@ type actionDef struct {
 	required    []string
 	destructive bool
 	readOnly    bool
+	// imageOnly tools exist only on a turn with an image: no text turn offers
+	// them and the public catalog leaves them out.
+	imageOnly bool
+	// alwaysConfirm proposes the tool in every mode but modeConfirmed.
+	alwaysConfirm bool
 }
 
 func param(typ string, description ...string) ai.Parameter {
@@ -217,6 +222,34 @@ var catalog = func() []actionDef {
 			required:    []string{"ticker"},
 			destructive: true,
 		},
+		{
+			name: "record_trades",
+			description: "Propose the executed buys and sells visible in the attached image. The user reviews them on a card " +
+				"before anything is saved. This is record-keeping and does not place an order.",
+			properties: map[string]ai.Parameter{
+				"trades": {
+					Type: "array",
+					Items: ai.JSONSchema{
+						Properties: map[string]ai.Parameter{
+							"symbol":     param("string", "Ticker, for example AVGO."),
+							"side":       enumParam("buy or sell", []string{"buy", "sell"}),
+							"quantity":   param("number", "Shares, greater than 0."),
+							"price":      param("number", "Price per share, greater than 0."),
+							"trade_date": param("string", "YYYY-MM-DD"),
+							"currency":   param("string", "ISO currency code, if visible."),
+							"fees":       param("number", "Commission and fees, if visible."),
+							"confidence": param("number", "How clearly this row could be read, from 0 to 1."),
+						},
+						Required: []string{"symbol", "side", "quantity", "price", "trade_date"},
+					},
+				},
+				"portfolio_list_id": param("string", "Portfolio to record in, if the user named one."),
+				"skipped_rows":      param("integer", "How many rows were left out."),
+			},
+			required:      []string{"trades"},
+			imageOnly:     true,
+			alwaysConfirm: true,
+		},
 	}
 }()
 
@@ -257,19 +290,25 @@ const (
 // actionTools is ActionCatalog.toolDefinitions(mode:).
 func actionTools(mode confirmationMode) []ai.Tool {
 	out := make([]ai.Tool, 0, len(catalog))
-	for _, a := range catalog {
-		props := make(map[string]ai.Parameter, len(a.properties)+1)
-		for k, v := range a.properties {
-			props[k] = v
+	for i := range catalog {
+		if !catalog[i].imageOnly {
+			out = append(out, actionTool(&catalog[i], mode))
 		}
-		required := append([]string{}, a.required...)
-		if a.destructive && mode == modeInline {
-			props["confirm"] = param("boolean", confirmDescription)
-			required = append(required, "confirm")
-		}
-		out = append(out, ai.NewTool(a.name, a.description, ai.JSONSchema{Properties: props, Required: required}))
 	}
 	return out
+}
+
+func actionTool(a *actionDef, mode confirmationMode) ai.Tool {
+	props := make(map[string]ai.Parameter, len(a.properties)+1)
+	for k, v := range a.properties {
+		props[k] = v
+	}
+	required := append([]string{}, a.required...)
+	if a.destructive && mode == modeInline {
+		props["confirm"] = param("boolean", confirmDescription)
+		required = append(required, "confirm")
+	}
+	return ai.NewTool(a.name, a.description, ai.JSONSchema{Properties: props, Required: required})
 }
 
 type dispositionKind int
@@ -285,6 +324,9 @@ func disposition(name string, args actionArgs, mode confirmationMode) (dispositi
 	a, ok := definition(canonicalName(name))
 	if !ok {
 		return dispUnknown, actionDef{}
+	}
+	if a.alwaysConfirm && mode != modeConfirmed {
+		return dispNeedsConfirmation, a
 	}
 	switch mode {
 	case modeConfirmed:
@@ -329,6 +371,9 @@ type catalogResponse struct {
 func buildCatalogResponse() catalogResponse {
 	out := make([]catalogActionSchema, 0, len(catalog))
 	for _, a := range catalog {
+		if a.imageOnly {
+			continue
+		}
 		props := map[string]catalogPropertySchema{}
 		for k, p := range a.properties {
 			props[k] = catalogPropertySchema{Type: p.Type, Description: p.Description, EnumValues: p.EnumValues}

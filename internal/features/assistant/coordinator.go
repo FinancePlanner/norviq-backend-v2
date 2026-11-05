@@ -94,14 +94,25 @@ func (h *handlers) persistReply(ctx context.Context, userID, conversationID uuid
 // runCoordinator is AIAssistantTurnCoordinator.run. requireConsent is
 // AIConsent.require for the caller: the request check (with the legacy-iOS
 // grace) over HTTP, the strict check for Telegram's synthetic request.
-func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, scoped bool, onEvent eventSink) (turnOutcome, error) {
+//
+// A turn with images goes straight to the model: text inside an image is
+// untrusted, so it never takes the memo or watch shortcuts and every write it
+// leads to waits for the user's confirmation.
+func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, images []ai.Image, scoped bool, onEvent eventSink) (turnOutcome, error) {
+	hasImages := len(images) > 0
+	if hasImages && content == "" {
+		content = defaultImagePrompt
+	}
 	if content == "" || graphemeLen(content) > maxMessageCharacters {
 		return turnOutcome{}, httpx.BadRequest("Message must contain 1 to 12,000 characters.")
 	}
-	ask := parseMemoAsk(content)
-	if ask == nil {
-		if intent := classifyWatch(content); intent != nil {
-			return h.proposeWatchTurn(ctx, intent, userID, conversationID, content)
+	var ask *memoAsk
+	if !hasImages {
+		ask = parseMemoAsk(content)
+		if ask == nil {
+			if intent := classifyWatch(content); intent != nil {
+				return h.proposeWatchTurn(ctx, intent, userID, conversationID, content)
+			}
 		}
 	}
 	if err := requireConsent(); err != nil {
@@ -121,6 +132,11 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 			return turnOutcome{}, err
 		}
 	}
+	opt := turnOptions{mode: confirmationModeFor(scoped), onEvent: onEvent}
+	if hasImages {
+		content += imageMarker
+		opt.mode, opt.images = modeDeferredEveryWrite, images
+	}
 	if err := h.insertUserMessage(ctx, userID, conversationID, content); err != nil {
 		return turnOutcome{}, err
 	}
@@ -136,9 +152,7 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		}
 		out.text, out.memo = "Memo on "+card.Symbol+" is ready.", &card
 	} else {
-		res, err := h.runTurn(ctx, resolved, userID, conversationID, turnOptions{
-			mode: confirmationModeFor(scoped), onEvent: onEvent,
-		})
+		res, err := h.runTurn(ctx, resolved, userID, conversationID, opt)
 		if err != nil {
 			return turnOutcome{}, err
 		}
@@ -220,6 +234,13 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 			h.ai.RecordCredentialSuccess(ctx, resolved.Credential)
 		}
 		return res, nil
+	}
+	if len(opt.images) > 0 {
+		// The key works; this model can't read images. Say so instead of
+		// marking the credential as failing or sending the image elsewhere.
+		if failure, ok := ai.ClassifyImageRejection(err, resolved.Credential); ok {
+			return turnResult{}, failure
+		}
 	}
 	failure, ok := ai.ClassifyCredentialFailure(err, resolved.Credential)
 	if !ok {

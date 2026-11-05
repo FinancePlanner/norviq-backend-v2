@@ -55,6 +55,7 @@ type preferencesResponse struct {
 	ProactiveTipsEnabled bool   `json:"proactiveTipsEnabled"`
 	PushEnabled          bool   `json:"pushEnabled"`
 	Timezone             string `json:"timezone"`
+	ImagesEnabled        bool   `json:"imagesEnabled"`
 }
 
 type usageResponse struct {

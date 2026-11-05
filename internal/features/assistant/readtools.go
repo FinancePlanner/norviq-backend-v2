@@ -96,6 +96,21 @@ func chatToolDefinitions(mode confirmationMode) []ai.Tool {
 	return append(readToolDefinitions(), actionTools(mode)...)
 }
 
+// imageTurnTools is what a turn with an image may call: the text-turn tools
+// plus record_trades, less the single-trade writes, so a trade read from an
+// image can only reach the user as a reviewed card.
+func imageTurnTools() []ai.Tool {
+	out := readToolDefinitions()
+	for i := range catalog {
+		switch catalog[i].name {
+		case "record_trade", "add_position", "sell_position":
+			continue
+		}
+		out = append(out, actionTool(&catalog[i], modeDeferredEveryWrite))
+	}
+	return out
+}
+
 // stringArg is `(args[key] as? String)?.trimmingCharacters(in:
 // .whitespacesAndNewlines).nilIfEmpty`.
 func (a actionArgs) trimmedString(key string) (string, bool) {

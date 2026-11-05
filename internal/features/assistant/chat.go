@@ -81,15 +81,20 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	if err != nil {
 		return turnResponse{}, err
 	}
-	var payload struct {
-		Content string `json:"content"`
-	}
-	if err := swiftjson.DecodeRequest(c, &payload); err != nil {
+	content, images, err := parseTurnBody(c)
+	if err != nil {
 		return turnResponse{}, err
 	}
-	content := trimSwiftSpace(payload.Content)
+	if len(images) > 0 {
+		if !h.imagesEnabled {
+			return turnResponse{}, httpx.NotFound("")
+		}
+		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
+			return turnResponse{}, err
+		}
+	}
 
-	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), s.Scope != nil, onEvent)
+	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), images, s.Scope != nil, onEvent)
 	if err != nil {
 		return turnResponse{}, err
 	}
@@ -132,7 +137,7 @@ func (h *handlers) streamChat(c *echo.Context) error {
 	// Vapor collected the body before the handler ran. net/http will not
 	// read a request body once the response has been flushed, so buffer it.
 	if req := c.Request(); req.Body != nil {
-		raw, err := io.ReadAll(io.LimitReader(req.Body, 16<<20))
+		raw, err := io.ReadAll(io.LimitReader(req.Body, turnBodyLimit))
 		if err != nil {
 			return err
 		}
@@ -143,6 +148,7 @@ func (h *handlers) streamChat(c *echo.Context) error {
 	turn, err := h.turnHTTP(c, sse.tool)
 	var abort *httpx.Error
 	var upgrade *entitlements.UpgradeRequiredError
+	var imageUnreadable *ai.UserCredentialFailure
 	switch {
 	case err == nil:
 		enc, encErr := encodeSwift(turn)
@@ -150,6 +156,11 @@ func (h *handlers) streamChat(c *echo.Context) error {
 			return encErr
 		}
 		_ = sse.frame("turn", enc)
+	case errors.As(err, &abort) && abort.Code == codeImageRejected:
+		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": codeImageRejected})
+	case errors.As(err, &imageUnreadable):
+		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed", "kind", imageUnreadable.Kind)
+		_ = sse.data("error", map[string]string{"message": imageUnreadable.UserFacingMessage(), "code": imageUnreadable.ErrorCode()})
 	case errors.As(err, &abort) && abort.Status == http.StatusFailedDependency:
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed")
 		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": "user_credential_rejected"})

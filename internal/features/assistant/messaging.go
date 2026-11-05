@@ -395,16 +395,7 @@ func (m *messenger) assistantTurn(ctx context.Context, in telegram.InboundMessag
 	}
 
 	// Strict consent: a Telegram turn has no app client, so no legacy grace.
-	strict := func() error {
-		ok, err := m.h.ai.Consent.IsAllowed(ctx, userID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return httpx.Forbidden(ai.ConsentRequiredReason)
-		}
-		return nil
-	}
+	strict := func() error { return m.h.requireStrictConsent(ctx, userID) }
 	if err := strict(); err != nil {
 		if reason, isAbort := abortReason(err); isAbort && reason == ai.ConsentRequiredReason {
 			m.h.d.Logger.Info("messaging_turn_refused reason=ai_consent_required")

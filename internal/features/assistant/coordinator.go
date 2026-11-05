@@ -115,6 +115,10 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 			}
 		}
 	}
+	// The legacy-iOS grace predates images and does not cover them.
+	if hasImages {
+		requireConsent = func() error { return h.requireStrictConsent(ctx, userID) }
+	}
 	if err := requireConsent(); err != nil {
 		return turnOutcome{}, err
 	}
@@ -186,12 +190,8 @@ func (h *handlers) proposeWatchTurn(ctx context.Context, intent *watchIntent, us
 
 // runProactive is one unattended, read-only turn for a standing task.
 func (h *handlers) runProactive(ctx context.Context, userID, conversationID uuid.UUID, prompt string) (string, error) {
-	allowed, err := h.ai.Consent.IsAllowed(ctx, userID)
-	if err != nil {
+	if err := h.requireStrictConsent(ctx, userID); err != nil {
 		return "", err
-	}
-	if !allowed {
-		return "", httpx.Forbidden(ai.ConsentRequiredReason)
 	}
 	resolved, err := h.ai.ResolveAssistantClient(ctx, userID)
 	if err != nil {
@@ -206,6 +206,18 @@ func (h *handlers) runProactive(ctx context.Context, userID, conversationID uuid
 		mode: modeDeferredEveryWrite, transientPrompt: &prompt, readOnly: true,
 	})
 	return res.text, err
+}
+
+// requireStrictConsent is the consent check with no legacy-iOS grace.
+func (h *handlers) requireStrictConsent(ctx context.Context, userID uuid.UUID) error {
+	allowed, err := h.ai.Consent.IsAllowed(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return httpx.Forbidden(ai.ConsentRequiredReason)
+	}
+	return nil
 }
 
 // consumeAssistantTurn spends one turn from the monthly allowance.
@@ -236,8 +248,8 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 		return res, nil
 	}
 	if len(opt.images) > 0 {
-		// The key works; this model can't read images. Say so instead of
-		// marking the credential as failing or sending the image elsewhere.
+		// The refusal is about the image, not the key, so the credential is
+		// not marked as failing.
 		if failure, ok := ai.ClassifyImageRejection(err, resolved.Credential); ok {
 			return turnResult{}, failure
 		}
@@ -247,7 +259,9 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 		return turnResult{}, err
 	}
 	h.ai.RecordCredentialFailure(ctx, resolved.Credential, failure)
-	if h.ai.Settings.CredentialFallback {
+	// An image the user sent through their own key never moves to Norviq's
+	// provider, whatever went wrong.
+	if h.ai.Settings.CredentialFallback && len(opt.images) == 0 {
 		h.d.Logger.Warn("ai_credential_fallback", "provider", resolved.Credential.Provider)
 		client, _ := h.ai.ClientFor(ctx, userID)
 		return h.generate(ctx, client, userID, conversationID, opt)

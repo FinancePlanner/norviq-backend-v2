@@ -167,11 +167,18 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// they are registered only once every read source and the memo writer
 	// are wired; until then they answer 404.
 	if h.turnsReady() {
-		// Three images outrun the app-wide body cap.
-		r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/chat", turnBodyLimit)
-		r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/stream", turnBodyLimit)
-		r.V1.POST(a+"/conversations/:id/chat", h.chat, write...)
-		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, write...)
+		turn := write
+		if h.imagesEnabled {
+			// Three images outrun the app-wide body cap. With the flag off the
+			// routes keep that cap and nothing buffers 16 MB for a disabled feature.
+			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/chat", turnBodyLimit)
+			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/stream", turnBodyLimit)
+			// After the authenticator in write, so the bucket is per user.
+			turn = append(append([]echo.MiddlewareFunc{}, write...),
+				onlyMultipart(d.Limiter.Limit(imageTurnsPerMinute, time.Minute, imageTurnLimitKey)))
+		}
+		r.V1.POST(a+"/conversations/:id/chat", h.chat, turn...)
+		r.V1.POST(a+"/conversations/:id/stream", h.streamChat, turn...)
 		// /v1/ai/chat: SessionToken only, first-party, no scope middleware.
 		r.V1.POST("/ai/chat", h.aiChat, aiLimit, d.Auth.Session(), auth.Guard())
 	}

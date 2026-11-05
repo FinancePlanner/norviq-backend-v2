@@ -12,14 +12,17 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
+	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/aiplatform"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/testutil"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 var imagesOn = map[string]string{"ASSISTANT_IMAGES_ENABLED": "true"}
@@ -41,6 +44,12 @@ func (th *turnHarness) proConversation(email string) (user uuid.UUID, conv strin
 // each declared as x.png so nothing can rely on the declared type.
 func (th *turnHarness) DoMultipart(path, token, content string, images ...[]byte) *testutil.Response {
 	th.T.Helper()
+	contentType, body := th.multipartForm(content, images...)
+	return th.doRaw(path, token, contentType, body)
+}
+
+func (th *turnHarness) multipartForm(content string, images ...[]byte) (contentType string, form []byte) {
+	th.T.Helper()
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	if err := w.WriteField("content", content); err != nil {
@@ -61,10 +70,10 @@ func (th *turnHarness) DoMultipart(path, token, content string, images ...[]byte
 	if err := w.Close(); err != nil {
 		th.T.Fatal(err)
 	}
-	return th.doRaw(path, token, w.FormDataContentType(), body.Bytes())
+	return w.FormDataContentType(), body.Bytes()
 }
 
-func (th *turnHarness) doRaw(path, token, contentType string, body []byte) *testutil.Response {
+func (th *turnHarness) doRaw(path, token, contentType string, body []byte, userAgent ...string) *testutil.Response {
 	th.T.Helper()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, th.Server.URL+path, bytes.NewReader(body))
 	if err != nil {
@@ -72,6 +81,9 @@ func (th *turnHarness) doRaw(path, token, contentType string, body []byte) *test
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+token)
+	if len(userAgent) > 0 {
+		req.Header.Set("User-Agent", userAgent[0])
+	}
 	resp, err := th.Server.Client().Do(req)
 	if err != nil {
 		th.T.Fatal(err)
@@ -430,9 +442,10 @@ func TestImageTurnFreeRungNotCalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	free := &countingClient{}
+	free, router := &countingClient{}, &countingClient{}
 	p.Default = &ai.FallbackClient{Logger: silent, Rungs: []ai.Rung{
 		{Tier: ai.Tier{Label: "free", Model: "vendor/model:free"}, Client: free},
+		{Tier: ai.Tier{Label: "router", Model: "openrouter/free"}, Client: router},
 		{Tier: ai.Tier{Label: "paid", Model: "vendor/model"}, Client: th.client},
 	}}
 	th.client.replies = []ai.Message{say("paid rung answered")}
@@ -440,8 +453,8 @@ func TestImageTurnFreeRungNotCalled(t *testing.T) {
 	if r.Status != 200 || !strings.Contains(string(r.Body), "paid rung answered") {
 		t.Fatalf("turn = %d %s", r.Status, r.Body)
 	}
-	if free.hits.Load() != 0 {
-		t.Fatalf("free rung hit %d times", free.hits.Load())
+	if free.hits.Load() != 0 || router.hits.Load() != 0 {
+		t.Fatalf("free rungs hit %d and %d times", free.hits.Load(), router.hits.Load())
 	}
 	// The chain itself is untouched: a text turn still leads with the free rung.
 	r = th.Do("POST", "/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), map[string]any{"content": "hello"})
@@ -484,7 +497,168 @@ func TestImageTurnFlagOff(t *testing.T) {
 	if r.Status != 404 {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
+	// With the flag off the routes keep the app-wide 10 MB cap, so nobody can
+	// have 16 MB buffered for a feature that isn't on.
+	img := fakePNG(4 << 20) // valid on its own, so only the cap can refuse three
+	for _, route := range []string{"chat", "stream"} {
+		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/"+route, th.Token(user), "x", img, img, img)
+		if r.Status != 413 {
+			t.Fatalf("12 MB %s = %d %s", route, r.Status, r.Body)
+		}
+	}
 	th.noTurnSpent(user)
+}
+
+// R11: image turns are first-party only, as the screenshot import is.
+func TestImageTurnRefusesScopedToken(t *testing.T) {
+	th := newTurnHarness(t, imagesOn)
+	user, conv := th.proConversation("scoped-image@example.com")
+	pat := th.pat(user, "assistant:write", "assistant:read")
+	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
+	r := th.DoMultipart(path, pat, "x", fakePNG(64))
+	if r.Status != 403 || !strings.Contains(string(r.Body), "This endpoint requires a first-party session.") {
+		t.Fatalf("image = %d %s", r.Status, r.Body)
+	}
+	th.noTurnSpent(user)
+	th.client.replies = []ai.Message{say("Hi.")}
+	if r := th.Do("POST", path, pat, map[string]any{"content": "hello"}); r.Status != 200 {
+		t.Fatalf("scoped text turn = %d %s", r.Status, r.Body)
+	}
+}
+
+// R12: the legacy-iOS grace predates images and never covers them.
+func TestImageTurnIgnoresLegacyConsentGrace(t *testing.T) {
+	th := newTurnHarness(t, map[string]string{
+		"ASSISTANT_IMAGES_ENABLED": "true", "AI_CONSENT_ENFORCED": "true", "AI_CONSENT_LEGACY_IOS_GRACE": "true",
+	})
+	user, conv := th.proConversation("grace@example.com")
+	const legacyIOS = "Norviq/77 CFNetwork/1498 Darwin/24.0.0"
+	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
+	contentType, form := th.multipartForm("x", fakePNG(64))
+	r := th.doRaw(path, th.Token(user), contentType, form, legacyIOS)
+	if r.Status != 403 || !strings.Contains(string(r.Body), ai.ConsentRequiredReason) {
+		t.Fatalf("image = %d %s", r.Status, r.Body)
+	}
+	th.noTurnSpent(user)
+	// The grace still lets the same client's text turn through.
+	th.client.replies = []ai.Message{say("Hi.")}
+	if r := th.doRaw(path, th.Token(user), "application/json", []byte(`{"content":"hello"}`), legacyIOS); r.Status != 200 {
+		t.Fatalf("text turn = %d %s", r.Status, r.Body)
+	}
+}
+
+// fakeRedis is what the real Limiter needs of Redis: its one script, counted
+// in memory. Anything else panics on the nil embedded client.
+type fakeRedis struct {
+	redis.UniversalClient
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (f *fakeRedis) EvalSha(_ context.Context, _ string, keys []string, _ ...any) *redis.Cmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts[keys[0]]++
+	return redis.NewCmdResult(f.counts[keys[0]], nil)
+}
+
+func (f *fakeRedis) count(key string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[key]
+}
+
+func TestImageTurnRateLimit(t *testing.T) {
+	th := newTurnHarness(t, imagesOn)
+	limits := &fakeRedis{counts: map[string]int64{}}
+	th.Deps.Limiter.Redis = limits
+	user, conv := th.proConversation("limit-images@example.com")
+	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
+	img := fakePNG(64)
+	for i := range 10 {
+		th.client.replies = []ai.Message{say("ok")}
+		if r := th.DoMultipart(path, th.Token(user), "x", img); r.Status != 200 {
+			t.Fatalf("image turn %d = %d %s", i+1, r.Status, r.Body)
+		}
+	}
+	calls := th.client.calls()
+	r := th.DoMultipart(path, th.Token(user), "x", img)
+	if r.Status != 429 {
+		t.Fatalf("11th image turn = %d %s", r.Status, r.Body)
+	}
+	if th.client.calls() != calls {
+		t.Fatal("the refused turn reached the model")
+	}
+	// /stream shares the bucket and refuses before any frame.
+	if r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", img); r.Status != 429 {
+		t.Fatalf("stream = %d %s", r.Status, r.Body)
+	}
+
+	key := "ratelimit:assistant-images:user:" + apijson.FormatUUID(user)
+	spent := limits.count(key)
+	th.client.replies = []ai.Message{say("Hi.")}
+	r = th.Do("POST", path, th.Token(user), map[string]any{"content": "hello"})
+	if r.Status != 200 {
+		t.Fatalf("text turn = %d %s", r.Status, r.Body)
+	}
+	if limits.count(key) != spent {
+		t.Fatal("a text turn spent the image budget")
+	}
+	// The bucket is per user.
+	other, otherConv := th.proConversation("limit-other@example.com")
+	th.client.replies = []ai.Message{say("ok")}
+	if r := th.DoMultipart("/v1/ai/assistant/conversations/"+otherConv+"/chat", th.Token(other), "x", img); r.Status != 200 {
+		t.Fatalf("other user = %d %s", r.Status, r.Body)
+	}
+}
+
+// Every provider call of the turn carries the image exactly once, on the
+// turn's own user message, however many messages the loop adds after it,
+// including the later user-role nudge and final-answer asks.
+func TestImageStaysOnOneMessageThroughEveryRound(t *testing.T) {
+	overview := func(id string) ai.Message { return callTool(id, "get_financial_overview", `{}`) }
+	for name, tc := range map[string]struct {
+		replies []ai.Message
+		calls   int
+	}{
+		"nudge then tool rounds": {[]ai.Message{
+			say("Let me check your portfolio."), overview("c1"), callTool("c2", "get_current_inflation", `{"country":"US"}`), say("Done."),
+		}, 4},
+		"tool rounds run out": {[]ai.Message{
+			overview("c1"), overview("c2"), overview("c3"), overview("c4"), overview("c5"), overview("c6"), say("Done."),
+		}, 7},
+	} {
+		t.Run(name, func(t *testing.T) {
+			th := newTurnHarness(t, imagesOn)
+			user, conv := th.proConversation("rounds@example.com")
+			img := fakePNG(64)
+			th.client.replies = tc.replies
+			r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", img)
+			if r.Status != 200 || th.client.calls() != tc.calls {
+				t.Fatalf("status %d, %d calls: %s", r.Status, th.client.calls(), r.Body)
+			}
+			index := -1
+			for call, seen := range th.client.seen {
+				carrying := -1
+				for i := range seen {
+					if len(seen[i].Images) == 0 {
+						continue
+					}
+					if carrying != -1 {
+						t.Fatalf("call %d: messages %d and %d both carry images", call, carrying, i)
+					}
+					carrying = i
+				}
+				if carrying == -1 || seen[carrying].Role != "user" || !bytes.Equal(seen[carrying].Images[0].Data, img) {
+					t.Fatalf("call %d: images on %d of %d messages", call, carrying, len(seen))
+				}
+				if index != -1 && carrying != index {
+					t.Fatalf("call %d: image moved from message %d to %d", call, index, carrying)
+				}
+				index = carrying
+			}
+		})
+	}
 }
 
 // RequirePremium answers every premium gate with a 403 upgrade_required body.
@@ -625,6 +799,22 @@ func TestBodyLimitAppliesToParamRoute(t *testing.T) {
 	}
 }
 
+// Only the two turn routes get the larger cap.
+func TestBodyLimitStaysOnOtherRoutes(t *testing.T) {
+	th := newTurnHarness(t, imagesOn)
+	user, conv := th.proConversation("otherroutes@example.com")
+	body := bytes.Repeat([]byte{' '}, 11<<20)
+	for _, tc := range []struct{ method, path string }{
+		{"POST", "/v1/ai/assistant/conversations/" + conv + "/messages"},
+		{"POST", "/v1/ai/chat"},
+		{"PUT", "/v1/ai/assistant/preferences"},
+	} {
+		if r := th.Do(tc.method, tc.path, th.Token(user), body); r.Status != 413 {
+			t.Fatalf("%s %s = %d %s", tc.method, tc.path, r.Status, r.Body)
+		}
+	}
+}
+
 func TestJSONTurnsStillWork(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user := th.CreateUser("json@example.com") // not Pro: JSON turns have no image gate
@@ -665,32 +855,50 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func TestByokImageRejectionMessage(t *testing.T) {
-	// Fallback on: a model that cannot read images must still say so, not
-	// quietly hand the user's picture to Norviq's own provider.
-	th := newTurnHarness(t, map[string]string{"ASSISTANT_IMAGES_ENABLED": "true", "AI_USER_CREDENTIAL_FALLBACK": "true"})
-	user, conv := th.proConversation("byok@example.com")
-	var hits atomic.Int32
+// byokStub routes a user's own key to a stub provider answering status.
+type byokStub struct {
+	status atomic.Int32
+	hits   atomic.Int32
+	p      *ai.Platform
+}
+
+func newByokStub(t *testing.T, th *turnHarness) *byokStub {
+	t.Helper()
+	b := &byokStub{}
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		http.Error(w, `{"error":{"message":"this model does not support image input"}}`, http.StatusBadRequest)
+		b.hits.Add(1)
+		http.Error(w, `{"error":{"message":"stub provider refused"}}`, int(b.status.Load()))
 	}))
 	t.Cleanup(stub.Close)
 	target, err := url.Parse(stub.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := aiplatform.Platform(th.Deps)
-	if err != nil {
+	if b.p, err = aiplatform.Platform(th.Deps); err != nil {
 		t.Fatal(err)
 	}
-	p.HTTP = &http.Client{Transport: rewriteTransport{target: target}}
-	key, err := p.Cipher.Encrypt("sk-fake-test-key", ai.CredentialContextAIProvider)
+	b.p.HTTP = &http.Client{Transport: rewriteTransport{target: target}}
+	return b
+}
+
+func (b *byokStub) addKey(th *turnHarness, user uuid.UUID) {
+	th.T.Helper()
+	key, err := b.p.Cipher.Encrypt("sk-fake-test-key", ai.CredentialContextAIProvider)
 	if err != nil {
-		t.Fatal(err)
+		th.T.Fatal(err)
 	}
 	th.exec(`INSERT INTO user_ai_provider_credentials (id, user_id, provider, label, api_key_encrypted, key_hint, key_fingerprint, status, created_at, updated_at)
 		VALUES ($1, $2, 'openai', 'mine', $3, 'hint', 'fp', 'active', now(), now())`, uuid.New(), user, key)
+}
+
+var byokFallbackOn = map[string]string{"ASSISTANT_IMAGES_ENABLED": "true", "AI_USER_CREDENTIAL_FALLBACK": "true"}
+
+func TestByokImageRejectionMessage(t *testing.T) {
+	th := newTurnHarness(t, byokFallbackOn)
+	user, conv := th.proConversation("byok@example.com")
+	stub := newByokStub(t, th)
+	stub.status.Store(http.StatusBadRequest)
+	stub.addKey(th, user)
 
 	const message = "Your openai model can't read images. Try without the image, or change the model in Settings → AI providers."
 	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(64))
@@ -710,8 +918,8 @@ func TestByokImageRejectionMessage(t *testing.T) {
 	if r.Status != 424 || !strings.Contains(string(r.Body), message) {
 		t.Fatalf("chat = %d %s", r.Status, r.Body)
 	}
-	if hits.Load() != 2 {
-		t.Fatalf("stub hits = %d", hits.Load())
+	if stub.hits.Load() != 2 {
+		t.Fatalf("stub hits = %d", stub.hits.Load())
 	}
 	if th.client.calls() != 0 {
 		t.Fatal("the image fell back to Norviq's provider")
@@ -719,6 +927,56 @@ func TestByokImageRejectionMessage(t *testing.T) {
 	// The key is fine; the model just can't read images.
 	if n := th.count(`SELECT count(*) FROM user_ai_provider_credentials WHERE user_id = $1 AND status = 'active' AND last_error_code IS NULL`, user); n != 1 {
 		t.Fatal("an image rejection marked the credential as failing")
+	}
+}
+
+// With fallback on, no provider failure sends a user's image to Norviq's
+// chain. The credential is blamed only when the status says the key is at fault.
+func TestByokImageNeverFallsBack(t *testing.T) {
+	for _, tc := range []struct {
+		status          int
+		message         string
+		credentialState string
+	}{
+		{http.StatusNotFound, "Your openai model didn't accept this image. It may not read images, or its name or base URL may be wrong. Try without the image, or check Settings → AI providers.", "status = 'active' AND last_error_code IS NULL"},
+		{http.StatusUnauthorized, "Your openai key was rejected. Update it in Settings → AI providers.", "status = 'invalid' AND last_error_code IS NOT NULL"},
+		{http.StatusTooManyRequests, "Your openai account is rate limiting requests. Try again shortly.", "status = 'active' AND last_error_code IS NOT NULL"},
+		{http.StatusInternalServerError, "Could not reach openai with your key. Try again shortly.", "status = 'active' AND last_error_code IS NOT NULL"},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			th := newTurnHarness(t, byokFallbackOn)
+			user, conv := th.proConversation("byok-status@example.com")
+			stub := newByokStub(t, th)
+			stub.status.Store(int32(tc.status))
+			stub.addKey(th, user)
+			r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+			if r.Status != 424 || !strings.Contains(string(r.Body), tc.message) {
+				t.Fatalf("chat = %d %s", r.Status, r.Body)
+			}
+			if stub.hits.Load() != 1 {
+				t.Fatalf("stub hits = %d", stub.hits.Load())
+			}
+			if th.client.calls() != 0 {
+				t.Fatal("the image reached Norviq's chain")
+			}
+			if n := th.count(`SELECT count(*) FROM user_ai_provider_credentials WHERE user_id = $1 AND `+tc.credentialState, user); n != 1 {
+				t.Fatalf("credential is not %s", tc.credentialState)
+			}
+		})
+	}
+}
+
+// The fallback is only closed for images: a text turn still takes it.
+func TestByokTextTurnStillFallsBack(t *testing.T) {
+	th := newTurnHarness(t, byokFallbackOn)
+	user, conv := th.proConversation("byok-text@example.com")
+	stub := newByokStub(t, th)
+	stub.status.Store(http.StatusUnauthorized)
+	stub.addKey(th, user)
+	th.client.replies = []ai.Message{say("From Norviq's chain.")}
+	r := th.Do("POST", "/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), map[string]any{"content": "hello"})
+	if r.Status != 200 || !strings.Contains(string(r.Body), "From Norviq's chain.") || th.client.calls() != 1 {
+		t.Fatalf("text turn = %d %s", r.Status, r.Body)
 	}
 }
 

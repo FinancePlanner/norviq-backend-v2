@@ -89,6 +89,10 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 		if !h.imagesEnabled {
 			return turnResponse{}, httpx.NotFound("")
 		}
+		// As the screenshot import: images spend Norviq's AI budget.
+		if s.Scope != nil {
+			return turnResponse{}, httpx.Forbidden("This endpoint requires a first-party session.")
+		}
 		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
 			return turnResponse{}, err
 		}

@@ -36,6 +36,8 @@ func readTool(name, description string, props map[string]ai.Parameter, required 
 	return ai.NewTool(name, description, ai.JSONSchema{Properties: props, Required: required})
 }
 
+const searchSymbolsToolName = "search_symbols"
+
 // macroCountries is MacroCountry.allCases.
 var macroCountries = []string{"US", "BR", "PT", "ES", "DE", "FR", "IT", "EA"}
 
@@ -73,7 +75,7 @@ func readToolDefinitions() []ai.Tool {
 		readTool("get_quote", "Latest market quote for a symbol.", map[string]ai.Parameter{
 			"symbol": param("string", "Ticker, for example AAPL."),
 		}, "symbol"),
-		readTool("search_symbols", "Search stocks and ETFs by name or ticker.", map[string]ai.Parameter{
+		readTool(searchSymbolsToolName, "Search stocks and ETFs by name or ticker.", map[string]ai.Parameter{
 			"query": param("string", "Company, fund, or ticker search text."),
 		}, "query"),
 		readTool("get_crypto_portfolio", "The user's crypto holdings with live prices and 24-hour changes.", nil),
@@ -98,12 +100,14 @@ func chatToolDefinitions(mode confirmationMode) []ai.Tool {
 
 // imageTurnTools is what a turn with an image may call: the text-turn tools
 // plus record_trades, less the single-trade writes, so a trade read from an
-// image can only reach the user as a reviewed card.
+// image can only reach the user as a reviewed card, and less lookup_share_facts,
+// an LLM and web-search call with unwrapped output that reading a screenshot
+// doesn't need.
 func imageTurnTools() []ai.Tool {
 	out := readToolDefinitions()
 	for i := range catalog {
 		switch catalog[i].name {
-		case "record_trade", "add_position", "sell_position":
+		case "record_trade", "add_position", "sell_position", "lookup_share_facts":
 			continue
 		}
 		out = append(out, actionTool(&catalog[i], modeDeferredEveryWrite))
@@ -252,7 +256,7 @@ func (r *readTools) execute(ctx context.Context, name, arguments string, userID 
 		}
 		return encodeSwift(q)
 
-	case "search_symbols":
+	case searchSymbolsToolName:
 		query, ok := args.trimmedString("query")
 		if !ok {
 			return `{"error":"missing query"}`, nil

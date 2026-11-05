@@ -287,7 +287,7 @@ func TestImageTurnToolSet(t *testing.T) {
 	if names["record_trades"] != 1 || names["get_quote"] != 1 || names["add_goal"] != 1 {
 		t.Fatalf("tools = %v", names)
 	}
-	for _, banned := range []string{"record_trade", "add_position", "sell_position"} {
+	for _, banned := range []string{"record_trade", "add_position", "sell_position", "lookup_share_facts"} {
 		if names[banned] != 0 {
 			t.Fatalf("%s offered on an image turn", banned)
 		}
@@ -351,7 +351,7 @@ func TestImageTurnToolSet(t *testing.T) {
 func TestImageTurnRefusesToolsItWasNotOffered(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("offered@example.com")
-	for _, banned := range []string{"record_trade", "add_position", "sell_position"} {
+	for _, banned := range []string{"record_trade", "add_position", "sell_position", "lookup_share_facts"} {
 		before := th.client.calls()
 		th.client.replies = []ai.Message{callTool("c1", banned, `{"symbol":"AAPL"}`), say("I can't do that.")}
 		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))

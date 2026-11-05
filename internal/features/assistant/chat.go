@@ -91,7 +91,7 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 		}
 		// As the screenshot import: images spend Norviq's AI budget.
 		if s.Scope != nil {
-			return turnResponse{}, httpx.Forbidden("This endpoint requires a first-party session.")
+			return turnResponse{}, imageRejected(http.StatusForbidden, "This endpoint requires a first-party session.")
 		}
 		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
 			return turnResponse{}, err
@@ -125,6 +125,8 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	}
 	return out, nil
 }
+
+const aiConsentStreamMessage = "Allow AI data sharing to use the assistant."
 
 func (h *handlers) chat(c *echo.Context) error {
 	out, err := h.turnHTTP(c, nil)
@@ -165,6 +167,10 @@ func (h *handlers) streamChat(c *echo.Context) error {
 	case errors.As(err, &imageUnreadable):
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed", "kind", imageUnreadable.Kind)
 		_ = sse.data("error", map[string]string{"message": imageUnreadable.UserFacingMessage(), "code": imageUnreadable.ErrorCode()})
+	case errors.As(err, &abort) && abort.Reason == ai.ConsentRequiredReason:
+		h.d.Logger.Info("ai_assistant.stream_refused", "reason", "ai_consent_required")
+		// Old iOS shows the message verbatim, so it is copy, not the reason.
+		_ = sse.data("error", map[string]string{"message": aiConsentStreamMessage, "code": ai.ConsentRequiredReason})
 	case errors.As(err, &abort) && abort.Status == http.StatusFailedDependency:
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed")
 		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": "user_credential_rejected"})

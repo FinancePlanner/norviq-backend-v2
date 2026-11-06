@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"norviq-api/internal/features/brokers"
+	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/platform/swiftjson"
@@ -23,10 +23,11 @@ import (
 const (
 	updateHoldingsToolName = "update_holdings"
 
-	holdingsNoBodyReason    = "Review these holdings on the web or update the app."
+	holdingsNoBodyReason    = "Review these holdings in the Norviq app. Update the app if you don't see the card."
 	holdingsNothingSelected = "Nothing was selected to save."
 	holdingsRowErrorsReason = "Some holdings need fixing before they can be saved."
 	holdingsCollisionCode   = "holdings_collision"
+	holdingsNoneReadable    = "No readable holdings in the attachment."
 	splitHoldingsError      = "Call update_holdings once, with every position in one rows list. Nothing from this round was proposed; call any other change again afterwards."
 )
 
@@ -49,18 +50,41 @@ type proposedHolding struct {
 	NeedsCost         bool     `json:"needsCost"`
 }
 
-// holdingsCSVSummary is all a model sees of a CSV that parsed as holdings. Only
-// symbols that look like symbols are named, so a cell can't carry words to it.
-func holdingsCSVSummary(rows []brokers.HoldingRow) string {
-	var symbols []string
-	for i := range rows {
-		if s := rows[i].Symbol; s != "" && len(s) <= maxProposedTextLength && strings.IndexFunc(s, func(r rune) bool {
-			return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '-' || r == '^' || r == '=')
-		}) < 0 {
-			symbols = append(symbols, s)
+// sanitizeHoldingRows keeps the rows a card may show, from a CSV or the model
+// alike: a symbol the CSV import would accept, of at most 32 characters, stored
+// trimmed and upper-cased. A buy date survives only as the CSV import reads it,
+// as YYYY-MM-DD; any other is dropped. Nothing else of a cell reaches the card.
+func sanitizeHoldingRows(rows []brokers.HoldingRow) []brokers.HoldingRow {
+	out := make([]brokers.HoldingRow, 0, len(rows))
+	for _, r := range rows {
+		symbol := strings.ToUpper(portfolios.TrimSwift(r.Symbol))
+		if len(symbol) > maxProposedTextLength || !stocks.IsImportableTickerSymbol(symbol) {
+			continue
 		}
+		row := brokers.HoldingRow{Symbol: symbol, Shares: r.Shares, AvgPrice: r.AvgPrice}
+		if r.BuyDate != nil {
+			if date, ok := brokers.NormalizeBuyDate(*r.BuyDate); ok {
+				row.BuyDate = &date
+			}
+		}
+		out = append(out, row)
 	}
-	return "The attached CSV is a holdings export with " + strconv.Itoa(len(rows)) + " rows: " + strings.Join(symbols, ", ") +
+	return out
+}
+
+// holdingsCSVSummary is all a model sees of a CSV that parsed as holdings: the
+// rows the card will hold, counted and named. Only sanitized symbols are named,
+// so a cell can't carry words to it.
+func holdingsCSVSummary(rows []brokers.HoldingRow) string {
+	clean := sanitizeHoldingRows(rows)
+	if len(clean) == 0 {
+		return "The attached CSV is a holdings export, but none of its rows has a readable symbol. Tell the user; do not call update_holdings."
+	}
+	symbols := make([]string, len(clean))
+	for i := range clean {
+		symbols[i] = clean[i].Symbol
+	}
+	return "The attached CSV is a holdings export with " + strconv.Itoa(len(clean)) + " rows: " + strings.Join(symbols, ", ") +
 		". Call update_holdings to let the user review it; its rows are filled in by Norviq."
 }
 
@@ -128,6 +152,11 @@ func (h *handlers) holdingsProposal(ctx context.Context, args actionArgs, csvRow
 			return turnResult{}, problem, nil
 		}
 	}
+	// Both sources, before anything is built from them: what the model was
+	// told of a CSV came from the same rows.
+	if rows = sanitizeHoldingRows(rows); len(rows) == 0 {
+		return turnResult{}, holdingsNoneReadable, nil
+	}
 	var requested *string
 	if raw := args["portfolio_list_id"]; raw != nil {
 		s, isString := raw.(string)
@@ -153,7 +182,7 @@ func (h *handlers) holdingsProposal(ctx context.Context, args actionArgs, csvRow
 	card := make([]proposedHolding, len(rows))
 	for i := range rows {
 		card[i] = proposedHolding{
-			Symbol: strings.ToUpper(portfolios.TrimSwift(rows[i].Symbol)), Shares: rows[i].Shares, AvgPrice: rows[i].AvgPrice,
+			Symbol: rows[i].Symbol, Shares: rows[i].Shares, AvgPrice: rows[i].AvgPrice,
 			BuyDate: rows[i].BuyDate, Existing: "none", NeedsCost: rows[i].AvgPrice == nil || *rows[i].AvgPrice <= 0,
 		}
 	}

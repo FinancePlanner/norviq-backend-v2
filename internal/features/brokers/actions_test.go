@@ -1,6 +1,7 @@
 package brokers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -8,9 +9,11 @@ import (
 
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/platform/portfolios"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type actionsEnv struct {
@@ -317,5 +320,43 @@ func TestCheckHoldingsReturnsRowErrorsAndCollisionTogether(t *testing.T) {
 	}
 	if _, err := e.a.CommitHoldings(bg, rows[:1], e.listA, e.user, false); err == nil {
 		t.Fatal("collision not refused")
+	}
+}
+
+// panicSearch panics on any search, as a bug under the check's transaction would.
+type panicSearch struct{}
+
+func (panicSearch) Search(context.Context, string) ([]marketdata.SearchResultResponse, error) {
+	panic("search exploded")
+}
+
+// A panic inside the check's transaction must not keep its connection. The
+// check runs on its own pool: a leaked connection would block Close forever,
+// so the pool is closed only when nothing leaked (the test database is dropped
+// WITH (FORCE) either way).
+func TestCheckHoldingsPanicReleasesTheConnection(t *testing.T) {
+	e := newActionsEnv(t)
+	pool, err := pgxpool.NewWithConfig(bg, e.app.Deps.DB.Config().Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if pool.Stat().AcquiredConns() == 0 {
+			pool.Close()
+		}
+	})
+	svc := *e.a.s
+	svc.db, svc.search = pool, panicSearch{}
+	a := &Actions{s: &svc, postCommit: e.a.postCommit}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the search did not panic")
+			}
+		}()
+		_, _, _ = a.CheckHoldings(bg, []HoldingRow{{Symbol: "ZZPANIC", Shares: fp(1), AvgPrice: fp(1)}}, e.listA, e.user, false)
+	}()
+	if n := pool.Stat().AcquiredConns(); n != 0 {
+		t.Fatalf("%d connections still acquired after the panic", n)
 	}
 }

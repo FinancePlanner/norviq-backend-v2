@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/ai"
+	"norviq-api/internal/platform/attachment"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/platform/swiftjson"
@@ -81,22 +82,26 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	if err != nil {
 		return turnResponse{}, err
 	}
-	content, files, client, err := parseTurnBody(c)
+	// Files are classified here, by their sniffed bytes alone; the flags, the
+	// scope and Premium are checked before any file is decoded or scanned.
+	allow := attachment.Allow{Images: h.imagesEnabled, Documents: h.documentsEnabled}
+	body, err := parseTurnBody(c, allow)
 	if err != nil {
 		return turnResponse{}, err
 	}
-	if files.Any() {
+	var files turnFiles
+	if len(body.kinds) > 0 {
 		// Coded, so /stream doesn't report these as conversation_not_found.
-		if len(files.Images) > 0 && !h.imagesEnabled {
+		if body.hasImage() && !h.imagesEnabled {
 			return turnResponse{}, imageRejected(http.StatusNotFound, "Images aren't available right now.")
 		}
-		if files.HasDocument() && !h.documentsEnabled {
+		if body.hasDocument() && !h.documentsEnabled {
 			return turnResponse{}, httpx.CodedAbort(http.StatusNotFound, codeAttachmentRejected, documentsOffMessage)
 		}
 		// As the screenshot import: images spend Norviq's AI budget.
 		if s.Scope != nil {
 			code := codeImageRejected
-			if files.HasDocument() {
+			if body.hasDocument() {
 				code = codeAttachmentRejected
 			}
 			return turnResponse{}, httpx.CodedAbort(http.StatusForbidden, code, "This endpoint requires a first-party session.")
@@ -104,7 +109,11 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
 			return turnResponse{}, err
 		}
+		if files, err = turnAttachments(body.parts, allow); err != nil {
+			return turnResponse{}, err
+		}
 	}
+	content, client := body.content, body.client
 
 	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), files, s.Scope != nil, client, onEvent)
 	if err != nil {

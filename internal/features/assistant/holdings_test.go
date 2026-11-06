@@ -18,7 +18,7 @@ import (
 
 const (
 	holdingsCSVBody  = "Symbol,Shares,Average Cost\nAAPL,10,150\nMSFT,5,300\n"
-	holdingsNoBody   = "Review these holdings on the web or update the app."
+	holdingsNoBody   = "Review these holdings in the Norviq app. Update the app if you don't see the card."
 	holdingsNothing  = "Nothing was selected to save."
 	collisionReason  = "These holdings already exist: AAPL. Turn on “Replace existing” to update them."
 	holdingsModelRow = `{"symbol":"AAPL","shares":999,"avg_price":1}`

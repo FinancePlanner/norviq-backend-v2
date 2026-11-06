@@ -121,13 +121,17 @@ func chatToolDefinitions(mode confirmationMode) []ai.Tool {
 // plus record_trades, less the single-trade writes, so a trade read from a
 // file can only reach the user as a reviewed card, and less lookup_share_facts,
 // an LLM and web-search call with unwrapped output that reading a screenshot
-// doesn't need.
-func attachmentTurnTools() []ai.Tool {
+// doesn't need. update_holdings is offered only with documents on.
+func attachmentTurnTools(documentsEnabled bool) []ai.Tool {
 	out := readToolDefinitions()
 	for i := range catalog {
 		switch catalog[i].name {
 		case "record_trade", "add_position", "sell_position", "lookup_share_facts":
 			continue
+		case updateHoldingsToolName:
+			if !documentsEnabled {
+				continue
+			}
 		}
 		out = append(out, actionTool(&catalog[i], modeDeferredEveryWrite))
 	}

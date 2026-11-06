@@ -143,6 +143,7 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 	if hasFiles {
 		content += files.marker()
 		opt.mode, opt.images, opt.documents = modeDeferredEveryWrite, files.Images, files.Documents
+		opt.documentsEnabled = h.documentsEnabled
 		if files.CSV != nil {
 			text := csvTextBlock(files.CSV)
 			// A CSV that is a holdings export reaches the model as a summary;

@@ -77,8 +77,12 @@ type turnOptions struct {
 	// holdingsCSV is a CSV that parsed as a holdings export. The model saw only
 	// its summary; update_holdings' card is built from these rows.
 	holdingsCSV []brokers.HoldingRow
-	client      clientContext
-	extended    bool
+	// documentsEnabled is ASSISTANT_DOCUMENTS_ENABLED. Only with it on does a
+	// turn with a file offer update_holdings, whose card no client showed
+	// before documents.
+	documentsEnabled bool
+	client           clientContext
+	extended         bool
 }
 
 func (o turnOptions) hasFiles() bool {
@@ -143,7 +147,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 	system := h.promptFor(ctx, assistantSystemPrompt, userID, opt.client)
 	if opt.hasFiles() {
 		client = ai.ExcludeFreeRungs(client)
-		system += "\n\n" + attachmentTurnPrompt
+		system += "\n\n" + attachmentTurnPrompt(opt.documentsEnabled)
 	}
 	messages := []ai.Message{ai.Text("system", system)}
 	// A row with the marker means text the model read from a file can be in
@@ -185,7 +189,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 	case opt.readOnly:
 		tools = readToolDefinitions()
 	case opt.hasFiles():
-		tools = attachmentTurnTools()
+		tools = attachmentTurnTools(opt.documentsEnabled)
 	default:
 		tools = chatToolDefinitions(opt.mode)
 		if opt.extended {

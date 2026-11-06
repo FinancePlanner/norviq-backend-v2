@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"norviq-api/internal/platform/ai"
+	"norviq-api/internal/platform/attachment"
 	"norviq-api/internal/testutil"
 
 	"github.com/labstack/echo/v5"
@@ -408,17 +409,23 @@ func TestParseTurnBodyDropsTheRawForm(t *testing.T) {
 	req.Header.Set("Content-Type", contentType)
 	c := echo.New().NewContext(req, httptest.NewRecorder())
 
-	content, files, _, err := parseTurnBody(c)
-	images := files.Images
+	allow := attachment.Allow{Images: true}
+	body, err := parseTurnBody(c, allow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	content := body.content
 	if req.Body != http.NoBody {
 		t.Fatalf("request still holds the form: %T", req.Body)
 	}
 	for i := range form {
 		form[i] = 0
 	}
+	files, err := turnAttachments(body.parts, allow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images := files.Images
 	if content != "hello" || len(images) != 1 || !bytes.Equal(images[0].Data, pngCore) {
 		t.Fatalf("content %q, %d images", content, len(images))
 	}

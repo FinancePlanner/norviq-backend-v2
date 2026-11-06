@@ -206,7 +206,7 @@ func TestImageTurnPassesImageToModelOnly(t *testing.T) {
 			t.Fatalf("message %d carries images", i)
 		}
 	}
-	if !strings.HasSuffix(*seen[0].Content, "\n\n"+attachmentTurnPrompt) {
+	if !strings.HasSuffix(*seen[0].Content, "\n\n"+attachmentTurnPrompt(false)) {
 		t.Fatalf("system = %q", *seen[0].Content)
 	}
 
@@ -309,7 +309,7 @@ func TestImageTurnNeverAppliesWrites(t *testing.T) {
 // The property the feature rests on, over the whole tool set rather than one
 // sample: every tool an image turn can call that is not a read becomes a card.
 func TestImageTurnEveryWriteToolIsDeferred(t *testing.T) {
-	tools := attachmentTurnTools()
+	tools := attachmentTurnTools(true)
 	for i := range tools {
 		name := tools[i].Function.Name
 		if isReadTool(name) {
@@ -533,7 +533,7 @@ func TestLaterTurnHasNoImage(t *testing.T) {
 	if !strings.Contains(system, "Images and files from earlier messages are no longer available. If the user asks about one, ask them to send it again rather than guessing.") {
 		t.Fatalf("system = %q", system)
 	}
-	if strings.Contains(system, attachmentTurnPrompt) {
+	if strings.Contains(system, attachmentPromptHead) {
 		t.Fatal("image prompt on a text turn")
 	}
 }
@@ -741,7 +741,7 @@ func TestImageTurnRejectsNonImage(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("pdf@example.com")
 	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", []byte("<html>not an image</html>"))
-	if r.Status != 400 || !strings.Contains(string(r.Body), "Only images, PDFs and CSV files are supported.") {
+	if r.Status != 400 || !strings.Contains(string(r.Body), "Only JPEG, PNG, WebP and GIF images are supported.") {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
 	th.noTurnSpent(user)
@@ -783,9 +783,9 @@ func TestImageRejectionStreamFrame(t *testing.T) {
 	img := fakePNG(256)
 	path := "/v1/ai/assistant/conversations/" + conv + "/stream"
 	for reason, images := range map[string][][]byte{
-		"Only images, PDFs and CSV files are supported.": {[]byte("<html>not an image</html>")},
-		"Attach up to 3 files.":                          {img, img, img, img},
-		"Each image must be 5 MB or smaller.":            {fakePNG(5<<20 + 1)},
+		"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("<html>not an image</html>")},
+		"Attach up to 3 files.":                              {img, img, img, img},
+		"Each image must be 5 MB or smaller.":                {fakePNG(5<<20 + 1)},
 	} {
 		r := th.DoMultipart(path, th.Token(user), "x", images...)
 		frames := parseFrames(t, r.Body)
@@ -878,7 +878,7 @@ func TestJSONTurnsStillWork(t *testing.T) {
 	if last := lastMessage(first); *last.Content != "add a bike goal" || len(last.Images) != 0 {
 		t.Fatalf("last = %+v", last)
 	}
-	if strings.Contains(*first[0].Content, attachmentTurnPrompt) {
+	if strings.Contains(*first[0].Content, attachmentPromptHead) {
 		t.Fatal("image prompt on a JSON turn")
 	}
 	// The harmless write still applies inline; only image turns defer it.

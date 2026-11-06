@@ -640,7 +640,7 @@ func TestImageTurnContextField(t *testing.T) {
 				t.Fatalf("missing %q: %q", wanted, prompt)
 			}
 		}
-		if !strings.HasSuffix(prompt, attachmentTurnPrompt) {
+		if !strings.HasSuffix(prompt, attachmentTurnPrompt(false)) {
 			t.Fatalf("image rules aren't last: %q", prompt)
 		}
 	})
@@ -651,7 +651,7 @@ func TestImageTurnContextField(t *testing.T) {
 		if r := send(`{"screen":"`+hostile+`","locale":"`+hostile+`","timeZone":"`+hostile+`","inputMode":"`+hostile+`"}`, img); r.Status != 200 {
 			t.Fatalf("turn = %d %s", r.Status, r.Body)
 		}
-		if prompt := th.lastSystemPrompt(); strings.Contains(prompt, hostile) || !strings.HasSuffix(prompt, attachmentTurnPrompt) {
+		if prompt := th.lastSystemPrompt(); strings.Contains(prompt, hostile) || !strings.HasSuffix(prompt, attachmentTurnPrompt(false)) {
 			t.Fatalf("prompt = %q", prompt)
 		}
 	})
@@ -669,8 +669,8 @@ func TestImageTurnContextField(t *testing.T) {
 		t.Run(name+" doesn't change a rejection", func(t *testing.T) {
 			calls := th.client.calls()
 			for reason, images := range map[string][][]byte{
-				"Only images, PDFs and CSV files are supported.": {[]byte("<html>not an image</html>")},
-				"Attach up to 3 files.":                          {img, img, img, img},
+				"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("<html>not an image</html>")},
+				"Attach up to 3 files.":                              {img, img, img, img},
 			} {
 				r := send(context, images...)
 				if r.Status != 400 || !strings.Contains(string(r.Body), reason) || !strings.Contains(string(r.Body), codeImageRejected) {

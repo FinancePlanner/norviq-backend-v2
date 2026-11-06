@@ -2,6 +2,7 @@ package brokers
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	"norviq-api/internal/store/badgesdb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -124,6 +126,10 @@ func (a *Actions) ParseHoldingsCSV(csv string) ([]HoldingRow, bool) {
 	return rows, true
 }
 
+// NormalizeBuyDate reads a buy date as the CSV import does, returning it as
+// YYYY-MM-DD, or false for a date the import can't read.
+func NormalizeBuyDate(raw string) (string, bool) { return normalizeDateOnlyString(raw) }
+
 func previewItems(rows []HoldingRow) []PreviewItem {
 	items := make([]PreviewItem, len(rows))
 	for i, r := range rows {
@@ -204,6 +210,9 @@ func (a *Actions) CheckHoldings(ctx context.Context, rows []HoldingRow, listID, 
 	if err != nil {
 		return nil, nil, err
 	}
+	// A panic below must not keep the pool's connection; after the explicit
+	// rollback this one is a no-op.
+	defer func() { _ = tx.Rollback(ctx) }()
 	for _, sym := range symbols {
 		if _, err := stocks.ResolveImportInstrument(ctx, tx, a.s.search, sym); err != nil {
 			msg := importErrorMessage(err)
@@ -213,7 +222,7 @@ func (a *Actions) CheckHoldings(ctx context.Context, rows []HoldingRow, listID, 
 			delete(grouped, sym)
 		}
 	}
-	if err := tx.Rollback(ctx); err != nil {
+	if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		return nil, nil, err
 	}
 

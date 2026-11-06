@@ -52,8 +52,8 @@ type Allow struct{ Images, Documents bool }
 type Rejection struct {
 	Status int
 	Reason string
-	// Document is true when the refused file was a PDF or CSV (or a non-image
-	// file refused because documents are off).
+	// Document is true only when the refused file sniffed as a PDF or CSV. A
+	// file of no supported kind, a BMP say, is not a document.
 	Document bool
 }
 
@@ -67,38 +67,45 @@ func rejectTooLarge(reason string, document bool) *Rejection {
 	return &Rejection{Status: http.StatusRequestEntityTooLarge, Reason: reason, Document: document}
 }
 
+// typeReason is the copy for a file of the wrong type. With documents off it is
+// the images-only copy whatever the images flag says, as before documents.
 func typeReason(allow Allow) string {
 	switch {
-	case allow.Images && !allow.Documents:
+	case !allow.Documents:
 		return "Only JPEG, PNG, WebP and GIF images are supported."
-	case allow.Documents && !allow.Images:
+	case !allow.Images:
 		return "Only PDF and CSV files are supported."
 	default:
 		return "Only images, PDFs and CSV files are supported."
 	}
 }
 
-// Validate checks every file. Errors are *Rejection. A first pass sniffs every
-// part and checks the counts (files, then PDFs, then CSVs), so a user who
-// attached too many files is told that before any content is judged; a second
-// pass validates each file in order.
-func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
+// Classify sniffs every part and checks the counts, files first, then PDFs,
+// then CSVs, so a user who attached too many files is told that before any
+// one file is judged. It reads nothing past the sniff, so it is cheap enough
+// to run before the caller's own gates. A file of no supported kind is refused
+// with the type reason for allow. With documents off the document counts are
+// not judged: the caller refuses any document by its flag.
+func Classify(files []multipartform.Part, allow Allow) ([]Kind, error) {
 	if len(files) > MaxFiles {
 		return nil, reject("Attach up to 3 files.", false)
 	}
-	kinds := make([]string, len(files))
+	kinds := make([]Kind, len(files))
 	var pdfs, csvs int
+	unsupported := false
 	for i, f := range files {
 		sniffed := http.DetectContentType(f.Body)
 		switch {
 		case sniffed == "application/pdf":
-			kinds[i] = "pdf"
+			kinds[i] = KindPDF
 			pdfs++
 		case isCSVCandidate(partName(f), sniffed):
-			kinds[i] = "csv"
+			kinds[i] = KindCSV
 			csvs++
 		case isSupportedImage(sniffed):
-			kinds[i] = "image"
+			kinds[i] = KindImage
+		default:
+			unsupported = true
 		}
 	}
 	if allow.Documents {
@@ -109,12 +116,24 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 			return nil, reject("Attach one CSV at a time.", true)
 		}
 	}
+	if unsupported {
+		return nil, reject(typeReason(allow), false)
+	}
+	return kinds, nil
+}
 
+// Validate checks every file. Errors are *Rejection. Classify runs first; then
+// each file is validated in order.
+func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
+	kinds, err := Classify(files, allow)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Attachment, 0, len(files))
 	for i, f := range files {
 		name := partName(f)
 		switch kinds[i] {
-		case "image":
+		case KindImage:
 			if !allow.Images {
 				return nil, reject(typeReason(allow), false)
 			}
@@ -126,7 +145,7 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindImage, MediaType: mt, Data: data, Name: name})
-		case "pdf":
+		case KindPDF:
 			if !allow.Documents {
 				return nil, reject(typeReason(allow), true)
 			}
@@ -137,7 +156,7 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindPDF, MediaType: "application/pdf", Data: f.Body, Name: name})
-		case "csv":
+		case KindCSV:
 			if !allow.Documents {
 				return nil, reject(typeReason(allow), true)
 			}
@@ -149,10 +168,6 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindCSV, MediaType: "text/csv", Data: data, Name: name})
-		default:
-			// Not an image: a refusal here is a document refusal when documents
-			// are off, since the file was not an image either way.
-			return nil, reject(typeReason(allow), !allow.Documents)
 		}
 	}
 	return out, nil

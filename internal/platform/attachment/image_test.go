@@ -241,3 +241,30 @@ func TestValidateRefusesProgressiveJPEGOverBudget(t *testing.T) {
 	_, err = Validate([]multipartform.Part{part("a.jpg", "", progressiveJPEGHeader(2048, 2048))}, allowAll)
 	wantRejection(t, err, http.StatusBadRequest, "This image couldn't be read.")
 }
+
+func jpegWithPrefix(w, h int, pre []byte) []byte {
+	b := append([]byte{0xFF, 0xD8}, pre...)
+	b = append(b, 0xFF, 0xE0, 0, 4, 0, 0, 0xFF, 0xC2, 0, 17, 8, byte(h>>8), byte(h), byte(w>>8), byte(w), 3,
+		1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0)
+	return append(b, 0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0, 3, 0, 0, 63, 0)
+}
+
+func TestValidateJPEGMarkerWalkFailsClosed(t *testing.T) {
+	tooLarge := "This image is too large. Use a smaller one."
+	cases := map[string]struct {
+		pre    []byte
+		reason string
+	}{
+		"plain":        {nil, tooLarge},
+		"RST0":         {[]byte{0xFF, 0xD0}, tooLarge},
+		"fill bytes":   {[]byte{0xFF, 0xFF}, tooLarge},
+		"garbage byte": {[]byte{0xFF, 0xE0, 0, 4, 0, 0, 0x00}, "This image couldn't be read."},
+		"FF00":         {[]byte{0xFF, 0x00}, "This image couldn't be read."},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Validate([]multipartform.Part{part("a.jpg", "", jpegWithPrefix(4000, 4000, c.pre))}, allowAll)
+			wantRejection(t, err, http.StatusBadRequest, c.reason)
+		})
+	}
+}

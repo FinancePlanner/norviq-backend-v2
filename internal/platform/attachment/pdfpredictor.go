@@ -1,8 +1,10 @@
 package attachment
 
 // undoPredictor reverses the PNG (10-15) and TIFF (2) predictors of a Flate
-// stream so names hidden behind them are visible to the scan. Parameters are
-// clamped, never refused: a predictor alone is no reason to reject a PDF.
+// stream in place, so names hidden behind them are visible to the scan. It
+// makes no second full-size copy and returns the (possibly shorter) data.
+// Parameters are clamped, never refused: a predictor alone is no reason to
+// reject a PDF.
 func undoPredictor(data []byte, s streamSpec) []byte {
 	colors := clamp(s.colors, 1, 32, 1)
 	columns := clamp(s.columns, 1, 1<<24, 1)
@@ -12,13 +14,12 @@ func undoPredictor(data []byte, s streamSpec) []byte {
 	default:
 		bpc = 8
 	}
-	rowBits := colors * bpc * columns
-	rowBytes := (rowBits + 7) / 8
+	rowBytes := (colors*bpc*columns + 7) / 8
 	switch {
 	case s.predictor >= 10 && s.predictor <= 15:
 		return undoPNG(data, rowBytes, max(1, colors*bpc/8))
 	case s.predictor == 2:
-		return undoTIFF(data, rowBytes, colors, bpc)
+		undoTIFF(data, rowBytes, colors, bpc)
 	}
 	return data
 }
@@ -30,12 +31,18 @@ func clamp(v, lo, hi, def int) int {
 	return v
 }
 
+// undoPNG unfilters each row and packs the rows down over their tag bytes.
 func undoPNG(data []byte, rowBytes, bpp int) []byte {
-	out := make([]byte, 0, len(data))
-	var prev []byte
+	w, prevAt, prevLen := 0, 0, 0
 	for off := 0; off < len(data); off += rowBytes + 1 {
 		tag := data[off]
-		row := append([]byte(nil), data[off+1:min(len(data), off+1+rowBytes)]...)
+		n := min(rowBytes, len(data)-off-1)
+		row := data[w : w+n]
+		copy(row, data[off+1:off+1+n]) // w <= off, so this only moves left
+		var prev []byte
+		if prevLen > 0 {
+			prev = data[prevAt : prevAt+prevLen]
+		}
 		for i := range row {
 			var a, b, c byte
 			if i >= bpp {
@@ -58,10 +65,10 @@ func undoPNG(data []byte, rowBytes, bpp int) []byte {
 				row[i] += paeth(a, b, c)
 			}
 		}
-		out = append(out, row...)
-		prev = row
+		prevAt, prevLen = w, n
+		w += n
 	}
-	return out
+	return data[:w]
 }
 
 func paeth(a, b, c byte) byte {
@@ -84,11 +91,10 @@ func abs(x int) int {
 }
 
 // undoTIFF adds each sample to the same component of the previous pixel,
-// modulo 2^bpc, row by row.
-func undoTIFF(data []byte, rowBytes, colors, bpc int) []byte {
-	out := append([]byte(nil), data...)
-	for off := 0; off < len(out); off += rowBytes {
-		row := out[off:min(len(out), off+rowBytes)]
+// modulo 2^bpc, row by row, in place.
+func undoTIFF(data []byte, rowBytes, colors, bpc int) {
+	for off := 0; off < len(data); off += rowBytes {
+		row := data[off:min(len(data), off+rowBytes)]
 		switch bpc {
 		case 8:
 			for i := colors; i < len(row); i++ {
@@ -114,5 +120,4 @@ func undoTIFF(data []byte, rowBytes, colors, bpc int) []byte {
 			}
 		}
 	}
-	return out
 }

@@ -168,7 +168,8 @@ func TestPDFAdversarialStreamsAreLinear(t *testing.T) {
 	}
 	b.WriteString("%%EOF\n")
 	start := time.Now()
-	_, _ = Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
+	_, err := Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
+	wantRejection(t, err, http.StatusBadRequest, reasonPDFRead)
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("took %s", d)
 	}

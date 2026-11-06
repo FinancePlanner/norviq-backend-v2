@@ -2,6 +2,7 @@ package attachment
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	_ "image/gif" // registers the GIF decoder
 	"image/jpeg"
@@ -29,39 +30,62 @@ const (
 // uploads cannot exhaust memory together. Callers block rather than fail.
 var decodeSlot = make(chan struct{}, 1)
 
-// isHeavy reports a 16-bit PNG or a progressive JPEG, read from the header.
-func isHeavy(data []byte) bool {
-	if len(data) > 24 && bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
-		return data[24] == 16 // IHDR bit depth
-	}
-	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
-		return false
-	}
-	for i := 2; i+3 < len(data); {
-		if data[i] != 0xFF {
-			return false
-		}
-		m := data[i+1]
-		switch {
-		case m == 0xFF: // fill byte
-			i++
-			continue
-		case m == 0xC2:
-			return true
-		case m == 0xDA: // first SOS: no SOF2 came before it
-			return false
-		}
-		i += 2 + int(data[i+2])<<8 + int(data[i+3])
-	}
-	return false
-}
-
 func isSupportedImage(sniffed string) bool {
 	switch sniffed {
 	case "image/jpeg", "image/png", "image/webp", "image/gif":
 		return true
 	}
 	return false
+}
+
+var errBadJPEG = errors.New("jpeg: unparseable marker stream")
+
+// isHeavy reports a 16-bit PNG or a progressive JPEG, read from the header.
+// For a JPEG it walks the markers before the first SOS the way the decoder
+// does, and fails closed: a byte that is not 0xFF where a marker is expected,
+// or FF 00, is errBadJPEG, so a header the walk cannot follow never slips past
+// as "not progressive".
+func isHeavy(data []byte) (bool, error) {
+	if len(data) > 24 && bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
+		return data[24] == 16, nil // IHDR bit depth
+	}
+	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+		return false, nil
+	}
+	i := 2
+	for i < len(data) {
+		if data[i] != 0xFF {
+			return false, errBadJPEG
+		}
+		for i < len(data) && data[i] == 0xFF { // fill bytes
+			i++
+		}
+		if i >= len(data) {
+			return false, nil // truncated: the decoder will refuse it
+		}
+		m := data[i]
+		i++
+		switch {
+		case m == 0x00:
+			return false, errBadJPEG
+		case m == 0x01 || m == 0xD8 || (m >= 0xD0 && m <= 0xD7):
+			continue // standalone markers carry no length
+		case m == 0xD9 || m == 0xDA:
+			return false, nil // EOI, or the first SOS with no progressive SOF before it
+		}
+		if i+2 > len(data) {
+			return false, nil
+		}
+		segLen := int(data[i])<<8 | int(data[i+1])
+		if segLen < 2 {
+			return false, errBadJPEG
+		}
+		if m == 0xC2 || m == 0xC6 || m == 0xCA || m == 0xCE {
+			return true, nil
+		}
+		i += segLen
+	}
+	return false, nil
 }
 
 // normalizeImage decodes and re-encodes data so metadata, trailing bytes and
@@ -81,7 +105,11 @@ func normalizeImage(data []byte) (mediaType string, out []byte, err error) {
 	if cfg.Width > MaxImageSide || cfg.Height > MaxImageSide {
 		return "", nil, reject("This image is too large. Use one up to 4096 pixels on each side.", false)
 	}
-	if px := cfg.Width * cfg.Height; px > maxPixels || (px > maxHeavyPixels && isHeavy(data)) {
+	heavy, herr := isHeavy(data)
+	if herr != nil {
+		return "", nil, reject("This image couldn't be read.", false)
+	}
+	if px := cfg.Width * cfg.Height; px > maxPixels || (px > maxHeavyPixels && heavy) {
 		return "", nil, reject("This image is too large. Use a smaller one.", false)
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))

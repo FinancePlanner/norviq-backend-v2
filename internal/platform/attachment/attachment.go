@@ -1,6 +1,12 @@
 // Package attachment is the single security gate between bytes uploaded to the
 // assistant and the LLM. It trusts sniffed bytes, never the declared type;
 // images are decoded and re-encoded so nothing but pixels survives.
+//
+// PDF checks guarantee bounded CPU and memory and refuse structure the scanner
+// cannot interpret. The scan for scripts, launch actions and embedded files is
+// best effort: a determined author can phrase a PDF a viewer reads differently.
+// Norviq never renders, executes or serves a PDF back; it goes only to the
+// model provider for one turn.
 package attachment
 
 import (

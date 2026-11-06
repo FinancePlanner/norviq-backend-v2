@@ -160,7 +160,7 @@ func readImageUploads(c *echo.Context, body []byte) ([]multipartform.Part, error
 	case err != nil:
 		return nil, httpx.BadRequest("Could not read the uploaded form.")
 	}
-	files := multipartform.ImageFiles(parts)
+	files := multipartform.Files(parts)
 	if len(files) == 0 {
 		return nil, httpx.BadRequest("Missing image field in multipart body.")
 	}

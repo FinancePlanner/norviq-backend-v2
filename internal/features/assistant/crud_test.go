@@ -215,12 +215,12 @@ func TestPreferences(t *testing.T) {
 	tok := h.Token(h.CreateUser("prefs@example.com"))
 	r := h.Do("GET", "/v1/ai/assistant/preferences", tok, nil)
 	expectStatus(t, r, 200)
-	if string(r.Body) != `{"proactiveTipsEnabled":false,"pushEnabled":false,"timezone":"UTC","imagesEnabled":false}` {
+	if string(r.Body) != `{"proactiveTipsEnabled":false,"pushEnabled":false,"timezone":"UTC","imagesEnabled":false,"documentsEnabled":false}` {
 		t.Fatalf("%s", r.Body)
 	}
 	r = h.Do("PUT", "/v1/ai/assistant/preferences", tok, map[string]any{"proactiveTipsEnabled": true, "pushEnabled": true, "timezone": "Europe/Lisbon"})
 	expectStatus(t, r, 200)
-	if string(r.Body) != `{"proactiveTipsEnabled":true,"pushEnabled":true,"timezone":"Europe/Lisbon","imagesEnabled":false}` {
+	if string(r.Body) != `{"proactiveTipsEnabled":true,"pushEnabled":true,"timezone":"Europe/Lisbon","imagesEnabled":false,"documentsEnabled":false}` {
 		t.Fatalf("%s", r.Body)
 	}
 	r = h.Do("PUT", "/v1/ai/assistant/preferences", tok, map[string]any{"proactiveTipsEnabled": true, "pushEnabled": true, "timezone": "Mars/Olympus"})

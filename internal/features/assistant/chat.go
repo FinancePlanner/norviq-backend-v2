@@ -81,25 +81,32 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	if err != nil {
 		return turnResponse{}, err
 	}
-	content, images, client, err := parseTurnBody(c)
+	content, files, client, err := parseTurnBody(c)
 	if err != nil {
 		return turnResponse{}, err
 	}
-	if len(images) > 0 {
-		// Coded, so /stream doesn't report this as conversation_not_found.
-		if !h.imagesEnabled {
+	if files.Any() {
+		// Coded, so /stream doesn't report these as conversation_not_found.
+		if len(files.Images) > 0 && !h.imagesEnabled {
 			return turnResponse{}, imageRejected(http.StatusNotFound, "Images aren't available right now.")
+		}
+		if files.HasDocument() && !h.documentsEnabled {
+			return turnResponse{}, httpx.CodedAbort(http.StatusNotFound, codeAttachmentRejected, documentsOffMessage)
 		}
 		// As the screenshot import: images spend Norviq's AI budget.
 		if s.Scope != nil {
-			return turnResponse{}, imageRejected(http.StatusForbidden, "This endpoint requires a first-party session.")
+			code := codeImageRejected
+			if files.HasDocument() {
+				code = codeAttachmentRejected
+			}
+			return turnResponse{}, httpx.CodedAbort(http.StatusForbidden, code, "This endpoint requires a first-party session.")
 		}
 		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
 			return turnResponse{}, err
 		}
 	}
 
-	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), images, s.Scope != nil, client, onEvent)
+	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), files, s.Scope != nil, client, onEvent)
 	if err != nil {
 		return turnResponse{}, err
 	}
@@ -163,8 +170,8 @@ func (h *handlers) streamChat(c *echo.Context) error {
 			return encErr
 		}
 		_ = sse.frame("turn", enc)
-	case errors.As(err, &abort) && abort.Code == codeImageRejected:
-		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": codeImageRejected})
+	case errors.As(err, &abort) && (abort.Code == codeImageRejected || abort.Code == codeAttachmentRejected):
+		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": abort.Code})
 	case errors.As(err, &imageUnreadable):
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed", "kind", imageUnreadable.Kind)
 		_ = sse.data("error", map[string]string{"message": imageUnreadable.UserFacingMessage(), "code": imageUnreadable.ErrorCode()})

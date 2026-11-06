@@ -69,7 +69,10 @@ type handlers struct {
 
 	// imagesEnabled is ASSISTANT_IMAGES_ENABLED: whether a turn may attach images.
 	imagesEnabled bool
-	// largeTurns holds a slot per running large image turn; see holdLargeTurnSlot.
+	// documentsEnabled is ASSISTANT_DOCUMENTS_ENABLED: whether a turn may attach
+	// a PDF or CSV.
+	documentsEnabled bool
+	// largeTurns holds a slot per running large file turn; see holdLargeTurnSlot.
 	// The server registers one handlers, so this is process-wide.
 	largeTurns chan struct{}
 }
@@ -134,6 +137,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 		env = os.Getenv
 	}
 	h.imagesEnabled = config.Bool(env(imagesEnabledEnv), false)
+	h.documentsEnabled = config.Bool(env(documentsEnabledEnv), false)
 	tg := f.Telegram
 	if tg == nil {
 		tg = telegram.Load(nil, d.Config.IsProduction(), d.Logger)
@@ -176,8 +180,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// are wired; until then they answer 404.
 	if h.turnsReady() {
 		turn := write
-		if h.imagesEnabled {
-			// Three images outrun the app-wide body cap. With the flag off the
+		if h.imagesEnabled || h.documentsEnabled {
+			// Three files outrun the app-wide body cap. With the flag off the
 			// routes keep that cap and nothing buffers 16 MB for a disabled feature.
 			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/chat", turnBodyLimit)
 			r.AllowLargeBody(http.MethodPost, "/v1"+a+"/conversations/:id/stream", turnBodyLimit)

@@ -46,7 +46,7 @@ func (h *handlers) getPreferences(c *echo.Context) error {
 	}
 	return httpx.OK(c, preferencesResponse{
 		ProactiveTipsEnabled: row.ProactiveTipsEnabled, PushEnabled: row.PushEnabled, Timezone: row.Timezone,
-		ImagesEnabled: h.imagesEnabled,
+		ImagesEnabled: h.imagesEnabled, DocumentsEnabled: h.documentsEnabled,
 	})
 }
 
@@ -89,7 +89,7 @@ func (h *handlers) updatePreferences(c *echo.Context) error {
 	}
 	return httpx.OK(c, preferencesResponse{
 		ProactiveTipsEnabled: payload.ProactiveTipsEnabled, PushEnabled: payload.PushEnabled, Timezone: payload.Timezone,
-		ImagesEnabled: h.imagesEnabled,
+		ImagesEnabled: h.imagesEnabled, DocumentsEnabled: h.documentsEnabled,
 	})
 }
 

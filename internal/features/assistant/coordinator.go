@@ -95,19 +95,22 @@ func (h *handlers) persistReply(ctx context.Context, userID, conversationID uuid
 // AIConsent.require for the caller: the request check (with the legacy-iOS
 // grace) over HTTP, the strict check for Telegram's synthetic request.
 //
-// A turn with images goes straight to the model: text inside an image is
+// A turn with files goes straight to the model: text inside a file is
 // untrusted, so it never takes the memo or watch shortcuts and every write it
 // leads to waits for the user's confirmation.
-func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, images []ai.Image, scoped bool, client clientContext, onEvent eventSink) (turnOutcome, error) {
-	hasImages := len(images) > 0
-	if hasImages && content == "" {
+func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() error, userID, conversationID uuid.UUID, content string, files turnFiles, scoped bool, client clientContext, onEvent eventSink) (turnOutcome, error) {
+	hasFiles := files.Any()
+	if hasFiles && content == "" {
 		content = defaultImagePrompt
+		if files.HasDocument() {
+			content = defaultFilePrompt
+		}
 	}
 	if content == "" || graphemeLen(content) > maxMessageCharacters {
 		return turnOutcome{}, httpx.BadRequest("Message must contain 1 to 12,000 characters.")
 	}
 	var ask *memoAsk
-	if !hasImages {
+	if !hasFiles {
 		ask = parseMemoAsk(content)
 		if ask == nil {
 			if intent := classifyWatch(content); intent != nil {
@@ -115,8 +118,8 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 			}
 		}
 	}
-	// The legacy-iOS grace predates images and does not cover them.
-	if hasImages {
+	// The legacy-iOS grace predates files and does not cover them.
+	if hasFiles {
 		requireConsent = func() error { return h.requireStrictConsent(ctx, userID) }
 	}
 	if err := requireConsent(); err != nil {
@@ -137,9 +140,13 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		}
 	}
 	opt := turnOptions{mode: confirmationModeFor(scoped), onEvent: onEvent, client: client}
-	if hasImages {
-		content += imageMarker
-		opt.mode, opt.images = modeDeferredEveryWrite, images
+	if hasFiles {
+		content += files.marker()
+		opt.mode, opt.images, opt.documents = modeDeferredEveryWrite, files.Images, files.Documents
+		if files.CSV != nil {
+			text := csvTextBlock(files.CSV)
+			opt.csvText = &text
+		}
 	}
 	if err := h.insertUserMessage(ctx, userID, conversationID, content); err != nil {
 		return turnOutcome{}, err
@@ -156,7 +163,7 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		}
 		out.text, out.memo = "Memo on "+card.Symbol+" is ready.", &card
 	} else {
-		opt.extended = !hasImages && h.extendedToolsAllowed(ctx, scoped, client, conversationID)
+		opt.extended = !hasFiles && h.extendedToolsAllowed(ctx, scoped, client, conversationID)
 		res, err := h.runTurn(ctx, resolved, userID, conversationID, opt)
 		if err != nil {
 			return turnOutcome{}, err
@@ -248,10 +255,10 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 		}
 		return res, nil
 	}
-	if len(opt.images) > 0 {
-		// The refusal is about the image, not the key, so the credential is
+	if opt.hasFiles() {
+		// The refusal is about the file, not the key, so the credential is
 		// not marked as failing.
-		if failure, ok := ai.ClassifyAttachmentRejection(err, resolved.Credential, false); ok {
+		if failure, ok := ai.ClassifyAttachmentRejection(err, resolved.Credential, len(opt.documents) > 0 || opt.csvText != nil); ok {
 			return turnResult{}, failure
 		}
 	}
@@ -260,9 +267,9 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 		return turnResult{}, err
 	}
 	h.ai.RecordCredentialFailure(ctx, resolved.Credential, failure)
-	// An image the user sent through their own key never moves to Norviq's
+	// A file the user sent through their own key never moves to Norviq's
 	// provider, whatever went wrong.
-	if h.ai.Settings.CredentialFallback && len(opt.images) == 0 {
+	if h.ai.Settings.CredentialFallback && !opt.hasFiles() {
 		h.d.Logger.Warn("ai_credential_fallback", "provider", resolved.Credential.Provider)
 		client, _ := h.ai.ClientFor(ctx, userID)
 		return h.generate(ctx, client, userID, conversationID, opt)

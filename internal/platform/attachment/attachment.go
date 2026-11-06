@@ -69,7 +69,7 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 		return nil, reject("Attach up to 3 files.", false)
 	}
 	out := make([]Attachment, 0, len(files))
-	var pdfs int
+	var pdfs, csvs int
 	for _, f := range files {
 		name := ""
 		if f.Filename != nil {
@@ -103,6 +103,21 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindPDF, MediaType: "application/pdf", Data: f.Body, Name: name})
+		case isCSVCandidate(name, sniffed):
+			if !allow.Documents {
+				return nil, reject(typeReason(allow), true)
+			}
+			if csvs++; csvs > 1 {
+				return nil, reject("Attach one CSV at a time.", true)
+			}
+			if len(f.Body) > MaxCSVBytes {
+				return nil, rejectTooLarge("Each CSV must be 1 MB or smaller.", true)
+			}
+			data, err := checkCSV(f.Body)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Attachment{Kind: KindCSV, MediaType: "text/csv", Data: data, Name: name})
 		default:
 			// Not an image: a refusal here is a document refusal when documents
 			// are off, since the file was not an image either way.
@@ -110,4 +125,15 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 		}
 	}
 	return out, nil
+}
+
+// isCSVCandidate is true for a .csv filename whose bytes sniff as text. NUL
+// and control bytes sniff as binary, so octet-stream is let through to
+// checkCSV, which refuses it with the UTF-8 reason; HTML, images and the like
+// are not.
+func isCSVCandidate(name, sniffed string) bool {
+	if !strings.HasSuffix(strings.ToLower(name), ".csv") {
+		return false
+	}
+	return strings.HasPrefix(sniffed, "text/plain") || sniffed == "application/octet-stream"
 }

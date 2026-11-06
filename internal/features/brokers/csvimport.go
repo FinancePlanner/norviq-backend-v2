@@ -33,12 +33,14 @@ var (
 // parseCSVPreview reads the rows of a holdings CSV; a row without a symbol is
 // an error line, every other row an item.
 func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
-	items, errs, _, err := parseCSVTable(raw)
+	items, errs, _, err := parseCSVTable(raw, false)
 	return items, errs, err
 }
 
-// parseCSVTable is parseCSVPreview plus the normalised header names.
-func parseCSVTable(raw string) ([]PreviewItem, []PreviewError, csvTable, error) {
+// parseCSVTable is parseCSVPreview plus the normalised header names. With
+// locale, numbers in semicolon- and tab-delimited files may use a decimal
+// comma (see parseCSVNumber); the HTTP import keeps its original reading.
+func parseCSVTable(raw string, locale bool) ([]PreviewItem, []PreviewError, csvTable, error) {
 	trimmed := portfolios.TrimSwift(raw)
 	if trimmed == "" {
 		return nil, nil, csvTable{}, httpx.BadRequest("CSV body is empty.")
@@ -93,8 +95,8 @@ func parseCSVTable(raw string) ([]PreviewItem, []PreviewError, csvTable, error) 
 		}
 		items = append(items, PreviewItem{
 			Line: lineNo, Symbol: symbol,
-			Shares:   parseCSVNumber(fieldAt(fields, sharesIdx), delim),
-			BuyPrice: parseCSVNumber(fieldAt(fields, priceIdx), delim),
+			Shares:   parseCSVNumber(fieldAt(fields, sharesIdx), delim, locale),
+			BuyPrice: parseCSVNumber(fieldAt(fields, priceIdx), delim, locale),
 			BuyDate:  trimmedNonEmpty(fieldAt(fields, dateIdx)),
 			Notes:    trimmedNonEmpty(fieldAt(fields, notesIdx)),
 		})
@@ -110,23 +112,36 @@ type csvTable struct {
 	cells   [][]string
 }
 
-// parseCSVNumber reads a cell. In a semicolon file a lone comma with one or
-// two digits after it and no dot ("1,5", "612,30") is a decimal comma; any
-// other comma is a thousands separator, as in parseCSVDouble.
-func parseCSVNumber(raw string, delim rune) *float64 {
-	if delim == ';' {
-		t := portfolios.TrimSwift(raw)
-		if i := strings.LastIndex(t, ","); i >= 0 && !strings.Contains(t, ".") && strings.Count(t, ",") == 1 {
-			if n := len(t) - i - 1; n == 1 || n == 2 {
-				t = t[:i] + "." + t[i+1:]
-				if v, ok := swiftDouble(t); ok {
-					return &v
-				}
-				return nil
-			}
+// parseCSVNumber reads a cell. In a semicolon- or tab-delimited file the
+// decimal separator is the last "." or "," in the cell and the other one is a
+// thousands separator ("1.234,56", "1,234.56", "0,125", "612,30"). A comma
+// file keeps parseCSVDouble's rule: commas are thousands separators.
+func parseCSVNumber(raw string, delim rune, locale bool) *float64 {
+	if !locale || (delim != ';' && delim != '\t') {
+		return parseCSVDouble(raw)
+	}
+	t := portfolios.TrimSwift(raw)
+	if t == "" {
+		return nil
+	}
+	dec := ','
+	if strings.LastIndex(t, ".") > strings.LastIndex(t, ",") {
+		dec = '.'
+	}
+	var b strings.Builder
+	for _, r := range t {
+		switch {
+		case r == dec:
+			b.WriteRune('.')
+		case r == '.' || r == ',':
+		default:
+			b.WriteRune(r)
 		}
 	}
-	return parseCSVDouble(raw)
+	if v, ok := swiftDouble(b.String()); ok {
+		return &v
+	}
+	return nil
 }
 
 // normalizeCSVHeader drops the BOM and every non-alphanumeric scalar,

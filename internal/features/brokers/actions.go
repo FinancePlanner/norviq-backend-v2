@@ -2,7 +2,6 @@ package brokers
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 
@@ -92,7 +91,7 @@ var tradeColumns = map[string]bool{"side": true, "action": true, "type": true, "
 // file that is not one: no shares column, mostly missing shares, trade
 // history (a side/action column holding buy or sell), no rows or too many.
 func (a *Actions) ParseHoldingsCSV(csv string) ([]HoldingRow, bool) {
-	items, _, table, err := parseCSVTable(csv)
+	items, _, table, err := parseCSVTable(csv, true)
 	if err != nil || len(items) == 0 || len(items) > MaxHoldingRows {
 		return nil, false
 	}
@@ -158,6 +157,13 @@ func (a *Actions) PreviewHoldings(ctx context.Context, rows []HoldingRow, listID
 // per-row (Line is the row index); a collision is reported unless
 // replaceExisting.
 func (a *Actions) CheckHoldings(ctx context.Context, rows []HoldingRow, listID, userID uuid.UUID, replaceExisting bool) ([]PreviewError, *CollisionError, error) {
+	rawList := apijson.FormatUUID(listID)
+	if _, err := requireListID(ctx, a.s.db, &rawList, userID); err != nil {
+		return nil, nil, err
+	}
+	if err := portfolios.EnsureNotFollowed(ctx, a.s.db, listID); err != nil {
+		return nil, nil, err
+	}
 	items := previewItems(rows)
 	var errs []PreviewError
 	bad := map[int]bool{}
@@ -191,8 +197,15 @@ func (a *Actions) CheckHoldings(ctx context.Context, rows []HoldingRow, listID, 
 		symbols = append(symbols, sym)
 	}
 	sort.Strings(symbols)
+	// Resolving may insert instrument rows (a search hit or a placeholder).
+	// A check must leave none behind, so it runs in a transaction that is
+	// always rolled back; the commit resolves again and keeps its rows.
+	tx, err := a.s.db.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, sym := range symbols {
-		if _, err := stocks.ResolveImportInstrument(ctx, a.s.db, a.s.search, sym); err != nil {
+		if _, err := stocks.ResolveImportInstrument(ctx, tx, a.s.search, sym); err != nil {
 			msg := importErrorMessage(err)
 			for _, it := range grouped[sym] {
 				fail(it.Line, msg)
@@ -200,25 +213,20 @@ func (a *Actions) CheckHoldings(ctx context.Context, rows []HoldingRow, listID, 
 			delete(grouped, sym)
 		}
 	}
+	if err := tx.Rollback(ctx); err != nil {
+		return nil, nil, err
+	}
 
 	// The commit increments the monthly counter once; refuse before any write
-	// when that would pass the plan's allowance.
+	// when that would pass the plan's allowance. The upgrade error is
+	// returned as is so the usual upgrade response applies.
 	if len(grouped) > 0 {
 		usage, err := a.s.entitlements.Counter(ctx, userID)
 		if err != nil {
 			return nil, nil, err
 		}
 		if err := a.s.entitlements.EnforceResourceLimit(ctx, entitlements.FeatureCSVImports, userID, int(usage.CsvImportCount), 1); err != nil {
-			var up *entitlements.UpgradeRequiredError
-			if !errors.As(err, &up) {
-				return nil, nil, err
-			}
-			for _, it := range items {
-				if !bad[it.Line] {
-					fail(it.Line, up.Reason())
-				}
-			}
-			grouped = map[string][]PreviewItem{}
+			return nil, nil, err
 		}
 	}
 
@@ -248,12 +256,13 @@ func (a *Actions) CommitHoldings(ctx context.Context, rows []HoldingRow, listID,
 	if err != nil {
 		return HoldingsCommitResult{}, err
 	}
-	if collision != nil {
-		return HoldingsCommitResult{}, collision
-	}
 	items := previewItems(rows)
 	if len(errs) > 0 {
+		// Row errors win over a collision: the user fixes those first.
 		return HoldingsCommitResult{Failed: symbolsOf(items, errs), Errors: errs}, nil
+	}
+	if collision != nil {
+		return HoldingsCommitResult{}, collision
 	}
 	raw := apijson.FormatUUID(listID)
 	resp, wrote, err := a.s.commit(ctx, items, nil, HoldingsProvider, &raw, userID, replaceExisting)
@@ -277,7 +286,7 @@ func symbolsOf(items []PreviewItem, errs []PreviewError) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, e := range errs {
-		if e.Line >= 0 && e.Line < len(items) && !seen[items[e.Line].Symbol] {
+		if e.Line >= 0 && e.Line < len(items) && items[e.Line].Symbol != "" && !seen[items[e.Line].Symbol] {
 			seen[items[e.Line].Symbol] = true
 			out = append(out, items[e.Line].Symbol)
 		}

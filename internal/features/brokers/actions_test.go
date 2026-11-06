@@ -2,9 +2,12 @@ package brokers
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
+	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 
 	"github.com/google/uuid"
@@ -91,6 +94,20 @@ func TestParseHoldingsCSVSemicolonSepLine(t *testing.T) {
 	rows, ok := a.ParseHoldingsCSV("sep=;\nSymbol;Shares;Average Cost\nASML;1,5;612,30\n")
 	if !ok || len(rows) != 1 || *rows[0].Shares != 1.5 || *rows[0].AvgPrice != 612.3 {
 		t.Fatalf("rows = %+v ok=%v", rows, ok)
+	}
+	cases := map[string]float64{"0,125": 0.125, "1.234,56": 1234.56, "1,234.56": 1234.56, "612,30": 612.3, "1,234": 1.234, "2.5": 2.5}
+	for cell, want := range cases {
+		for _, sep := range []string{";", "\t"} {
+			rows, ok := a.ParseHoldingsCSV("Symbol" + sep + "Shares\nAAPL" + sep + cell + "\n")
+			if !ok || len(rows) != 1 || *rows[0].Shares != want {
+				t.Errorf("%q (sep %q) = %+v ok=%v, want %v", cell, sep, rows, ok, want)
+			}
+		}
+	}
+	// Comma-delimited files keep treating a comma inside quotes as thousands.
+	rows, ok = a.ParseHoldingsCSV("Symbol,Shares\nAAPL,\"1,234\"\n")
+	if !ok || *rows[0].Shares != 1234 {
+		t.Errorf("comma file = %+v ok=%v", rows, ok)
 	}
 }
 
@@ -201,5 +218,104 @@ func TestCommitHoldingsSameSymbolTwoLots(t *testing.T) {
 	}
 	if n := count(t, e.app.Deps.DB, `SELECT count(*) FROM lots l JOIN accounts a ON a.id = l.account_id WHERE a.user_id = $1`, e.user); n != 2 {
 		t.Fatalf("lots = %d", n)
+	}
+}
+
+func TestCheckHoldingsWritesNoInstruments(t *testing.T) {
+	e := newActionsEnv(t)
+	before := count(t, e.app.Deps.DB, `SELECT count(*) FROM instruments`)
+	rows := []HoldingRow{{Symbol: "ZZPLAUS", Shares: fp(1), AvgPrice: fp(10)}}
+	errs, col, err := e.a.CheckHoldings(bg, rows, e.listA, e.user, false)
+	if err != nil || col != nil || len(errs) != 0 {
+		t.Fatalf("check = %+v %v %v", errs, col, err)
+	}
+	if after := count(t, e.app.Deps.DB, `SELECT count(*) FROM instruments`); after != before {
+		t.Fatalf("instruments %d -> %d", before, after)
+	}
+}
+
+func TestCheckHoldingsLimitReachedReturnsUpgradeError(t *testing.T) {
+	e := newActionsEnv(t)
+	e.instrument(t, "AAPL")
+	svc := *e.svc
+	svc.entitlements = entitlements.New(e.app.Deps.DB, entitlements.Config{})
+	e.a = &Actions{s: &svc, postCommit: e.a.postCommit}
+	if err := svc.entitlements.IncrementUsage(bg, entitlements.FeatureCSVImports, e.user, 1); err != nil {
+		t.Fatal(err)
+	}
+	rows := []HoldingRow{{Symbol: "AAPL", Shares: fp(1), AvgPrice: fp(10)}}
+	errs, col, err := e.a.CheckHoldings(bg, rows, e.listA, e.user, false)
+	var up *entitlements.UpgradeRequiredError
+	if !errors.As(err, &up) || len(errs) != 0 || col != nil {
+		t.Fatalf("check = %+v %v %v", errs, col, err)
+	}
+	if _, err := e.a.CommitHoldings(bg, rows, e.listA, e.user, false); !errors.As(err, &up) {
+		t.Fatalf("commit err = %v", err)
+	}
+	db := e.app.Deps.DB
+	if n := count(t, db, `SELECT count(*) FROM stocks WHERE user_id = $1`, e.user) +
+		count(t, db, `SELECT count(*) FROM lots l JOIN accounts a ON a.id = l.account_id WHERE a.user_id = $1`, e.user) +
+		count(t, db, `SELECT count(*) FROM broker_connections WHERE user_id = $1`, e.user); n != 0 {
+		t.Fatalf("rows written: %d", n)
+	}
+}
+
+func TestCheckHoldingsRefusesFollowedOrForeignList(t *testing.T) {
+	e := newActionsEnv(t)
+	e.instrument(t, "AAPL")
+	rows := []HoldingRow{{Symbol: "AAPL", Shares: fp(1), AvgPrice: fp(10)}}
+	db := e.app.Deps.DB
+
+	other := e.app.CreateUser("parity-brokers-test-" + uuid.NewString()[:8] + "@example.com")
+	foreign := uuid.New()
+	mustExec(t, db, `INSERT INTO portfolio_lists (id, user_id, name, created_at) VALUES ($1, $2, 'Theirs', now())`, foreign, other)
+	_, _, err := e.a.CheckHoldings(bg, rows, foreign, e.user, false)
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.StatusCode() != http.StatusNotFound {
+		t.Fatalf("foreign err = %v", err)
+	}
+
+	pilotID := uuid.New()
+	mustExec(t, db, `INSERT INTO pilots (id, kind, slug, display_name, chamber, name_aliases, active, created_at) VALUES ($1, 'politician', $2, 'P', 'house', '{"P"}', true, now())`,
+		pilotID, "p-"+pilotID.String()[:6])
+	mustExec(t, db, `INSERT INTO pilot_follows (id, user_id, pilot_id, target_kind, portfolio_list_id, status, created_at)
+		VALUES ($1, $2, $3, 'portfolio', $4, 'active', now())`, uuid.New(), e.user, pilotID, e.listB)
+	_, _, err = e.a.CheckHoldings(bg, rows, e.listB, e.user, false)
+	if !errors.As(err, &he) || he.StatusCode() != http.StatusConflict {
+		t.Fatalf("followed err = %v", err)
+	}
+	if _, err = e.a.CommitHoldings(bg, rows, e.listB, e.user, false); err == nil {
+		t.Fatal("commit into followed list succeeded")
+	}
+}
+
+func TestCheckHoldingsReturnsRowErrorsAndCollisionTogether(t *testing.T) {
+	e := newActionsEnv(t)
+	e.instrument(t, "AAPL")
+	e.instrument(t, "MSFT")
+	e.manualStock(t, "AAPL", e.listA)
+	rows := []HoldingRow{
+		{Symbol: "AAPL", Shares: fp(1), AvgPrice: fp(10)},
+		{Symbol: "MSFT", Shares: fp(1)},
+		{Symbol: "", Shares: fp(1), AvgPrice: fp(1)},
+	}
+	errs, col, err := e.a.CheckHoldings(bg, rows, e.listA, e.user, false)
+	if err != nil || len(errs) != 2 || col == nil || strings.Join(col.Symbols, ",") != "AAPL" {
+		t.Fatalf("check = %+v %+v %v", errs, col, err)
+	}
+	res, err := e.a.CommitHoldings(bg, rows, e.listA, e.user, true)
+	if err != nil || len(res.Saved) != 0 || len(res.Errors) != 2 {
+		t.Fatalf("commit = %+v %v", res, err)
+	}
+	for _, f := range res.Failed {
+		if f == "" {
+			t.Fatalf("empty symbol in Failed: %q", res.Failed)
+		}
+	}
+	if len(res.Failed) != 1 || res.Failed[0] != "MSFT" {
+		t.Fatalf("failed = %q", res.Failed)
+	}
+	if _, err := e.a.CommitHoldings(bg, rows[:1], e.listA, e.user, false); err == nil {
+		t.Fatal("collision not refused")
 	}
 }

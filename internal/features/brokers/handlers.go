@@ -3,6 +3,7 @@ package brokers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,14 +21,23 @@ import (
 	"norviq-api/internal/platform/swiftjson"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 )
 
 // handlers is BrokerController (plus AuthController.brokerIBKRCallback).
 type handlers struct {
-	s       *service
-	badges  *badges.Service
+	s *service
+	postCommit
 	consent func(c *echo.Context, userID uuid.UUID) error
+}
+
+// postCommit is what follows every holdings write, shared by the HTTP
+// handlers and Actions.
+type postCommit struct {
+	db     *pgxpool.Pool
+	logger *slog.Logger
+	badges *badges.Service
 }
 
 // screenshotMaxBody is the screenshot route's 26 MB collect cap.
@@ -40,9 +50,9 @@ const (
 )
 
 // reconcileBadges is Request.reconcileBadges.
-func (h *handlers) reconcileBadges(ctx context.Context, userID uuid.UUID) {
+func (h *postCommit) reconcileBadges(ctx context.Context, userID uuid.UUID) {
 	if _, err := h.badges.Evaluate(ctx, userID); err != nil {
-		h.s.logger.Warn("badge reconciliation failed", "user", userID.String(), "error", err)
+		h.logger.Warn("badge reconciliation failed", "user", userID.String(), "error", err)
 	}
 	achievementhooks.Schedule(userID)
 }
@@ -319,10 +329,10 @@ func (h *handlers) csvCommit(c *echo.Context) error {
 
 // afterCommit reconciles badges and, when a stock row was written (imported
 // rows are always category stock), latches the holding onboarding step.
-func (h *handlers) afterCommit(ctx context.Context, userID uuid.UUID, wrote bool) {
+func (h *postCommit) afterCommit(ctx context.Context, userID uuid.UUID, wrote bool) {
 	h.reconcileBadges(ctx, userID)
 	if wrote {
-		onboarding.StampBestEffort(ctx, h.s.db, h.s.logger, onboarding.LatchHolding, userID)
+		onboarding.StampBestEffort(ctx, h.db, h.logger, onboarding.LatchHolding, userID)
 	}
 }
 

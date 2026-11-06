@@ -13,14 +13,12 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/features/aiplatform"
-	"norviq-api/internal/features/badges"
 	"norviq-api/internal/features/market"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/server"
-	"norviq-api/internal/store/badgesdb"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -139,7 +137,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if err != nil {
 		return err
 	}
-	h := &handlers{s: s, badges: &badges.Service{Q: badgesdb.New(d.DB), Logger: d.Logger.Warn}}
+	h := &handlers{s: s, postCommit: newPostCommit(d)}
 	if f.Consent != nil {
 		h.consent = f.Consent
 	}

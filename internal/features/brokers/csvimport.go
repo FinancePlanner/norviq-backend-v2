@@ -33,9 +33,15 @@ var (
 // parseCSVPreview reads the rows of a holdings CSV; a row without a symbol is
 // an error line, every other row an item.
 func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
+	items, errs, _, err := parseCSVTable(raw)
+	return items, errs, err
+}
+
+// parseCSVTable is parseCSVPreview plus the normalised header names.
+func parseCSVTable(raw string) ([]PreviewItem, []PreviewError, csvTable, error) {
 	trimmed := portfolios.TrimSwift(raw)
 	if trimmed == "" {
-		return nil, nil, httpx.BadRequest("CSV body is empty.")
+		return nil, nil, csvTable{}, httpx.BadRequest("CSV body is empty.")
 	}
 	var lines []string
 	for _, l := range strings.FieldsFunc(trimmed, isNewline) {
@@ -44,14 +50,14 @@ func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
 		}
 	}
 	if len(lines) == 0 {
-		return nil, nil, httpx.BadRequest("CSV body is empty.")
+		return nil, nil, csvTable{}, httpx.BadRequest("CSV body is empty.")
 	}
 	idx := 0
 	if strings.HasPrefix(strings.ToLower(lines[0]), "sep=") {
 		idx = 1
 	}
 	if idx >= len(lines) {
-		return nil, nil, httpx.BadRequest("CSV must include a header row.")
+		return nil, nil, csvTable{}, httpx.BadRequest("CSV must include a header row.")
 	}
 	header := lines[idx]
 	delim := ','
@@ -67,7 +73,7 @@ func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
 	}
 	symbolIdx := aliasIndex(headers, csvSymbolAliases)
 	if symbolIdx < 0 {
-		return nil, nil, httpx.BadRequest("CSV header must include a symbol column (symbol/ticker).")
+		return nil, nil, csvTable{}, httpx.BadRequest("CSV header must include a symbol column (symbol/ticker).")
 	}
 	sharesIdx := aliasIndex(headers, csvSharesAliases)
 	priceIdx := aliasIndex(headers, csvBuyPriceAliases)
@@ -76,6 +82,7 @@ func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
 
 	items := []PreviewItem{}
 	errs := []PreviewError{}
+	table := csvTable{headers: headers}
 	for offset, line := range lines[idx+1:] {
 		lineNo := idx + 2 + offset
 		fields := splitDelimited(line, delim)
@@ -86,13 +93,40 @@ func parseCSVPreview(raw string) ([]PreviewItem, []PreviewError, error) {
 		}
 		items = append(items, PreviewItem{
 			Line: lineNo, Symbol: symbol,
-			Shares:   parseCSVDouble(fieldAt(fields, sharesIdx)),
-			BuyPrice: parseCSVDouble(fieldAt(fields, priceIdx)),
+			Shares:   parseCSVNumber(fieldAt(fields, sharesIdx), delim),
+			BuyPrice: parseCSVNumber(fieldAt(fields, priceIdx), delim),
 			BuyDate:  trimmedNonEmpty(fieldAt(fields, dateIdx)),
 			Notes:    trimmedNonEmpty(fieldAt(fields, notesIdx)),
 		})
+		table.cells = append(table.cells, fields)
 	}
-	return items, errs, nil
+	return items, errs, table, nil
+}
+
+// csvTable is the parsed grid behind the items: normalised header names and,
+// per item, its raw cells.
+type csvTable struct {
+	headers []string
+	cells   [][]string
+}
+
+// parseCSVNumber reads a cell. In a semicolon file a lone comma with one or
+// two digits after it and no dot ("1,5", "612,30") is a decimal comma; any
+// other comma is a thousands separator, as in parseCSVDouble.
+func parseCSVNumber(raw string, delim rune) *float64 {
+	if delim == ';' {
+		t := portfolios.TrimSwift(raw)
+		if i := strings.LastIndex(t, ","); i >= 0 && !strings.Contains(t, ".") && strings.Count(t, ",") == 1 {
+			if n := len(t) - i - 1; n == 1 || n == 2 {
+				t = t[:i] + "." + t[i+1:]
+				if v, ok := swiftDouble(t); ok {
+					return &v
+				}
+				return nil
+			}
+		}
+	}
+	return parseCSVDouble(raw)
 }
 
 // normalizeCSVHeader drops the BOM and every non-alphanumeric scalar,
@@ -213,13 +247,13 @@ func (s *service) csvPreviewText(ctx context.Context, csv, provider string, rawL
 	if err != nil {
 		return PreviewResponse{}, err
 	}
-	return s.preview(ctx, items, errs, provider, rawListID, userID)
+	return s.preview(ctx, items, errs, provider, rawListID, userID, nil)
 }
 
 // preview validates rows and classifies them against the user's holdings.
-func (s *service) preview(ctx context.Context, base []PreviewItem, baseErrors []PreviewError, provider string, rawListID *string, userID uuid.UUID) (PreviewResponse, error) {
+func (s *service) preview(ctx context.Context, base []PreviewItem, baseErrors []PreviewError, provider string, rawListID *string, userID uuid.UUID, scope *uuid.UUID) (PreviewResponse, error) {
 	q := s.q()
-	kinds, err := s.existingStockKinds(ctx, userID)
+	kinds, err := s.existingStockKinds(ctx, userID, scope)
 	if err != nil {
 		return PreviewResponse{}, err
 	}
@@ -267,10 +301,18 @@ func validatePreviewItem(item PreviewItem) string {
 	return ""
 }
 
-func (s *service) existingStockKinds(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
-	rows, err := s.q().UserStocks(ctx, userID)
+// existingStockKinds classifies the user's holdings by symbol; with a
+// listID only the holdings of that list count.
+func (s *service) existingStockKinds(ctx context.Context, userID uuid.UUID, listID *uuid.UUID) (map[string]string, error) {
+	all, err := s.q().UserStocks(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	rows := all[:0:0]
+	for idx := range all {
+		if listID == nil || all[idx].PortfolioListID == *listID {
+			rows = append(rows, all[idx])
+		}
 	}
 	manual, imported := map[string]bool{}, map[string]bool{}
 	for idx := range rows {
@@ -387,7 +429,7 @@ type resolvedImport struct {
 // lots and position in its own transaction. The bool reports whether any
 // holding row was written (for the onboarding latch).
 func (s *service) commit(ctx context.Context, base []PreviewItem, baseErrors []PreviewError, provider string, rawListID *string, userID uuid.UUID, confirm bool) (CommitResponse, bool, error) {
-	preview, err := s.preview(ctx, base, baseErrors, provider, rawListID, userID)
+	preview, err := s.preview(ctx, base, baseErrors, provider, rawListID, userID, nil)
 	if err != nil {
 		return CommitResponse{}, false, err
 	}

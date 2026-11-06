@@ -299,7 +299,6 @@ func TestPreferencesReportsDocumentsEnabled(t *testing.T) {
 
 // Review Focus 2: a text turn after a file turn must not offer update_holdings.
 func TestUpdateHoldingsNotOfferedOnTextTurnAfterFile(t *testing.T) {
-	t.Skip("Task 7")
 	th := newTurnHarness(t, docsOn)
 	user, conv := th.proConversation("holdings-text@example.com")
 	th.client.replies = []ai.Message{say("A holdings file.")}

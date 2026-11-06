@@ -19,9 +19,9 @@ type actionDef struct {
 	required    []string
 	destructive bool
 	readOnly    bool
-	// imageOnly tools exist only on a turn with an image: no text turn offers
+	// attachmentOnly tools exist only on a turn with a file: no text turn offers
 	// them and the public catalog leaves them out.
-	imageOnly bool
+	attachmentOnly bool
 	// alwaysConfirm proposes the tool in every mode but modeConfirmed.
 	alwaysConfirm bool
 }
@@ -246,9 +246,32 @@ var catalog = func() []actionDef {
 				"portfolio_list_id": param("string", "Portfolio to record in, if the user named one."),
 				"skipped_rows":      param("integer", "How many rows were left out."),
 			},
-			required:      []string{"trades"},
-			imageOnly:     true,
-			alwaysConfirm: true,
+			required:       []string{"trades"},
+			attachmentOnly: true,
+			alwaysConfirm:  true,
+		},
+		{
+			name: updateHoldingsToolName,
+			description: "Propose the holdings or positions listed in the attached file. The user reviews them on a card " +
+				"before anything is saved. This is record-keeping and does not place an order.",
+			properties: map[string]ai.Parameter{
+				"rows": {
+					Type: "array",
+					Items: ai.JSONSchema{
+						Properties: map[string]ai.Parameter{
+							"symbol":    param("string", "Ticker, for example AAPL."),
+							"shares":    param("number", "Shares held, greater than 0."),
+							"avg_price": param("number", "Average cost per share, only if the file shows it. Never the current price."),
+							"buy_date":  param("string", "YYYY-MM-DD, if shown."),
+						},
+						Required: []string{"symbol"},
+					},
+				},
+				"portfolio_list_id": param("string", "Portfolio to save in, if the user named one."),
+			},
+			required:       []string{"rows"},
+			attachmentOnly: true,
+			alwaysConfirm:  true,
 		},
 	}
 }()
@@ -291,7 +314,7 @@ const (
 func actionTools(mode confirmationMode) []ai.Tool {
 	out := make([]ai.Tool, 0, len(catalog))
 	for i := range catalog {
-		if !catalog[i].imageOnly {
+		if !catalog[i].attachmentOnly {
 			out = append(out, actionTool(&catalog[i], mode))
 		}
 	}
@@ -371,7 +394,7 @@ type catalogResponse struct {
 func buildCatalogResponse() catalogResponse {
 	out := make([]catalogActionSchema, 0, len(catalog))
 	for _, a := range catalog {
-		if a.imageOnly {
+		if a.attachmentOnly {
 			continue
 		}
 		props := map[string]catalogPropertySchema{}

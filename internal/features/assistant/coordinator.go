@@ -145,6 +145,11 @@ func (h *handlers) runCoordinator(ctx context.Context, requireConsent func() err
 		opt.mode, opt.images, opt.documents = modeDeferredEveryWrite, files.Images, files.Documents
 		if files.CSV != nil {
 			text := csvTextBlock(files.CSV)
+			// A CSV that is a holdings export reaches the model as a summary;
+			// the card is built from the rows parsed here.
+			if rows, ok := h.actions.brokers.ParseHoldingsCSV(string(files.CSV.Data)); ok {
+				text, opt.holdingsCSV = holdingsCSVSummary(rows), rows
+			}
 			opt.csvText = &text
 		}
 	}
@@ -280,7 +285,7 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 
 // confirm is AIAssistantTurnCoordinator.confirm: claim, execute, settle.
 //
-// A live record_trades card is refused before the claim: it saves only reviewed
+// A live record_trades or update_holdings card is refused before the claim: it saves only reviewed
 // rows, which this path doesn't have (see confirmTrades), so the card stays
 // pending. The refusal is an *httpx.Error so messaging can relay it. An unknown
 // id falls through to the claim's 404, and a finished or expired card to its 409.
@@ -289,8 +294,13 @@ func (h *handlers) confirm(ctx context.Context, actionID, userID uuid.UUID) (con
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return confirmResult{}, err
 	}
-	if err == nil && pending.ToolName == recordTradesToolName && pending.Status == statusPending && pending.ExpiresAt.After(h.now()) {
-		return confirmResult{}, httpx.Unprocessable(tradesNoBodyReason)
+	if err == nil && pending.Status == statusPending && pending.ExpiresAt.After(h.now()) {
+		switch pending.ToolName {
+		case recordTradesToolName:
+			return confirmResult{}, httpx.Unprocessable(tradesNoBodyReason)
+		case updateHoldingsToolName:
+			return confirmResult{}, httpx.Unprocessable(holdingsNoBodyReason)
+		}
 	}
 	action, auditID, err := h.claimAction(ctx, actionID, userID)
 	if err != nil {

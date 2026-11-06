@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/platform/ai"
 	"norviq-api/internal/store/assistantdb"
 
@@ -73,8 +74,11 @@ type turnOptions struct {
 	images    []ai.Image
 	documents []ai.Document
 	csvText   *string
-	client    clientContext
-	extended  bool
+	// holdingsCSV is a CSV that parsed as a holdings export. The model saw only
+	// its summary; update_holdings' card is built from these rows.
+	holdingsCSV []brokers.HoldingRow
+	client      clientContext
+	extended    bool
 }
 
 func (o turnOptions) hasFiles() bool {
@@ -215,6 +219,7 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 
 		messages = append(messages, message)
 		splitTrades := offered[recordTradesToolName] && countCalls(calls, recordTradesToolName) > 1
+		splitHoldings := offered[updateHoldingsToolName] && countCalls(calls, updateHoldingsToolName) > 1
 		for i := range calls {
 			call := &calls[i]
 			name := call.Function.Name
@@ -258,8 +263,22 @@ func (h *handlers) generate(ctx context.Context, client ai.ChatClient, userID, c
 					messages = append(messages, toolMessage(errorPayload(splitTradesError), call.ID, name))
 					continue
 				}
+				if splitHoldings {
+					h.d.Logger.Warn("ai_turn_split_update_holdings", "tool", name)
+					messages = append(messages, toolMessage(errorPayload(splitHoldingsError), call.ID, name))
+					continue
+				}
 				var proposal turnResult
-				if name == recordTradesToolName {
+				if name == updateHoldingsToolName {
+					var problem string
+					if proposal, problem, err = h.holdingsProposal(ctx, args, opt.holdingsCSV, userID, conversationID); err != nil {
+						return turnResult{}, err
+					}
+					if problem != "" {
+						messages = append(messages, toolMessage(errorPayload(problem), call.ID, name))
+						continue
+					}
+				} else if name == recordTradesToolName {
 					var problem string
 					if proposal, problem, err = h.tradesProposal(ctx, args, userID, conversationID); err != nil {
 						return turnResult{}, err

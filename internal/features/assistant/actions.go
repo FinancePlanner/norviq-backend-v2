@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"norviq-api/internal/apijson"
+	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/features/terminalpositions"
@@ -33,6 +34,7 @@ type actionHandler func(ctx context.Context, userID uuid.UUID, args actionArgs) 
 type actionServices struct {
 	expenses  *expenses.Service
 	stocks    *stocks.Actions
+	brokers   *brokers.Actions
 	watchlist *watchlist.Actions
 	terminal  *terminalpositions.Catalog
 	db        *pgxpool.Pool
@@ -50,8 +52,12 @@ func newActionServices(d *server.Deps, q *assistantdb.Queries, now func() time.T
 	if err != nil {
 		return nil, err
 	}
+	br, err := brokers.NewActions(d)
+	if err != nil {
+		return nil, err
+	}
 	return &actionServices{
-		expenses: exp, stocks: st, watchlist: watchlist.NewActions(d), terminal: terminalpositions.NewCatalog(d),
+		expenses: exp, stocks: st, brokers: br, watchlist: watchlist.NewActions(d), terminal: terminalpositions.NewCatalog(d),
 		db: d.DB, q: q, now: now, logger: d.Logger.Warn,
 	}, nil
 }
@@ -692,6 +698,8 @@ func completionCopy(name string) (string, bool) {
 	switch name {
 	case "list_watchlist", "list_transactions", "list_goals":
 		return "Done.", true
+	case updateHoldingsToolName:
+		return "Holdings saved.", true
 	case "add_expense":
 		return "Expense created.", true
 	case "update_expense":

@@ -221,13 +221,17 @@ func (h *handlers) confirmAction(c *echo.Context) error {
 		return err
 	}
 	var res confirmResult
-	if action.ToolName == recordTradesToolName {
-		// This tool alone takes a body: the rows the user reviewed.
+	if action.ToolName == recordTradesToolName || action.ToolName == updateHoldingsToolName {
+		// These tools alone take a body: the rows the user reviewed.
 		body, readErr := io.ReadAll(c.Request().Body)
 		if readErr != nil {
 			return readErr
 		}
-		res, err = h.confirmTrades(ctx, &action, s.UserID, body)
+		if action.ToolName == updateHoldingsToolName {
+			res, err = h.confirmHoldings(ctx, &action, s.UserID, body)
+		} else {
+			res, err = h.confirmTrades(ctx, &action, s.UserID, body)
+		}
 	} else {
 		res, err = h.confirm(ctx, id, s.UserID)
 	}

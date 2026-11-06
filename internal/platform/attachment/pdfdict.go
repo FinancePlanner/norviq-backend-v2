@@ -184,9 +184,15 @@ func own(v pdfVal) pdfVal {
 	return v
 }
 
+// maxKeptEntries bounds the entries one dictionary may keep. A real stream
+// or DecodeParms dictionary keeps at most a handful; more means repeated keys.
+const maxKeptEntries = 16
+
 // entries parses key/value pairs up to and including ">>". The opening "<<"
 // is already consumed. Only entries whose key satisfies keep are returned, so
-// a huge dictionary costs time but not memory; keep nil returns none.
+// a huge dictionary costs time but not memory; keep nil returns none. A
+// dictionary keeping more than maxKeptEntries is refused, so repeating a kept
+// key cannot grow memory either.
 func (l *plex) entries(keep func(key []byte) bool) ([]dictEntry, bool) {
 	var out []dictEntry
 	for {
@@ -206,6 +212,9 @@ func (l *plex) entries(keep func(key []byte) bool) ([]dictEntry, bool) {
 		kept := keep != nil && keep(key)
 		var k []byte
 		if kept {
+			if len(out) == maxKeptEntries {
+				return nil, false
+			}
 			k = append([]byte(nil), key...)
 		}
 		l.i = end

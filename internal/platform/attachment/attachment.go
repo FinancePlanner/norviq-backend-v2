@@ -7,6 +7,15 @@
 // best effort: a determined author can phrase a PDF a viewer reads differently.
 // Norviq never renders, executes or serves a PDF back; it goes only to the
 // model provider for one turn.
+//
+// Known residuals of the best-effort scan, accepted under that rule: names
+// inside literal or hex strings; /Rendition, /Sound, /Movie and /Hide
+// actions; inline images with ASCII filters. Known false refusals, the safe
+// direction: /F read as a filter key where it names a file spec; a top-level
+// syntax error refuses the whole PDF; the word "stream" right after a '>' or
+// on the line after a '%' line, inside a string or an uncompressed body. A
+// fake or missing endstream is not a residual: a stream keyword the lexer did
+// not reach is refused.
 package attachment
 
 import (

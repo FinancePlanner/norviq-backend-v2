@@ -3,6 +3,7 @@ package attachment
 import (
 	"bytes"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -96,10 +97,14 @@ func TestPDFConsumedSkipDoesNotHideNextObject(t *testing.T) {
 	pdfRefusal(t, buildPDF(1, streamObj("<< /Type /ObjStm /Filter /FlateDecode >>", huffZlib(t, evilDict), "\n")), reasonPDFScripts)
 }
 
+// Each stored block holds "endstream <<>>stream" and a zlib header, so the
+// lexer resyncs into the block and lexes the next keyword: every inflate
+// re-reads the tail, until the 2 x file-size cap on compressed bytes refuses.
 func TestPDFSubCapAdversarialIsBounded(t *testing.T) {
+	raiseBudget(t) // the budget must not mask a slow path
 	var b bytes.Buffer
 	b.WriteString("%PDF-1.7\n1 0 obj\n<< >>\nstream\n\x78\x9c")
-	blk := []byte("stream\n\x78\x9c")
+	blk := []byte("endstream <<>>stream\n\x78\x9c")
 	for range 2000 {
 		b.Write([]byte{0x00, byte(len(blk)), 0, ^byte(len(blk)), 0xff})
 		b.Write(blk)
@@ -110,13 +115,18 @@ func TestPDFSubCapAdversarialIsBounded(t *testing.T) {
 	b.WriteByte(0x06)
 	b.WriteString("\nendstream\nendobj\n%%EOF\n")
 	start := time.Now()
-	_, _ = Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
-	if d := time.Since(start); d > 500*time.Millisecond*raceSlack {
+	_, err := Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
+	d := time.Since(start)
+	wantRejection(t, err, http.StatusBadRequest, reasonPDFRead)
+	if d > 500*time.Millisecond*raceSlack {
 		t.Fatalf("took %s", d)
 	}
 }
 
+// Repeated /Filter keys are refused at the first stream (duplicate key, or a
+// nested opener the top-level dict cannot take).
 func TestPDFFilterDictDoSIsBounded(t *testing.T) {
+	raiseBudget(t)
 	for _, k := range []int{1, 5} {
 		var b bytes.Buffer
 		b.WriteString("%PDF-1.7\n")
@@ -128,8 +138,10 @@ func TestPDFFilterDictDoSIsBounded(t *testing.T) {
 		}
 		b.WriteString("\n%%EOF\n")
 		start := time.Now()
-		_ = checkPDF(b.Bytes())
-		if d := time.Since(start); d > 2*time.Second {
+		err := checkPDF(b.Bytes())
+		d := time.Since(start)
+		wantRejection(t, err, http.StatusBadRequest, reasonPDFRead)
+		if d > time.Second*raceSlack {
 			t.Fatalf("k=%d took %s", k, d)
 		}
 	}
@@ -141,10 +153,9 @@ func TestPDFTimeBudgetRefuses(t *testing.T) {
 		extra = append(extra, streamObj("<< /Filter /FlateDecode >>", huffZlib(t, strings.Repeat("harmless ", 50)), "\n"))
 	}
 	data := buildPDF(1, extra...)
+	raiseBudget(t) // a slow -race run must not refuse the clean file
 	mustPass(t, data)
-	old := pdfBudget
 	pdfBudget = time.Millisecond
-	t.Cleanup(func() { pdfBudget = old })
 	pdfRefusal(t, data, reasonPDFRead)
 }
 

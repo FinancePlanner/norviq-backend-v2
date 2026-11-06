@@ -161,6 +161,7 @@ func TestPDFClaimedFlateThatFailsToInflate(t *testing.T) {
 }
 
 func TestPDFAdversarialStreamsAreLinear(t *testing.T) {
+	raiseBudget(t)
 	var b bytes.Buffer
 	b.WriteString("%PDF-1.7\n")
 	for b.Len() < 8<<20-64 {
@@ -169,8 +170,9 @@ func TestPDFAdversarialStreamsAreLinear(t *testing.T) {
 	b.WriteString("%%EOF\n")
 	start := time.Now()
 	_, err := Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
+	d := time.Since(start)
 	wantRejection(t, err, http.StatusBadRequest, reasonPDFRead)
-	if d := time.Since(start); d > 2*time.Second {
+	if d > time.Second*raceSlack {
 		t.Fatalf("took %s", d)
 	}
 }

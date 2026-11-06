@@ -127,6 +127,7 @@ func TestPDFConsumedSkipWhenAClaimsFlate(t *testing.T) {
 // A single 8 MB dictionary is lexed in one linear pass and keeps only the few
 // keys it needs.
 func TestPDFLexerLinearOnHugeDict(t *testing.T) {
+	raiseBudget(t)
 	var b bytes.Buffer
 	b.WriteString("%PDF-1.7\n1 0 obj\n<< ")
 	for i := 0; b.Len() < MaxPDFBytes-200; i++ {
@@ -146,6 +147,7 @@ func TestPDFLexerLinearOnHugeDict(t *testing.T) {
 // Many distinct keys per stream dictionary (4 KB each) cost per-stream parse
 // time only; unique keys keep it from being refused at the first duplicate.
 func TestPDFFilterDictDoSIsBoundedUniqueKeys(t *testing.T) {
+	raiseBudget(t)
 	for _, k := range []int{1, 5} {
 		var b bytes.Buffer
 		b.WriteString("%PDF-1.7\n")
@@ -163,10 +165,11 @@ func TestPDFFilterDictDoSIsBoundedUniqueKeys(t *testing.T) {
 		b.WriteString("\n%%EOF\n")
 		start := time.Now()
 		err := checkPDF(b.Bytes())
+		d := time.Since(start)
 		if err != nil {
-			t.Logf("k=%d refused after: %v", k, time.Since(start))
+			t.Fatalf("k=%d: want pass, got %v", k, err)
 		}
-		if d := time.Since(start); d > time.Second {
+		if d > time.Second*raceSlack {
 			t.Fatalf("k=%d took %s", k, d)
 		}
 	}

@@ -108,11 +108,13 @@ func TestPDFPageCount(t *testing.T) {
 }
 
 func TestPDFDeflateBombStopsAtCap(t *testing.T) {
+	raiseBudget(t) // the ratio cap, not the budget, must stop it
 	bomb := flateStream(strings.Repeat("A", 32<<20))
+	data := buildPDF(1, bomb)
 	start := time.Now()
-	pdfRefusal(t, buildPDF(1, bomb), reasonPDFRead)
-	if time.Since(start) > time.Second {
-		t.Fatalf("bomb took %s", time.Since(start))
+	pdfRefusal(t, data, reasonPDFRead)
+	if d := time.Since(start); d > time.Second*raceSlack {
+		t.Fatalf("bomb took %s", d)
 	}
 }
 

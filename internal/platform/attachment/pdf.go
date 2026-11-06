@@ -30,10 +30,6 @@ const (
 
 	// maxPDFStreams caps the stream keywords scanned, bounding the work.
 	maxPDFStreams = 10_000
-	// maxDictLookback bounds the backward search for a stream's dictionary.
-	maxDictLookback = 4096
-	// maxDictCandidates is how many "<<" openers are tried for one dictionary.
-	maxDictCandidates = 16
 	// maxDictDepth bounds nesting while parsing a dictionary.
 	maxDictDepth = 32
 )
@@ -112,65 +108,6 @@ func checkPDF(data []byte) error {
 		return reject(reasonPDFPages, true)
 	}
 	return nil
-}
-
-// scanStreams visits every `stream` keyword once. It never trusts `endstream`
-// or the dictionary for where a stream ends or whether it is compressed: an
-// inflate is tried at every body start and zlib finds its own end. After each
-// attempt the position moves only past the keyword itself, so a stream that
-// wraps another object cannot hide it. The work is linear: each keyword costs
-// one bounded dictionary parse and one inflate, the keyword count is capped,
-// and the compressed bytes read over all attempts are capped at a multiple of
-// the file size.
-func (r *pdfRun) scanStreams() error {
-	data := r.data
-	streams, pos := 0, 0
-	for {
-		if r.expired() {
-			return errPDFBudget
-		}
-		i := bytes.Index(data[pos:], []byte("stream"))
-		if i < 0 {
-			return nil
-		}
-		i += pos
-		pos = i + len("stream")
-		if i >= 3 && string(data[i-3:i]) == "end" {
-			continue // an "endstream" keyword, not a start
-		}
-		bodyStart, ok := streamBodyStart(data, pos)
-		if !ok {
-			continue
-		}
-		if streams++; streams > maxPDFStreams {
-			return errors.New("pdf: too many streams")
-		}
-
-		spec, ok := streamSpecBefore(data, i)
-		if !ok {
-			return errors.New("pdf: uninterpretable stream dictionary")
-		}
-		err := r.inflate(data[bodyStart:])
-		switch {
-		case errors.Is(err, errPDFBomb), errors.Is(err, errPDFBudget):
-			return err
-		case r.compressed > maxCompressedFactor*len(data):
-			return errPDFBudget
-		case err != nil:
-			if spec.flate {
-				return err
-			}
-			continue // not a zlib stream: nothing to scan
-		}
-		if err := r.scanNames(r.work); err != nil {
-			return err
-		}
-		if spec.predictor != 1 {
-			if err := r.scanNames(undoPredictor(r.work, spec)); err != nil {
-				return err
-			}
-		}
-	}
 }
 
 // streamBodyStart skips the EOL after `stream`: optional spaces or tabs, then

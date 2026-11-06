@@ -37,6 +37,17 @@ type plex struct {
 	i       int
 	depth   int
 	scratch []byte
+	// sawObjStm is set when the name /ObjStm appears anywhere in what was
+	// parsed, as a key or at any depth of a value.
+	sawObjStm bool
+	// expired, when set, is polled as the lexer loops; true aborts the parse.
+	expired func() bool
+	ticks   int
+}
+
+func (l *plex) tick() bool {
+	l.ticks++
+	return l.ticks&0xff == 0 && l.expired != nil && l.expired()
 }
 
 func (l *plex) skipWS() {
@@ -90,7 +101,8 @@ func (l *plex) value() (pdfVal, bool) {
 	case c == '/':
 		name, end := readName(l.b, l.i, &l.scratch)
 		l.i = end
-		return pdfVal{kName, append([]byte(nil), name...)}, true
+		l.sawObjStm = l.sawObjStm || string(name) == "ObjStm"
+		return pdfVal{kName, name}, true // aliases scratch: callers keep a copy via own
 	case c == '(':
 		n := 1
 		l.i++
@@ -112,7 +124,7 @@ func (l *plex) value() (pdfVal, bool) {
 	case l.peek2('<', '<'):
 		l.i += 2
 		l.depth++
-		if _, ok := l.entries(); !ok {
+		if _, ok := l.entries(nil); !ok {
 			return pdfVal{}, false
 		}
 		l.depth--
@@ -129,7 +141,7 @@ func (l *plex) value() (pdfVal, bool) {
 		l.depth++
 		for {
 			l.skipWS()
-			if l.i >= len(l.b) {
+			if l.i >= len(l.b) || l.tick() {
 				return pdfVal{}, false
 			}
 			if l.b[l.i] == ']' {
@@ -164,13 +176,22 @@ func (l *plex) value() (pdfVal, bool) {
 	return pdfVal{kOther, tok}, true
 }
 
+// own returns v with its bytes copied, for values that alias the scratch.
+func own(v pdfVal) pdfVal {
+	if v.kind == kName {
+		v.raw = append([]byte(nil), v.raw...)
+	}
+	return v
+}
+
 // entries parses key/value pairs up to and including ">>". The opening "<<"
-// is already consumed.
-func (l *plex) entries() ([]dictEntry, bool) {
+// is already consumed. Only entries whose key satisfies keep are returned, so
+// a huge dictionary costs time but not memory; keep nil returns none.
+func (l *plex) entries(keep func(key []byte) bool) ([]dictEntry, bool) {
 	var out []dictEntry
 	for {
 		l.skipWS()
-		if l.i >= len(l.b) {
+		if l.i >= len(l.b) || l.tick() {
 			return nil, false
 		}
 		if l.peek2('>', '>') {
@@ -181,31 +202,50 @@ func (l *plex) entries() ([]dictEntry, bool) {
 			return nil, false
 		}
 		key, end := readName(l.b, l.i, &l.scratch)
-		key = append([]byte(nil), key...)
+		l.sawObjStm = l.sawObjStm || string(key) == "ObjStm"
+		kept := keep != nil && keep(key)
+		var k []byte
+		if kept {
+			k = append([]byte(nil), key...)
+		}
 		l.i = end
 		v, ok := l.value()
 		if !ok {
 			return nil, false
 		}
-		out = append(out, dictEntry{key, v})
+		if kept {
+			out = append(out, dictEntry{k, own(v)})
+		}
 	}
 }
 
-// parseDictExact parses src as one dictionary that spans all of src.
-func parseDictExact(src []byte) ([]dictEntry, bool) {
-	l := &plex{b: src}
+// topDict parses the dictionary at l.i, returning the kept entries.
+func (l *plex) topDict(keep func(key []byte) bool) ([]dictEntry, bool) {
 	if !l.peek2('<', '<') {
 		return nil, false
 	}
 	l.i += 2
-	es, ok := l.entries()
+	l.depth = 1
+	es, ok := l.entries(keep)
+	l.depth = 0
+	return es, ok
+}
+
+// parseDictExact parses src as one dictionary that spans all of src,
+// returning the entries whose key satisfies keep.
+func parseDictExact(src []byte, keep func(key []byte) bool) ([]dictEntry, bool) {
+	l := &plex{b: src}
+	es, ok := l.topDict(keep)
 	if !ok || l.i != len(src) {
 		return nil, false
 	}
 	return es, true
 }
 
-// arrayItems parses an array object's elements.
+// maxFilterItems bounds a /Filter or /DecodeParms array; longer is refused.
+const maxFilterItems = 64
+
+// arrayItems parses an array object's elements (at most maxFilterItems).
 func arrayItems(raw []byte) ([]pdfVal, bool) {
 	l := &plex{b: raw, i: 1}
 	var out []pdfVal
@@ -217,39 +257,15 @@ func arrayItems(raw []byte) ([]pdfVal, bool) {
 		if raw[l.i] == ']' {
 			return out, l.i+1 == len(raw)
 		}
+		if len(out) >= maxFilterItems {
+			return nil, false
+		}
 		v, ok := l.value()
 		if !ok {
 			return nil, false
 		}
-		out = append(out, v)
+		out = append(out, own(v))
 	}
-}
-
-// dictBefore finds the dictionary that ends right before the `stream` keyword
-// at kw. found is false when no ">>" precedes the keyword (nothing to
-// interpret). ok is false when ">>" does, but no dictionary that parses
-// exactly up to it starts within maxDictLookback bytes. The nearest opener
-// that parses exactly to the end wins.
-func dictBefore(data []byte, kw int) (entries []dictEntry, found, ok bool) {
-	end := kw
-	for end > 0 && isPDFSpace(data[end-1]) {
-		end--
-	}
-	if end < 2 || data[end-1] != '>' || data[end-2] != '>' {
-		return nil, false, true
-	}
-	floor := max(0, kw-maxDictLookback)
-	tried := 0
-	for k := end - 4; k >= floor && tried < maxDictCandidates; k-- {
-		if data[k] != '<' || data[k+1] != '<' {
-			continue
-		}
-		tried++
-		if es, good := parseDictExact(data[k:end]); good {
-			return es, true, true
-		}
-	}
-	return nil, true, false
 }
 
 // streamSpec is what a stream dictionary says about how to decode its body.
@@ -270,59 +286,80 @@ var (
 	}
 )
 
-// streamSpecBefore reads the filter chain and predictor parameters of the
-// stream whose keyword is at kw. ok is false when anything cannot be
-// interpreted, which the caller treats as a refusal.
-func streamSpecBefore(data []byte, kw int) (streamSpec, bool) {
-	spec := streamSpec{predictor: 1, columns: 1, colors: 1, bpc: 8}
-	entries, found, ok := dictBefore(data, kw)
-	if !ok {
-		return spec, false
+func topKey(key []byte) bool {
+	switch string(key) {
+	case "Filter", "F", "DecodeParms", "DP", "Type", "N", "First":
+		return true
 	}
-	if !found {
-		return spec, true
-	}
+	return false
+}
 
-	var filters []pdfVal
-	var parms *pdfVal
-	objStm := false
-	haveFilter := false
+func predictorKey(key []byte) bool {
+	switch string(key) {
+	case "Predictor", "Columns", "Colors", "BitsPerComponent":
+		return true
+	}
+	return false
+}
+
+// streamSpecFrom reads the filter chain and predictor parameters from a
+// stream dictionary's kept entries. objStm says the dictionary named /ObjStm
+// anywhere. ok is false when anything cannot be interpreted, which the caller
+// treats as a refusal. Both the full and the abbreviated keys are read
+// (/Filter or /F, /DecodeParms or /DP); a key given twice, or in both forms,
+// is refused.
+func streamSpecFrom(entries []dictEntry, objStm bool) (streamSpec, bool) {
+	spec := streamSpec{predictor: 1, columns: 1, colors: 1, bpc: 8}
+
+	var filterVal, parmsVal *pdfVal
+	hasN, hasFirst := false, false
 	for i, e := range entries {
 		switch string(e.key) {
-		case "Filter":
-			if haveFilter {
+		case "Filter", "F":
+			if filterVal != nil {
 				return spec, false
 			}
-			haveFilter = true
-			switch e.val.kind {
-			case kName:
-				filters = []pdfVal{e.val}
-			case kArray:
-				items, good := arrayItems(e.val.raw)
-				if !good {
+			filterVal = &entries[i].val
+		case "DecodeParms", "DP":
+			if parmsVal != nil {
+				return spec, false
+			}
+			parmsVal = &entries[i].val
+		case "Type":
+			objStm = objStm || (e.val.kind == kName && string(e.val.raw) == "ObjStm")
+		case "N":
+			hasN = true
+		case "First":
+			hasFirst = true
+		}
+	}
+	objStm = objStm || (hasN && hasFirst)
+
+	var filters []pdfVal
+	if filterVal != nil {
+		switch filterVal.kind {
+		case kName:
+			filters = []pdfVal{*filterVal}
+		case kArray:
+			items, good := arrayItems(filterVal.raw)
+			if !good {
+				return spec, false
+			}
+			for _, it := range items {
+				if it.kind != kName {
 					return spec, false
 				}
-				for _, it := range items {
-					if it.kind != kName {
-						return spec, false
-					}
-				}
-				filters = items
-			default:
-				return spec, false
 			}
-		case "DecodeParms":
-			if parms != nil {
-				return spec, false
-			}
-			switch e.val.kind {
-			case kDict, kArray, kNull:
-				parms = &entries[i].val
-			default:
-				return spec, false
-			}
-		case "Type":
-			objStm = e.val.kind == kName && string(e.val.raw) == "ObjStm"
+			filters = items
+		default:
+			return spec, false
+		}
+	}
+	if parmsVal != nil {
+		switch parmsVal.kind {
+		case kDict, kArray, kNull:
+		default:
+			return spec, false
 		}
 	}
 
@@ -340,10 +377,10 @@ func streamSpecBefore(data []byte, kw int) (streamSpec, bool) {
 			return spec, false
 		}
 	}
-	if flateIdx < 0 || parms == nil {
+	if flateIdx < 0 || parmsVal == nil {
 		return spec, true
 	}
-	good := readPredictorParms(&spec, *parms, flateIdx)
+	good := readPredictorParms(&spec, *parmsVal, flateIdx)
 	return spec, good
 }
 
@@ -369,7 +406,7 @@ func readPredictorParms(spec *streamSpec, parms pdfVal, flateIdx int) bool {
 		}
 		entry = items[flateIdx]
 	}
-	es, ok := parseDictExact(entry.raw)
+	es, ok := parseDictExact(entry.raw, predictorKey)
 	if !ok {
 		return false
 	}

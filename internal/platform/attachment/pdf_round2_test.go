@@ -111,7 +111,7 @@ func TestPDFSubCapAdversarialIsBounded(t *testing.T) {
 	b.WriteString("\nendstream\nendobj\n%%EOF\n")
 	start := time.Now()
 	_, _ = Validate([]multipartform.Part{part("a.pdf", "", b.Bytes())}, allowAll)
-	if d := time.Since(start); d > 2*time.Second {
+	if d := time.Since(start); d > 500*time.Millisecond*raceSlack {
 		t.Fatalf("took %s", d)
 	}
 }

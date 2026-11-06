@@ -63,21 +63,43 @@ func typeReason(allow Allow) string {
 	}
 }
 
-// Validate checks every file in order. Errors are *Rejection.
+// Validate checks every file. Errors are *Rejection. A first pass sniffs every
+// part and checks the counts (files, then PDFs, then CSVs), so a user who
+// attached too many files is told that before any content is judged; a second
+// pass validates each file in order.
 func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 	if len(files) > MaxFiles {
 		return nil, reject("Attach up to 3 files.", false)
 	}
-	out := make([]Attachment, 0, len(files))
+	kinds := make([]string, len(files))
 	var pdfs, csvs int
-	for _, f := range files {
-		name := ""
-		if f.Filename != nil {
-			name = *f.Filename
-		}
+	for i, f := range files {
 		sniffed := http.DetectContentType(f.Body)
 		switch {
-		case strings.HasPrefix(sniffed, "image/") && isSupportedImage(sniffed):
+		case sniffed == "application/pdf":
+			kinds[i] = "pdf"
+			pdfs++
+		case isCSVCandidate(partName(f), sniffed):
+			kinds[i] = "csv"
+			csvs++
+		case isSupportedImage(sniffed):
+			kinds[i] = "image"
+		}
+	}
+	if allow.Documents {
+		if pdfs > 1 {
+			return nil, reject("Attach one PDF at a time.", true)
+		}
+		if csvs > 1 {
+			return nil, reject("Attach one CSV at a time.", true)
+		}
+	}
+
+	out := make([]Attachment, 0, len(files))
+	for i, f := range files {
+		name := partName(f)
+		switch kinds[i] {
+		case "image":
 			if !allow.Images {
 				return nil, reject(typeReason(allow), false)
 			}
@@ -89,12 +111,9 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindImage, MediaType: mt, Data: data, Name: name})
-		case sniffed == "application/pdf":
+		case "pdf":
 			if !allow.Documents {
 				return nil, reject(typeReason(allow), true)
-			}
-			if pdfs++; pdfs > 1 {
-				return nil, reject("Attach one PDF at a time.", true)
 			}
 			if len(f.Body) > MaxPDFBytes {
 				return nil, rejectTooLarge("Each PDF must be 8 MB or smaller.", true)
@@ -103,12 +122,9 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindPDF, MediaType: "application/pdf", Data: f.Body, Name: name})
-		case isCSVCandidate(name, sniffed):
+		case "csv":
 			if !allow.Documents {
 				return nil, reject(typeReason(allow), true)
-			}
-			if csvs++; csvs > 1 {
-				return nil, reject("Attach one CSV at a time.", true)
 			}
 			if len(f.Body) > MaxCSVBytes {
 				return nil, rejectTooLarge("Each CSV must be 1 MB or smaller.", true)
@@ -125,6 +141,13 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 		}
 	}
 	return out, nil
+}
+
+func partName(f multipartform.Part) string {
+	if f.Filename == nil {
+		return ""
+	}
+	return *f.Filename
 }
 
 // isCSVCandidate is true for a .csv filename whose bytes sniff as text. NUL

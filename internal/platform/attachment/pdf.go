@@ -3,6 +3,7 @@ package attachment
 import (
 	"bytes"
 	"compress/zlib"
+	"errors"
 	"io"
 )
 
@@ -22,6 +23,11 @@ const (
 	minStreamAllowance = 64 << 10
 
 	pdfEdgeWindow = 1024
+
+	// maxPDFStreams caps the stream keywords scanned, bounding the work.
+	maxPDFStreams = 10_000
+	// maxDictLookback bounds the backward search for a stream's dictionary.
+	maxDictLookback = 4096
 )
 
 const (
@@ -38,6 +44,8 @@ var forbiddenPDFNames = map[string]bool{
 	"EmbeddedFiles": true, "RichMedia": true, "XFA": true, "SubmitForm": true,
 	"ImportData": true, "GoToE": true,
 }
+
+var errPDFBomb = errors.New("pdf: inflate cap exceeded")
 
 // pdfScan is what one pass over a chunk of PDF syntax found.
 type pdfScan struct {
@@ -56,17 +64,8 @@ func checkPDF(data []byte) error {
 
 	var res pdfScan
 	scanPDFNames(data, &res)
-
-	var total int
-	for _, s := range findStreams(data) {
-		if !hasFlate(s.dict) {
-			continue
-		}
-		inflated, ok := inflateBounded(s.body, &total)
-		if !ok {
-			return reject(reasonPDFUnreadable, true)
-		}
-		scanPDFNames(inflated, &res)
+	if err := scanStreams(data, &res); err != nil {
+		return err
 	}
 
 	switch {
@@ -80,70 +79,244 @@ func checkPDF(data []byte) error {
 	return nil
 }
 
-type pdfStream struct{ dict, body []byte }
-
-// findStreams locates `stream\r?\n ... endstream` spans and the dictionary
-// text that precedes each (back to the previous "obj" keyword).
-func findStreams(data []byte) []pdfStream {
-	var out []pdfStream
+// scanStreams finds every `stream` keyword, inflates what inflates, and scans
+// the output. It never trusts `endstream` or the dictionary to say where a
+// stream ends or whether it is compressed: zlib finds its own end, and an
+// inflate is tried at every body start. The pass is linear: the position only
+// moves forward, each stream's dictionary is looked up in a bounded window,
+// and the stream count and the inflated total are both capped.
+func scanStreams(data []byte, res *pdfScan) error {
+	var total, streams int
 	pos := 0
 	for {
 		i := bytes.Index(data[pos:], []byte("stream"))
 		if i < 0 {
-			return out
+			return nil
 		}
 		i += pos
 		pos = i + len("stream")
 		if i >= 3 && string(data[i-3:i]) == "end" {
 			continue // an "endstream" keyword, not a start
 		}
-		bodyStart := pos
-		switch {
-		case bodyStart+1 < len(data) && data[bodyStart] == '\r' && data[bodyStart+1] == '\n':
-			bodyStart += 2
-		case bodyStart < len(data) && data[bodyStart] == '\n':
-			bodyStart++
-		default:
+		bodyStart, ok := streamBodyStart(data, pos)
+		if !ok {
 			continue
 		}
-		end := bytes.Index(data[bodyStart:], []byte("endstream"))
-		if end < 0 {
-			return out
+		if streams++; streams > maxPDFStreams {
+			return reject(reasonPDFUnreadable, true)
 		}
-		end += bodyStart
-		dictStart := max(0, bytes.LastIndex(data[:i], []byte("obj")))
-		out = append(out, pdfStream{dict: data[dictStart:i], body: data[bodyStart:end]})
-		pos = end + len("endstream")
+		pos = bodyStart
+
+		dict := precedingDict(data, i)
+		spec := parseStreamDict(dict)
+		if spec.unsupported {
+			return reject(reasonPDFUnreadable, true)
+		}
+		inflated, consumed, err := inflateBounded(data[bodyStart:], &total)
+		switch {
+		case errors.Is(err, errPDFBomb):
+			return reject(reasonPDFUnreadable, true)
+		case err != nil:
+			if spec.flate {
+				return reject(reasonPDFUnreadable, true)
+			}
+			continue // not a zlib stream: nothing to scan
+		}
+		pos = bodyStart + consumed
+		scanPDFNames(inflated, res)
+		if spec.predictor != 1 {
+			scanPDFNames(undoPredictor(inflated, spec), res)
+		}
 	}
 }
 
-func hasFlate(dict []byte) bool {
-	found := false
-	forEachPDFName(dict, func(name string, _, _ int) {
-		if name == "FlateDecode" {
-			found = true
+// streamBodyStart skips the EOL after `stream`: optional spaces or tabs, then
+// CRLF, LF or a lone CR.
+func streamBodyStart(data []byte, pos int) (int, bool) {
+	for pos < len(data) && (data[pos] == ' ' || data[pos] == '\t') {
+		pos++
+	}
+	switch {
+	case pos+1 < len(data) && data[pos] == '\r' && data[pos+1] == '\n':
+		return pos + 2, true
+	case pos < len(data) && (data[pos] == '\n' || data[pos] == '\r'):
+		return pos + 1, true
+	}
+	return 0, false
+}
+
+// precedingDict returns the balanced << ... >> that ends right before the
+// stream keyword at index kw, looking back at most maxDictLookback bytes. It
+// is nil when none is found.
+func precedingDict(data []byte, kw int) []byte {
+	end := kw - 1
+	for end >= 0 && isPDFSpace(data[end]) {
+		end--
+	}
+	if end < 1 || data[end] != '>' || data[end-1] != '>' {
+		return nil
+	}
+	floor := max(0, kw-maxDictLookback)
+	depth := 0
+	for k := end; k >= floor+1; {
+		switch {
+		case data[k] == '>' && data[k-1] == '>':
+			depth++
+			k -= 2
+		case data[k] == '<' && data[k-1] == '<':
+			depth--
+			if depth == 0 {
+				return data[k-1 : end+1]
+			}
+			k -= 2
+		default:
+			k--
+		}
+	}
+	return nil
+}
+
+// streamSpec is what a stream dictionary says about how to decode its body.
+type streamSpec struct {
+	flate       bool
+	unsupported bool // a filter we cannot scan through
+	predictor   int
+	columns     int
+	colors      int
+	bpc         int
+}
+
+var (
+	flateFilters = map[string]bool{"FlateDecode": true, "Fl": true}
+	// imageFilters carry pixels, not syntax; allowed except on object streams.
+	imageFilters = map[string]bool{
+		"DCTDecode": true, "DCT": true, "JPXDecode": true,
+		"CCITTFaxDecode": true, "CCF": true, "JBIG2Decode": true,
+	}
+)
+
+// parseStreamDict reads every /Filter value and the first predictor
+// parameters. Every /Filter occurrence counts, so a decoy cannot hide the
+// real one. Any filter other than Flate or an image codec fails closed.
+func parseStreamDict(dict []byte) streamSpec {
+	spec := streamSpec{predictor: 1, columns: 1, colors: 1, bpc: 8}
+	if dict == nil {
+		return spec
+	}
+	var filters []string
+	objStm := false
+	seen := map[string]bool{}
+	forEachPDFName(dict, func(name string, _, end int) {
+		switch name {
+		case "Filter":
+			filters = append(filters, filterValue(dict[end:])...)
+		case "ObjStm":
+			objStm = true
+		case "Predictor", "Columns", "Colors", "BitsPerComponent":
+			if seen[name] {
+				return
+			}
+			seen[name] = true
+			n, ok := intAfter(dict[end:])
+			if !ok {
+				return
+			}
+			switch name {
+			case "Predictor":
+				spec.predictor = n
+			case "Columns":
+				spec.columns = n
+			case "Colors":
+				spec.colors = n
+			case "BitsPerComponent":
+				spec.bpc = n
+			}
 		}
 	})
-	return found
+	for _, f := range filters {
+		switch {
+		case flateFilters[f]:
+			spec.flate = true
+		case imageFilters[f] && !objStm:
+		default:
+			spec.unsupported = true
+		}
+	}
+	return spec
 }
 
-// inflateBounded inflates body through io.LimitReader so a bomb never
-// allocates past its cap. total accumulates across streams. ok is false when a
-// cap is hit. A corrupt stream is kept as far as it decoded: a viewer would
-// stop at the same place.
-func inflateBounded(body []byte, total *int) (out []byte, ok bool) {
-	zr, err := zlib.NewReader(bytes.NewReader(body))
+// filterValue returns the names in the value that follows /Filter: one name,
+// or an array of names.
+func filterValue(rest []byte) []string {
+	i := 0
+	for i < len(rest) && isPDFSpace(rest[i]) {
+		i++
+	}
+	if i >= len(rest) {
+		return nil
+	}
+	var out []string
+	switch rest[i] {
+	case '/':
+		forEachPDFName(rest[i:], func(name string, _, _ int) { out = append(out, name) })
+		return out[:min(len(out), 1)]
+	case '[':
+		j := bytes.IndexByte(rest[i:], ']')
+		if j < 0 {
+			j = len(rest) - i
+		}
+		forEachPDFName(rest[i:i+j], func(name string, _, _ int) { out = append(out, name) })
+	}
+	return out
+}
+
+func intAfter(rest []byte) (int, bool) {
+	i := 0
+	for i < len(rest) && isPDFSpace(rest[i]) {
+		i++
+	}
+	n, digits := 0, 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' && digits < 9 {
+		n = n*10 + int(rest[i]-'0')
+		i++
+		digits++
+	}
+	return n, digits > 0
+}
+
+// inflateBounded inflates from the start of body through io.LimitReader and
+// lets zlib find its own end. consumed is the compressed bytes read. Output is
+// bounded per stream by maxStreamRatio x consumed (floor minStreamAllowance)
+// and across streams by maxPDFInflated; either overrun is errPDFBomb. total
+// accumulates the inflated bytes. A bad Adler checksum is not an error:
+// viewers ignore it.
+func inflateBounded(body []byte, total *int) (out []byte, consumed int, err error) {
+	r := bytes.NewReader(body)
+	zr, err := zlib.NewReader(r)
 	if err != nil {
-		return nil, true
+		return nil, 0, err
 	}
 	defer zr.Close()
-	allowance := min(max(len(body)*maxStreamRatio, minStreamAllowance), maxPDFInflated-*total)
-	out, _ = io.ReadAll(io.LimitReader(zr, int64(allowance)+1))
-	if len(out) > allowance {
-		return nil, false
+	remaining := maxPDFInflated - *total
+	lr := io.LimitReader(zr, int64(remaining)+1)
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := lr.Read(buf)
+		out = append(out, buf[:n]...)
+		used := len(body) - r.Len()
+		if len(out) > remaining || len(out) > max(used*maxStreamRatio, minStreamAllowance) {
+			*total += len(out)
+			return nil, 0, errPDFBomb
+		}
+		if rerr != nil {
+			*total += len(out)
+			consumed = len(body) - r.Len()
+			if errors.Is(rerr, io.EOF) || errors.Is(rerr, zlib.ErrChecksum) {
+				return out, consumed, nil
+			}
+			return nil, 0, rerr
+		}
 	}
-	*total += len(out)
-	return out, true
 }
 
 func scanPDFNames(chunk []byte, res *pdfScan) {

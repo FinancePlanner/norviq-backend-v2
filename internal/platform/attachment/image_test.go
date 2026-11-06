@@ -211,3 +211,33 @@ func TestValidateNothingAllowedOrEmpty(t *testing.T) {
 		t.Fatalf("got %v %v", out, err)
 	}
 }
+
+func TestValidateRefuses16BitPNGOverBudget(t *testing.T) {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], 3000)
+	binary.BigEndian.PutUint32(ihdr[4:], 3000)
+	ihdr[8], ihdr[9] = 16, 6
+	data := append([]byte("\x89PNG\r\n\x1a\n"), chunk("IHDR", ihdr)...)
+	_, err := Validate([]multipartform.Part{part("a.png", "", data)}, allowAll)
+	wantRejection(t, err, http.StatusBadRequest, "This image is too large. Use a smaller one.")
+	// 2048x2048 at 16 bits is exactly on budget: past the gate (then unreadable).
+	binary.BigEndian.PutUint32(ihdr[0:], 2048)
+	binary.BigEndian.PutUint32(ihdr[4:], 2048)
+	data = append([]byte("\x89PNG\r\n\x1a\n"), chunk("IHDR", ihdr)...)
+	_, err = Validate([]multipartform.Part{part("a.png", "", data)}, allowAll)
+	wantRejection(t, err, http.StatusBadRequest, "This image couldn't be read.")
+}
+
+func progressiveJPEGHeader(w, h int) []byte {
+	b := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 0, 0} // SOI, tiny APP0
+	b = append(b, 0xFF, 0xC2, 0, 17, 8, byte(h>>8), byte(h), byte(w>>8), byte(w), 3,
+		1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0)
+	return append(b, 0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0, 3, 0, 0, 63, 0) // SOS, truncated body
+}
+
+func TestValidateRefusesProgressiveJPEGOverBudget(t *testing.T) {
+	_, err := Validate([]multipartform.Part{part("a.jpg", "", progressiveJPEGHeader(3000, 3000))}, allowAll)
+	wantRejection(t, err, http.StatusBadRequest, "This image is too large. Use a smaller one.")
+	_, err = Validate([]multipartform.Part{part("a.jpg", "", progressiveJPEGHeader(2048, 2048))}, allowAll)
+	wantRejection(t, err, http.StatusBadRequest, "This image couldn't be read.")
+}

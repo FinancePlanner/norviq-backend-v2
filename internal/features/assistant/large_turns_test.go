@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	largeBusyReason = "Too many large images right now. Try again in a moment."
+	largeBusyReason = "Too many large uploads right now. Try again in a moment."
 	// largeImage alone puts a form over the 4 MB line.
 	largeImage = 5 << 20
 )

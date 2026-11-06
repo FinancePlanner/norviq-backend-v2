@@ -255,10 +255,11 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 		}
 		return res, nil
 	}
-	if opt.hasFiles() {
-		// The refusal is about the file, not the key, so the credential is
-		// not marked as failing.
-		if failure, ok := ai.ClassifyAttachmentRejection(err, resolved.Credential, len(opt.documents) > 0 || opt.csvText != nil); ok {
+	if len(opt.images) > 0 || len(opt.documents) > 0 {
+		// The refusal is about the image or PDF, not the key, so the credential
+		// is not marked as failing. A CSV is text: it is not classified here, but
+		// it still never falls back below.
+		if failure, ok := ai.ClassifyAttachmentRejection(err, resolved.Credential, len(opt.documents) > 0); ok {
 			return turnResult{}, failure
 		}
 	}

@@ -251,7 +251,7 @@ func (h *handlers) runTurn(ctx context.Context, resolved ai.ResolvedClient, user
 	if len(opt.images) > 0 {
 		// The refusal is about the image, not the key, so the credential is
 		// not marked as failing.
-		if failure, ok := ai.ClassifyImageRejection(err, resolved.Credential); ok {
+		if failure, ok := ai.ClassifyAttachmentRejection(err, resolved.Credential, false); ok {
 			return turnResult{}, failure
 		}
 	}

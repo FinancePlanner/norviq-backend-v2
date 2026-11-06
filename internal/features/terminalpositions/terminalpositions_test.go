@@ -582,8 +582,8 @@ type scripted struct {
 func (c *scripted) Chat(_ context.Context, messages []ai.Message, _ []ai.Tool, _ string) (ai.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, m := range messages {
-		if m.Role == "user" {
+	for i := range messages {
+		if m := &messages[i]; m.Role == "user" {
 			c.users = append(c.users, m.ContentString())
 		}
 	}

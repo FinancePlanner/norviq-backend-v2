@@ -219,14 +219,15 @@ func BuildAnthropicRequest(
 
 	var systemParts []string
 	var rest []Message
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		if m.Role == "system" {
 			if text, ok := nonEmpty(m.Content); ok {
 				systemParts = append(systemParts, text)
 			}
 			continue
 		}
-		rest = append(rest, m)
+		rest = append(rest, *m)
 	}
 	if responseFormat == ResponseFormatJSON {
 		systemParts = append(systemParts, JSONInstruction)
@@ -272,11 +273,12 @@ func shouldThink(messages []Message, maxTokens int, options AnthropicOptions) bo
 	if !options.ThinkingEnabled || maxTokens < MinimumThinkingMaxTokens {
 		return false
 	}
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
 			continue
 		}
-		if _, ok := ThinkingBlocks(m); !ok {
+		if _, ok := ThinkingBlocks(*m); !ok {
 			return false
 		}
 	}
@@ -284,7 +286,8 @@ func shouldThink(messages []Message, maxTokens int, options AnthropicOptions) bo
 }
 
 func containsToolTurns(messages []Message) bool {
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		if m.Role == "tool" || (m.Role == "assistant" && len(m.ToolCalls) > 0) {
 			return true
 		}
@@ -307,12 +310,13 @@ func buildTurns(messages []Message, flattenTools, replayThinking bool) []Anthrop
 		turns = append(turns, AnthropicTurn{Content: blocks, Role: role})
 	}
 
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		switch m.Role {
 		case "assistant":
 			var blocks []json.RawMessage
 			if replayThinking {
-				if thinking, ok := ThinkingBlocks(m); ok {
+				if thinking, ok := ThinkingBlocks(*m); ok {
 					blocks = append(blocks, thinking...)
 				}
 			}
@@ -364,6 +368,9 @@ func buildTurns(messages []Message, flattenTools, replayThinking bool) []Anthrop
 
 		default:
 			var blocks []json.RawMessage
+			for _, doc := range m.Documents {
+				blocks = append(blocks, documentBlock(doc))
+			}
 			for _, img := range m.Images {
 				blocks = append(blocks, imageBlock(img))
 			}
@@ -662,4 +669,21 @@ func imageBlock(img Image) json.RawMessage {
 		Type   string `json:"type"`
 		Source source `json:"source"`
 	}{"image", source{"base64", img.MediaType, base64.StdEncoding.EncodeToString(img.Data)}})
+}
+
+// documentBlock is a Messages API base64 document block.
+func documentBlock(doc Document) json.RawMessage {
+	type source struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}
+	mediaType := doc.MediaType
+	if mediaType == "" {
+		mediaType = "application/pdf"
+	}
+	return mustJSON(struct {
+		Type   string `json:"type"`
+		Source source `json:"source"`
+	}{"document", source{"base64", mediaType, base64.StdEncoding.EncodeToString(doc.Data)}})
 }

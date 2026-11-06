@@ -31,6 +31,16 @@ type Message struct {
 	// Images ride on a user turn for one request only. They never marshal
 	// as a field: MarshalJSON turns them into the content array.
 	Images []Image `json:"-"`
+	// Documents (PDFs) ride the same way, for one request only.
+	Documents []Document `json:"-"`
+}
+
+// Document is one attached file (a PDF): raw bytes, the media type the
+// provider is told and the filename. It is never persisted or logged.
+type Document struct {
+	MediaType string
+	Data      []byte
+	Name      string
 }
 
 // Image is one attached picture: raw bytes plus the media type the provider
@@ -42,10 +52,10 @@ type Image struct {
 
 // MarshalJSON encodes as before unless the message carries images, then
 // content becomes an OpenAI multimodal array (text first, then one data URL
-// per image). It encodes without HTML escaping, like the rest of the wire.
+// per image, then one file part per document). It encodes without HTML escaping, like the rest of the wire.
 func (m Message) MarshalJSON() ([]byte, error) {
 	type plain Message
-	if len(m.Images) == 0 {
+	if len(m.Images)+len(m.Documents) == 0 {
 		return marshalNoEscape(plain(m))
 	}
 	parts := []VisionPart{}
@@ -54,6 +64,9 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}
 	for _, img := range m.Images {
 		parts = append(parts, VisionImage(img.Data, img.MediaType))
+	}
+	for _, doc := range m.Documents {
+		parts = append(parts, VisionFile(doc.Data, doc.MediaType, doc.Name))
 	}
 	return marshalNoEscape(struct {
 		plain

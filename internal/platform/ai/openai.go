@@ -254,10 +254,10 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, tools []Too
 
 func (c *OpenAIClient) completion(ctx context.Context, messages []Message, tools []Tool, responseFormat string) (Completion, error) {
 	stripped := make([]Message, len(messages))
-	for i, m := range messages {
+	for i := range messages {
 		// A transcript that went through the Anthropic rung carries its
 		// thinking blocks; they mean nothing to this provider.
-		stripped[i] = m.WithoutAnthropicReasoning()
+		stripped[i] = messages[i].WithoutAnthropicReasoning()
 	}
 	temperature := 0.3
 	maxTokens := c.MaxTokens

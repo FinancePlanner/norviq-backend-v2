@@ -382,7 +382,7 @@ func resolveCredentialBaseURL(row *Credential) (string, error) {
 // UserCredentialFailure is AIUserCredentialFailure: the user's own key
 // failed mid-turn, as distinct from Norviq's AI being down.
 type UserCredentialFailure struct {
-	Kind         string // "rejected" | "rate_limited" | "unreachable" | "image_unsupported" | "image_not_accepted"
+	Kind         string // "rejected" | "rate_limited" | "unreachable" | "image_unsupported" | "image_not_accepted" | "document_unsupported" | "document_not_accepted"
 	Provider     string
 	CredentialID uuid.UUID
 }
@@ -406,6 +406,10 @@ func (f *UserCredentialFailure) UserFacingMessage() string {
 		return "Your " + f.Provider + " model can't read images. Try without the image, or change the model in Settings → AI providers."
 	case "image_not_accepted":
 		return "Your " + f.Provider + " model didn't accept this image. It may not read images, or its name or base URL may be wrong. Try without the image, or check Settings → AI providers."
+	case "document_unsupported":
+		return "Your " + f.Provider + " model can't read PDFs. Try without the file, or change the model in Settings → AI providers."
+	case "document_not_accepted":
+		return "Your " + f.Provider + " model didn't accept this PDF. It may not read PDFs, or its name or base URL may be wrong. Try without the file, or check Settings → AI providers."
 	}
 	return "Could not reach " + f.Provider + " with your key. Try again shortly."
 }
@@ -419,6 +423,8 @@ func (f *UserCredentialFailure) ErrorCode() string {
 		return "user_credential_rate_limited"
 	case "image_unsupported", "image_not_accepted":
 		return "user_credential_image_unsupported"
+	case "document_unsupported", "document_not_accepted":
+		return "user_credential_document_unsupported"
 	}
 	return "user_credential_unreachable"
 }
@@ -440,21 +446,26 @@ func ClassifyCredentialFailure(err error, cred *Credential) (*UserCredentialFail
 	return &UserCredentialFailure{Kind: kind, Provider: cred.Provider, CredentialID: cred.ID}, true
 }
 
-// ClassifyImageRejection maps a 400, 415 or 422 on a turn that carried an
-// image on the user's own key: the model cannot read images. A 404 is what
-// OpenRouter answers on a text-only model ("No endpoints found that support
-// image input"), but also what a wrong base URL or model name gets, so it has
-// its own copy. ok is false for any other error, which passes through.
-func ClassifyImageRejection(err error, cred *Credential) (*UserCredentialFailure, bool) {
+// ClassifyAttachmentRejection maps a 400, 415 or 422 on a turn that carried
+// an image (or, with hasDocument, a PDF) on the user's own key: the model
+// cannot read it. A 404 is what OpenRouter answers on a text-only model ("No
+// endpoints found that support image input"), but also what a wrong base URL
+// or model name gets, so it has its own copy. ok is false for any other
+// error, which passes through.
+func ClassifyAttachmentRejection(err error, cred *Credential, hasDocument bool) (*UserCredentialFailure, bool) {
 	up, ok := AsUpstream(err)
 	if !ok || cred == nil {
 		return nil, false
 	}
+	unsupported, notAccepted := "image_unsupported", "image_not_accepted"
+	if hasDocument {
+		unsupported, notAccepted = "document_unsupported", "document_not_accepted"
+	}
 	switch up.Status {
 	case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
-		return &UserCredentialFailure{Kind: "image_unsupported", Provider: cred.Provider, CredentialID: cred.ID}, true
+		return &UserCredentialFailure{Kind: unsupported, Provider: cred.Provider, CredentialID: cred.ID}, true
 	case http.StatusNotFound:
-		return &UserCredentialFailure{Kind: "image_not_accepted", Provider: cred.Provider, CredentialID: cred.ID}, true
+		return &UserCredentialFailure{Kind: notAccepted, Provider: cred.Provider, CredentialID: cred.ID}, true
 	}
 	return nil, false
 }

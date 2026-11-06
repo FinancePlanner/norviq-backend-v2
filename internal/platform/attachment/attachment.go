@@ -69,6 +69,7 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 		return nil, reject("Attach up to 3 files.", false)
 	}
 	out := make([]Attachment, 0, len(files))
+	var pdfs int
 	for _, f := range files {
 		name := ""
 		if f.Filename != nil {
@@ -88,6 +89,20 @@ func Validate(files []multipartform.Part, allow Allow) ([]Attachment, error) {
 				return nil, err
 			}
 			out = append(out, Attachment{Kind: KindImage, MediaType: mt, Data: data, Name: name})
+		case sniffed == "application/pdf":
+			if !allow.Documents {
+				return nil, reject(typeReason(allow), true)
+			}
+			if pdfs++; pdfs > 1 {
+				return nil, reject("Attach one PDF at a time.", true)
+			}
+			if len(f.Body) > MaxPDFBytes {
+				return nil, rejectTooLarge("Each PDF must be 8 MB or smaller.", true)
+			}
+			if err := checkPDF(f.Body); err != nil {
+				return nil, err
+			}
+			out = append(out, Attachment{Kind: KindPDF, MediaType: "application/pdf", Data: f.Body, Name: name})
 		default:
 			// Not an image: a refusal here is a document refusal when documents
 			// are off, since the file was not an image either way.

@@ -27,7 +27,7 @@ const addNVDA = `{"symbol":"NVDA","shares":100,"buy_price":1,"buy_date":"2024-01
 func (h *tradesHarness) imageReply(text string) {
 	h.T.Helper()
 	h.client.replies = []ai.Message{say(text)}
-	if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "what is this", fakePNG(64)); r.Status != 200 {
+	if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "what is this", fakePNG(256)); r.Status != 200 {
 		h.T.Fatalf("image turn = %d %s", r.Status, r.Body)
 	}
 }
@@ -232,7 +232,7 @@ func TestTelegramSentencesLeaveACardAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.client.replies = []ai.Message{callTool("c1", "delete_position", `{"id":"`+stockID+`"}`)}
-	r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "what is this", fakePNG(64))
+	r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "what is this", fakePNG(256))
 	var turn turnResponse
 	r.JSON(t, &turn)
 	if turn.PendingAction == nil || turn.PendingAction.ToolName != "delete_position" {
@@ -283,7 +283,7 @@ func TestSecondRecordTradesCallInARoundGoesBackToTheModel(t *testing.T) {
 			twoCalls(tradeCall("c1", first), tradeCall("c2", second)),
 			callTool("c3", recordTradesToolName, both),
 		}
-		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(64))
+		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(256))
 		var turn turnResponse
 		r.JSON(t, &turn)
 		if r.Status != 200 || turn.Kind != "confirmation_required" || turn.PendingAction == nil {
@@ -314,7 +314,7 @@ func TestSecondRecordTradesCallInARoundGoesBackToTheModel(t *testing.T) {
 	t.Run("then gives up", func(t *testing.T) {
 		h := newTradesHarness(t)
 		h.client.replies = []ai.Message{twoCalls(tradeCall("c1", first), tradeCall("c2", second)), say("Please crop it.")}
-		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(64))
+		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(256))
 		var turn turnResponse
 		r.JSON(t, &turn)
 		if turn.Kind != "message" || turn.PendingAction != nil || h.pendingCards() != 0 {
@@ -327,7 +327,7 @@ func TestSecondRecordTradesCallInARoundGoesBackToTheModel(t *testing.T) {
 		h := newTradesHarness(t)
 		goal := ai.ToolCall{ID: "c3", Type: "function", Function: ai.FunctionCall{Name: "add_goal", Arguments: `{"title":"Trip"}`}}
 		h.client.replies = []ai.Message{twoCalls(goal, tradeCall("c1", first), tradeCall("c2", second)), say("Please crop it.")}
-		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(64))
+		r := h.DoMultipart(path(h), h.token, "record these", fakePNG(256))
 		var turn turnResponse
 		r.JSON(t, &turn)
 		if turn.Kind != "message" || turn.PendingAction != nil || h.pendingCards() != 0 {
@@ -358,7 +358,7 @@ func TestEveryTurnIsToldOnlySaveSavesTrades(t *testing.T) {
 	if r := th.Do("POST", path, th.Token(user), map[string]any{"content": "hello"}); r.Status != 200 {
 		t.Fatalf("text turn = %d %s", r.Status, r.Body)
 	}
-	if r := th.DoMultipart(path, th.Token(user), "x", fakePNG(64)); r.Status != 200 {
+	if r := th.DoMultipart(path, th.Token(user), "x", fakePNG(256)); r.Status != 200 {
 		t.Fatalf("image turn = %d %s", r.Status, r.Body)
 	}
 	for i, seen := range th.client.seen {
@@ -377,7 +377,7 @@ func TestStreamConsentRefusalFrame(t *testing.T) {
 	for name, r := range map[string]func() []byte{
 		"text": func() []byte { return th.Do("POST", path, th.Token(user), map[string]any{"content": "hello"}).Body },
 		"image": func() []byte {
-			return th.DoMultipart(path, th.Token(user), "x", fakePNG(64)).Body
+			return th.DoMultipart(path, th.Token(user), "x", fakePNG(256)).Body
 		},
 	} {
 		frames := parseFrames(t, r())
@@ -405,7 +405,7 @@ func TestStreamScopedImageRefusalFrame(t *testing.T) {
 	th := newTurnHarness(t, imagesOn, func(d *server.Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
 	user, conv := th.proConversation("scoped-frame@example.com")
 	pat := th.pat(user, "assistant:write", "assistant:read")
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", pat, "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", pat, "x", fakePNG(256))
 	frames := parseFrames(t, r.Body)
 	if events(frames) != "started,error,done" {
 		t.Fatalf("frames = %+v", frames)
@@ -461,7 +461,7 @@ func TestLookupInputCapOnImageAndTaintedTurns(t *testing.T) {
 			}
 			image := func(letter string, n int) string {
 				h.client.replies = []ai.Message{lookup(letter, n), say("ok")}
-				if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "x", fakePNG(64)); r.Status != 200 {
+				if r := h.DoMultipart("/v1/ai/assistant/conversations/"+h.conv+"/chat", h.token, "x", fakePNG(256)); r.Status != 200 {
 					t.Fatalf("image turn = %d %s", r.Status, r.Body)
 				}
 				return toolReply()
@@ -543,7 +543,7 @@ func TestImageTurnNeverGetsExtendedTools(t *testing.T) {
 	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
 
 	// Everything else that gate asks for is met: a text turn would get them.
-	contentType, form := imageForm(t, `{"screen":"home"}`, fakePNG(64))
+	contentType, form := imageForm(t, `{"screen":"home"}`, fakePNG(256))
 	th.client.replies = []ai.Message{callTool("c1", "get_financial_goals", `{}`), say("Done.")}
 	if r := th.doRaw(path, th.Token(user), contentType, form); r.Status != 200 {
 		t.Fatalf("image turn = %d %s", r.Status, r.Body)
@@ -622,7 +622,7 @@ func TestImageTurnContextField(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("image-context@example.com")
 	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
-	img := fakePNG(64)
+	img := fakePNG(256)
 	send := func(context string, images ...[]byte) *testutil.Response {
 		t.Helper()
 		contentType, form := imageForm(t, context, images...)
@@ -640,7 +640,7 @@ func TestImageTurnContextField(t *testing.T) {
 				t.Fatalf("missing %q: %q", wanted, prompt)
 			}
 		}
-		if !strings.HasSuffix(prompt, imageTurnPrompt) {
+		if !strings.HasSuffix(prompt, attachmentTurnPrompt(false)) {
 			t.Fatalf("image rules aren't last: %q", prompt)
 		}
 	})
@@ -651,7 +651,7 @@ func TestImageTurnContextField(t *testing.T) {
 		if r := send(`{"screen":"`+hostile+`","locale":"`+hostile+`","timeZone":"`+hostile+`","inputMode":"`+hostile+`"}`, img); r.Status != 200 {
 			t.Fatalf("turn = %d %s", r.Status, r.Body)
 		}
-		if prompt := th.lastSystemPrompt(); strings.Contains(prompt, hostile) || !strings.HasSuffix(prompt, imageTurnPrompt) {
+		if prompt := th.lastSystemPrompt(); strings.Contains(prompt, hostile) || !strings.HasSuffix(prompt, attachmentTurnPrompt(false)) {
 			t.Fatalf("prompt = %q", prompt)
 		}
 	})
@@ -669,8 +669,8 @@ func TestImageTurnContextField(t *testing.T) {
 		t.Run(name+" doesn't change a rejection", func(t *testing.T) {
 			calls := th.client.calls()
 			for reason, images := range map[string][][]byte{
-				"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("%PDF-1.7 not an image")},
-				"Attach up to 3 images.":                             {img, img, img, img},
+				"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("<html>not an image</html>")},
+				"Attach up to 3 files.":                              {img, img, img, img},
 			} {
 				r := send(context, images...)
 				if r.Status != 400 || !strings.Contains(string(r.Body), reason) || !strings.Contains(string(r.Body), codeImageRejected) {
@@ -689,7 +689,7 @@ func TestImageTurnContextField(t *testing.T) {
 func TestStreamImagesOffIsNotAMissingConversation(t *testing.T) {
 	th := newTurnHarness(t, nil)
 	user, conv := th.proConversation("images-off@example.com")
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(256))
 	frames := parseFrames(t, r.Body)
 	if events(frames) != "started,error,done" || !strings.Contains(frames[1].data, `"code":"`+codeImageRejected+`"`) {
 		t.Fatalf("frames = %+v", frames)

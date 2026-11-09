@@ -117,17 +117,21 @@ func chatToolDefinitions(mode confirmationMode) []ai.Tool {
 	return append(readToolDefinitions(), actionTools(mode)...)
 }
 
-// imageTurnTools is what a turn with an image may call: the text-turn tools
-// plus record_trades, less the single-trade writes, so a trade read from an
-// image can only reach the user as a reviewed card, and less lookup_share_facts,
+// attachmentTurnTools is what a turn with a file may call: the text-turn tools
+// plus record_trades, less the single-trade writes, so a trade read from a
+// file can only reach the user as a reviewed card, and less lookup_share_facts,
 // an LLM and web-search call with unwrapped output that reading a screenshot
-// doesn't need.
-func imageTurnTools() []ai.Tool {
+// doesn't need. update_holdings is offered only with documents on.
+func attachmentTurnTools(documentsEnabled bool) []ai.Tool {
 	out := readToolDefinitions()
 	for i := range catalog {
 		switch catalog[i].name {
 		case "record_trade", "add_position", "sell_position", "lookup_share_facts":
 			continue
+		case updateHoldingsToolName:
+			if !documentsEnabled {
+				continue
+			}
 		}
 		out = append(out, actionTool(&catalog[i], modeDeferredEveryWrite))
 	}

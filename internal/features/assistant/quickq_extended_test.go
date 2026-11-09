@@ -144,7 +144,7 @@ func TestTelegramCoordinatorPathNeverGetsExtendedTools(t *testing.T) {
 	}
 	th.client.replies = []ai.Message{say("Hi.")}
 	// messaging.go passes the zero clientContext.
-	if _, err := th.h.runCoordinator(context.Background(), func() error { return nil }, user, conv, "hello", nil, false, clientContext{}, nil); err != nil {
+	if _, err := th.h.runCoordinator(context.Background(), func() error { return nil }, user, conv, "hello", turnFiles{}, false, clientContext{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertExtended(t, th, false)

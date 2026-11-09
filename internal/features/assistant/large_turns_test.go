@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"norviq-api/internal/platform/ai"
+	"norviq-api/internal/platform/attachment"
 	"norviq-api/internal/testutil"
 
 	"github.com/labstack/echo/v5"
@@ -21,7 +22,7 @@ import (
 )
 
 const (
-	largeBusyReason = "Too many large images right now. Try again in a moment."
+	largeBusyReason = "Too many large uploads right now. Try again in a moment."
 	// largeImage alone puts a form over the 4 MB line.
 	largeImage = 5 << 20
 )
@@ -46,15 +47,20 @@ type turnReply struct {
 
 func newLargeTurnRig(t *testing.T) *largeTurnRig {
 	t.Helper()
-	th := newTurnHarness(t, imagesOn)
+	return newLargeTurnRigWith(t, imagesOn)
+}
+
+func newLargeTurnRigWith(t *testing.T, env map[string]string) *largeTurnRig {
+	t.Helper()
+	th := newTurnHarness(t, env)
 	user, conv := th.proConversation("large@example.com")
 	r := &largeTurnRig{turnHarness: th, token: th.Token(user), conv: conv, entered: make(chan struct{})}
-	r.contentType, r.form = th.multipartForm("x", fakePNG(largeImage))
+	r.contentType, r.form = th.multipartForm(parkedTurnText, fakePNG(largeImage))
 	th.client.before = func(ctx context.Context, messages []ai.Message) error {
 		r.mu.Lock()
 		gate := r.gate
 		r.mu.Unlock()
-		if gate == nil || imageBytes(messages) < 4<<20 {
+		if gate == nil || !parkedTurn(messages) {
 			return nil
 		}
 		select {
@@ -74,14 +80,13 @@ func newLargeTurnRig(t *testing.T) *largeTurnRig {
 	return r
 }
 
-func imageBytes(messages []ai.Message) int {
-	n := 0
-	for i := range messages {
-		for j := range messages[i].Images {
-			n += len(messages[i].Images[j].Data)
-		}
-	}
-	return n
+// parkedTurnText marks the rig's own large turns. The gate re-encodes every
+// image, so a form's size no longer shows in what the model receives.
+const parkedTurnText = "park"
+
+func parkedTurn(messages []ai.Message) bool {
+	last := lastMessage(messages)
+	return last.Role == "user" && last.Content != nil && strings.HasPrefix(*last.Content, parkedTurnText)
 }
 
 func (r *largeTurnRig) open() {
@@ -221,11 +226,11 @@ func TestLargeTurnsTakeASlotAndAThirdIsRefused(t *testing.T) {
 		t.Fatalf("stream refusal carried frames: %s", stream.body)
 	}
 	// No Content-Length, whatever it turns out to hold.
-	smallType, smallForm := r.multipartForm("x", fakePNG(64))
+	smallType, smallForm := r.multipartForm("x", fakePNG(256))
 	refusedBusy(t, "no Content-Length", r.post(ctx, "chat", smallType, chunked(smallForm)))
 
 	// The line is over 4 MB, so exactly 4 MB takes no slot.
-	overhead := len(smallForm) - 64
+	overhead := len(smallForm) - 256
 	exactType, exact := r.multipartForm("x", fakePNG(4<<20-overhead))
 	if len(exact) != 4<<20 {
 		t.Fatalf("form = %d bytes", len(exact))
@@ -315,7 +320,7 @@ func TestLargeTurnSlotsFreeWhenTheClientDrops(t *testing.T) {
 		spy := &limiterSpy{}
 		r.Deps.Limiter.Redis = spy
 		r.script(50)
-		smallType, smallForm := r.multipartForm("x", fakePNG(64))
+		smallType, smallForm := r.multipartForm("x", fakePNG(256))
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		var wg sync.WaitGroup
@@ -398,23 +403,61 @@ func TestOversizedJSONTurnIs413WithImagesOn(t *testing.T) {
 // The raw form goes as soon as it is parsed; the images are their own copies.
 func TestParseTurnBodyDropsTheRawForm(t *testing.T) {
 	th := &turnHarness{App: &testutil.App{T: t}}
-	img := fakePNG(64)
+	img := fakePNG(256)
 	contentType, form := th.multipartForm("hello", img)
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", bytes.NewReader(form))
 	req.Header.Set("Content-Type", contentType)
 	c := echo.New().NewContext(req, httptest.NewRecorder())
 
-	content, images, _, err := parseTurnBody(c)
+	allow := attachment.Allow{Images: true}
+	body, err := parseTurnBody(c, allow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	content := body.content
 	if req.Body != http.NoBody {
 		t.Fatalf("request still holds the form: %T", req.Body)
 	}
 	for i := range form {
 		form[i] = 0
 	}
-	if content != "hello" || len(images) != 1 || !bytes.Equal(images[0].Data, img) {
+	files, err := turnAttachments(body.parts, allow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images := files.Images
+	if content != "hello" || len(images) != 1 || !bytes.Equal(images[0].Data, pngCore) {
 		t.Fatalf("content %q, %d images", content, len(images))
+	}
+}
+
+// A PDF can be 8 MB and the slot is taken before the body is read, so with
+// documents on a 2 MB turn takes one; with them off it is below the 4 MB line.
+func TestDocumentsEnabledLowersLargeTurnThreshold(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env    map[string]string
+		status int
+	}{
+		"documents on":  {docsOn, http.StatusServiceUnavailable},
+		"documents off": {imagesOn, http.StatusOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newLargeTurnRigWith(t, tc.env)
+			r.script(10)
+			finish := r.occupy()
+			contentType, form := r.multipartForm("x", fakePNG(2<<20))
+			got := r.post(context.Background(), "chat", contentType, bytes.NewReader(form))
+			if got.err != nil || got.status != tc.status {
+				t.Fatalf("2 MB turn = %d %v %s", got.status, got.err, got.body)
+			}
+			if tc.status == http.StatusServiceUnavailable {
+				refusedBusy(t, "2 MB turn", got)
+			}
+			for i, done := range finish() {
+				if done.err != nil || done.status != 200 {
+					t.Fatalf("parked turn %d = %d %v %s", i, done.status, done.err, done.body)
+				}
+			}
+		})
 	}
 }

@@ -101,10 +101,10 @@ func TestProviderErrorLogNeverContainsImageData(t *testing.T) {
 	}
 }
 
-func TestClassifyImageRejection(t *testing.T) {
+func TestClassifyAttachmentRejection(t *testing.T) {
 	cred := &Credential{ID: uuid.New(), Provider: "openai"}
 	for _, status := range []int{400, 415, 422} {
-		f, ok := ClassifyImageRejection(&UpstreamError{Status: status}, cred)
+		f, ok := ClassifyAttachmentRejection(&UpstreamError{Status: status}, cred, false)
 		if !ok || f.Kind != "image_unsupported" || f.CredentialID != cred.ID {
 			t.Fatalf("status %d: %#v %v", status, f, ok)
 		}
@@ -113,18 +113,18 @@ func TestClassifyImageRejection(t *testing.T) {
 	}
 	// OpenRouter's answer on a text-only model, which is also what a wrong
 	// base URL or model name looks like, so the copy can't claim to know.
-	f, ok := ClassifyImageRejection(&UpstreamError{Status: 404}, cred)
+	f, ok := ClassifyAttachmentRejection(&UpstreamError{Status: 404}, cred, false)
 	if !ok || f.Kind != "image_not_accepted" {
 		t.Fatalf("404: %#v %v", f, ok)
 	}
 	eq(t, f.UserFacingMessage(), "Your openai model didn't accept this image. It may not read images, or its name or base URL may be wrong. Try without the image, or check Settings → AI providers.")
 	eq(t, f.ErrorCode(), "user_credential_image_unsupported")
 	for _, status := range []int{401, 429, 500} {
-		if _, ok := ClassifyImageRejection(&UpstreamError{Status: status}, cred); ok {
+		if _, ok := ClassifyAttachmentRejection(&UpstreamError{Status: status}, cred, false); ok {
 			t.Fatalf("status %d should not classify", status)
 		}
 	}
-	if _, ok := ClassifyImageRejection(&UpstreamError{Status: 400}, nil); ok {
+	if _, ok := ClassifyAttachmentRejection(&UpstreamError{Status: 400}, nil, false); ok {
 		t.Fatal("nil credential should not classify")
 	}
 }
@@ -175,5 +175,63 @@ func TestExcludeFreeRungs(t *testing.T) {
 	anth := &AnthropicClient{Model: "claude-haiku-5-5"}
 	if ExcludeFreeRungs(anth) != ChatClient(anth) {
 		t.Fatal("anthropic client should pass through")
+	}
+}
+
+var tinyPDF = Document{MediaType: "application/pdf", Data: []byte("%PDF"), Name: "s.pdf"}
+
+func TestMessageMarshalWithDocumentUsesFilePart(t *testing.T) {
+	m := Text("user", "hi")
+	m.Images = []Image{tinyPNG}
+	m.Documents = []Document{tinyPDF}
+	eq(t, marshalString(t, m), `{"role":"user","content":[{"type":"text","text":"hi"},`+
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,AQI="}},`+
+		`{"type":"file","file":{"filename":"s.pdf","file_data":"data:application/pdf;base64,JVBERg=="}}]}`)
+}
+
+func TestMessageWithoutAttachmentsUnchanged(t *testing.T) {
+	eq(t, marshalString(t, Text("user", "hi")), `{"role":"user","content":"hi"}`)
+}
+
+func TestBuildTurnsPutsDocumentBlockFirst(t *testing.T) {
+	m := Text("user", "summarize")
+	m.Images = []Image{tinyPNG}
+	m.Documents = []Document{tinyPDF}
+	req := build([]Message{m}, nil, "", 4096, thinkingOn)
+	turns := req.Messages
+	eq(t, len(turns), 1)
+	eq(t, blockTypes(turns[0]), []string{"document", "image", "text"})
+	eq(t, string(turns[0].Content[0]), `{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERg=="}}`)
+	body := encoded(t, req)
+	for _, key := range []string{`"temperature"`, `"top_p"`, `"top_k"`} {
+		if strings.Contains(body, key) {
+			t.Fatalf("request carries %s: %s", key, body)
+		}
+	}
+}
+
+func TestClassifyAttachmentRejectionDocument(t *testing.T) {
+	cred := &Credential{ID: uuid.New(), Provider: "openai"}
+	for _, status := range []int{400, 415, 422} {
+		f, ok := ClassifyAttachmentRejection(&UpstreamError{Status: status}, cred, true)
+		if !ok || f.Kind != "document_unsupported" {
+			t.Fatalf("status %d: %#v %v", status, f, ok)
+		}
+		eq(t, f.UserFacingMessage(), "Your openai model can't read PDFs. Try without the file, or change the model in Settings → AI providers.")
+		eq(t, f.ErrorCode(), "user_credential_document_unsupported")
+	}
+	f, ok := ClassifyAttachmentRejection(&UpstreamError{Status: 404}, cred, true)
+	if !ok || f.Kind != "document_not_accepted" {
+		t.Fatalf("404: %#v %v", f, ok)
+	}
+	eq(t, f.UserFacingMessage(), "Your openai model didn't accept this PDF. It may not read PDFs, or its name or base URL may be wrong. Try without the file, or check Settings → AI providers.")
+	eq(t, f.ErrorCode(), "user_credential_document_unsupported")
+	for _, status := range []int{401, 429, 500} {
+		if _, ok := ClassifyAttachmentRejection(&UpstreamError{Status: status}, cred, true); ok {
+			t.Fatalf("status %d should not classify", status)
+		}
+	}
+	if _, ok := ClassifyAttachmentRejection(&UpstreamError{Status: 400}, nil, true); ok {
+		t.Fatal("nil credential should not classify")
 	}
 }

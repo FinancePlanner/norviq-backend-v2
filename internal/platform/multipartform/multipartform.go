@@ -81,10 +81,10 @@ func CanonicalFieldName(raw string) string {
 	return raw
 }
 
-// ImageFiles is MultipartFormParser's file list: parts named file, image or
+// Files is MultipartFormParser's file list: parts named file, image or
 // files (canonicalized) that carry a filename. A part without a
 // Content-Type is application/octet-stream.
-func ImageFiles(parts []Part) []Part {
+func Files(parts []Part) []Part {
 	var out []Part
 	for _, p := range parts {
 		if ImageFieldNames[CanonicalFieldName(p.Name)] && p.Filename != nil {

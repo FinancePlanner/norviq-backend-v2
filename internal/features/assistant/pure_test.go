@@ -196,7 +196,7 @@ func TestSummaryCopy(t *testing.T) {
 		t.Fatal("completion copy")
 	}
 	for i := range catalog {
-		if _, ok := summaryCopy(catalog[i].name, actionArgs{}); !ok && catalog[i].name != recordTradesToolName {
+		if _, ok := summaryCopy(catalog[i].name, actionArgs{}); !ok && catalog[i].name != recordTradesToolName && catalog[i].name != updateHoldingsToolName {
 			t.Errorf("%s has no summary copy", catalog[i].name)
 		}
 		if _, ok := completionCopy(catalog[i].name); !ok {

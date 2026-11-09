@@ -405,7 +405,7 @@ func (m *messenger) assistantTurn(ctx context.Context, in telegram.InboundMessag
 		return telegram.Outbound{}, err
 	}
 
-	outcome, err := m.h.runCoordinator(ctx, strict, userID, conversationID, text, nil, false, clientContext{}, nil)
+	outcome, err := m.h.runCoordinator(ctx, strict, userID, conversationID, text, turnFiles{}, false, clientContext{}, nil)
 	if err != nil {
 		reason, isAbort := abortReason(err)
 		if !isAbort {
@@ -530,7 +530,7 @@ func parseSwiftUUID(s string) (uuid.UUID, bool) {
 }
 
 // latestPendingAction is the card a typed yes or no answers: the newest one, or
-// none when the newest is record_trades. That card saves only reviewed rows,
+// none when the newest is record_trades or update_holdings. That card saves only reviewed rows,
 // which free text can't carry, and it must not let the words reach past it to an
 // older card the user is no longer looking at.
 func (m *messenger) latestPendingAction(ctx context.Context, userID, conversationID uuid.UUID) (*uuid.UUID, error) {
@@ -543,7 +543,7 @@ func (m *messenger) latestPendingAction(ctx context.Context, userID, conversatio
 	if err != nil {
 		return nil, err
 	}
-	if latest.ToolName == recordTradesToolName {
+	if latest.ToolName == recordTradesToolName || latest.ToolName == updateHoldingsToolName {
 		return nil, nil
 	}
 	return &latest.ID, nil

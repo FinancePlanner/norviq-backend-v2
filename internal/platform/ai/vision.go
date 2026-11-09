@@ -43,6 +43,24 @@ type VisionPart struct {
 	Type     string          `json:"type"`
 	Text     *string         `json:"text,omitempty"`
 	ImageURL *visionImageURL `json:"image_url,omitempty"`
+	File     *visionFile     `json:"file,omitempty"`
+}
+
+type visionFile struct {
+	Filename string `json:"filename"`
+	FileData string `json:"file_data"`
+}
+
+// VisionFile is a file part carrying raw bytes as a base64 data URL, as the
+// OpenAI wire takes a PDF.
+func VisionFile(data []byte, mediaType, filename string) VisionPart {
+	if mediaType == "" {
+		mediaType = "application/pdf"
+	}
+	return VisionPart{Type: "file", File: &visionFile{
+		Filename: filename,
+		FileData: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data),
+	}}
 }
 
 type visionImageURL struct {

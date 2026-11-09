@@ -13,6 +13,7 @@ import (
 	"norviq-api/internal/auth"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/ai"
+	"norviq-api/internal/platform/attachment"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/platform/swiftjson"
@@ -81,25 +82,40 @@ func (h *handlers) turnHTTP(c *echo.Context, onEvent eventSink) (turnResponse, e
 	if err != nil {
 		return turnResponse{}, err
 	}
-	content, images, client, err := parseTurnBody(c)
+	// Files are classified here, by their sniffed bytes alone; the flags, the
+	// scope and Premium are checked before any file is decoded or scanned.
+	allow := attachment.Allow{Images: h.imagesEnabled, Documents: h.documentsEnabled}
+	body, err := parseTurnBody(c, allow)
 	if err != nil {
 		return turnResponse{}, err
 	}
-	if len(images) > 0 {
-		// Coded, so /stream doesn't report this as conversation_not_found.
-		if !h.imagesEnabled {
+	var files turnFiles
+	if len(body.kinds) > 0 {
+		// Coded, so /stream doesn't report these as conversation_not_found.
+		if body.hasImage() && !h.imagesEnabled {
 			return turnResponse{}, imageRejected(http.StatusNotFound, "Images aren't available right now.")
+		}
+		if body.hasDocument() && !h.documentsEnabled {
+			return turnResponse{}, httpx.CodedAbort(http.StatusNotFound, codeAttachmentRejected, documentsOffMessage)
 		}
 		// As the screenshot import: images spend Norviq's AI budget.
 		if s.Scope != nil {
-			return turnResponse{}, imageRejected(http.StatusForbidden, "This endpoint requires a first-party session.")
+			code := codeImageRejected
+			if body.hasDocument() {
+				code = codeAttachmentRejected
+			}
+			return turnResponse{}, httpx.CodedAbort(http.StatusForbidden, code, "This endpoint requires a first-party session.")
 		}
 		if err := h.ent.RequirePremium(ctx, entitlements.FeatureScreenshotImport, s.UserID); err != nil {
 			return turnResponse{}, err
 		}
+		if files, err = turnAttachments(body.parts, allow); err != nil {
+			return turnResponse{}, err
+		}
 	}
+	content, client := body.content, body.client
 
-	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), images, s.Scope != nil, client, onEvent)
+	outcome, err := h.runCoordinator(c.Request().Context(), func() error { return h.ai.Consent.Require(c, s.UserID) }, s.UserID, conv.ID, stripAssistantAddress(content), files, s.Scope != nil, client, onEvent)
 	if err != nil {
 		return turnResponse{}, err
 	}
@@ -163,8 +179,8 @@ func (h *handlers) streamChat(c *echo.Context) error {
 			return encErr
 		}
 		_ = sse.frame("turn", enc)
-	case errors.As(err, &abort) && abort.Code == codeImageRejected:
-		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": codeImageRejected})
+	case errors.As(err, &abort) && (abort.Code == codeImageRejected || abort.Code == codeAttachmentRejected):
+		_ = sse.data("error", map[string]string{"message": abort.Reason, "code": abort.Code})
 	case errors.As(err, &imageUnreadable):
 		h.d.Logger.Warn("ai_assistant.stream_user_credential_failed", "kind", imageUnreadable.Kind)
 		_ = sse.data("error", map[string]string{"message": imageUnreadable.UserFacingMessage(), "code": imageUnreadable.ErrorCode()})
@@ -214,13 +230,17 @@ func (h *handlers) confirmAction(c *echo.Context) error {
 		return err
 	}
 	var res confirmResult
-	if action.ToolName == recordTradesToolName {
-		// This tool alone takes a body: the rows the user reviewed.
+	if action.ToolName == recordTradesToolName || action.ToolName == updateHoldingsToolName {
+		// These tools alone take a body: the rows the user reviewed.
 		body, readErr := io.ReadAll(c.Request().Body)
 		if readErr != nil {
 			return readErr
 		}
-		res, err = h.confirmTrades(ctx, &action, s.UserID, body)
+		if action.ToolName == updateHoldingsToolName {
+			res, err = h.confirmHoldings(ctx, &action, s.UserID, body)
+		} else {
+			res, err = h.confirmTrades(ctx, &action, s.UserID, body)
+		}
 	} else {
 		res, err = h.confirm(ctx, id, s.UserID)
 	}

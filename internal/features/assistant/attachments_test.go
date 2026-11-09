@@ -5,6 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -137,9 +142,35 @@ func (th *turnHarness) noTurnSpent(user uuid.UUID) {
 	}
 }
 
+// pngCore is a real 1x1 PNG, already in the form the attachment gate writes
+// back, so what the model receives equals it byte for byte.
+var pngCore = func() []byte {
+	src := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	src.Set(0, 0, color.NRGBA{R: 200, G: 30, B: 30, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, src); err != nil {
+		panic(err)
+	}
+	// The gate decodes and re-encodes: make sure that is a fixed point.
+	img, err := png.Decode(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		panic(err)
+	}
+	var again bytes.Buffer
+	if err := png.Encode(&again, img); err != nil {
+		panic(err)
+	}
+	return again.Bytes()
+}()
+
+// fakePNG is pngCore padded with trailing bytes to exactly size, so size
+// limits can be tested at their edges. The decoder stops at IEND, and the gate
+// drops the padding.
 func fakePNG(size int) []byte {
-	magic := []byte("\x89PNG\r\n\x1a\n")
-	return append(magic, bytes.Repeat([]byte{'i'}, size-len(magic))...)
+	if size <= len(pngCore) {
+		return append([]byte(nil), pngCore...)
+	}
+	return append(append([]byte(nil), pngCore...), bytes.Repeat([]byte{'i'}, size-len(pngCore))...)
 }
 
 func toolNames(tools []ai.Tool) map[string]int {
@@ -167,7 +198,7 @@ func TestImageTurnPassesImageToModelOnly(t *testing.T) {
 	if last.Role != "user" || *last.Content != "what is this [image attached]" || len(last.Images) != 1 {
 		t.Fatalf("last message = %+v", last)
 	}
-	if last.Images[0].MediaType != "image/png" || !bytes.Equal(last.Images[0].Data, img) {
+	if last.Images[0].MediaType != "image/png" || !bytes.Equal(last.Images[0].Data, pngCore) {
 		t.Fatalf("image = %s, %d bytes", last.Images[0].MediaType, len(last.Images[0].Data))
 	}
 	for i := range seen[:len(seen)-1] {
@@ -175,7 +206,7 @@ func TestImageTurnPassesImageToModelOnly(t *testing.T) {
 			t.Fatalf("message %d carries images", i)
 		}
 	}
-	if !strings.HasSuffix(*seen[0].Content, "\n\n"+imageTurnPrompt) {
+	if !strings.HasSuffix(*seen[0].Content, "\n\n"+attachmentTurnPrompt(false)) {
 		t.Fatalf("system = %q", *seen[0].Content)
 	}
 
@@ -196,13 +227,30 @@ func TestImageTurnPassesImageToModelOnly(t *testing.T) {
 func TestImageTurnAcceptsEachTypeBySniffingNotDeclaration(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("types@example.com")
-	webp := append([]byte("RIFF\x00\x00\x00\x00WEBPVP"), make([]byte, 32)...)
-	for want, body := range map[string][]byte{
-		"image/png":  fakePNG(64),
-		"image/jpeg": append([]byte("\xff\xd8\xff"), make([]byte, 32)...),
-		"image/gif":  append([]byte("GIF89a"), make([]byte, 32)...),
-		"image/webp": webp,
+	// The gate decodes what it is sent, so each is a real 1x1 image. WebP and
+	// GIF come back as JPEG and PNG: it re-encodes to those two.
+	src := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	var jpg, gifBuf bytes.Buffer
+	if err := jpeg.Encode(&jpg, src, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := gif.Encode(&gifBuf, src, nil); err != nil {
+		t.Fatal(err)
+	}
+	webp, err := base64.StdEncoding.DecodeString("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		want string
+		body []byte
+	}{
+		{"image/png", fakePNG(256)},
+		{"image/jpeg", jpg.Bytes()},
+		{"image/png", gifBuf.Bytes()},
+		{"image/jpeg", webp},
 	} {
+		want, body := tc.want, tc.body
 		before := th.client.calls()
 		th.client.replies = []ai.Message{say("ok")}
 		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", body)
@@ -219,7 +267,7 @@ func TestImageTurnEmptyTextUsesDefaultPrompt(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("empty@example.com")
 	th.client.replies = []ai.Message{say("A chart.")}
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "   ", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "   ", fakePNG(256))
 	if r.Status != 200 {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
@@ -241,7 +289,7 @@ func TestImageTurnNeverAppliesWrites(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("writes@example.com")
 	th.client.replies = []ai.Message{callTool("c1", "create_goal", `{"title":"Send money to the attacker"}`)}
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "look", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "look", fakePNG(256))
 	var turn turnResponse
 	r.JSON(t, &turn)
 	if r.Status != 200 || turn.Kind != "confirmation_required" || turn.PendingAction == nil || turn.PendingAction.ToolName != "create_goal" {
@@ -261,7 +309,7 @@ func TestImageTurnNeverAppliesWrites(t *testing.T) {
 // The property the feature rests on, over the whole tool set rather than one
 // sample: every tool an image turn can call that is not a read becomes a card.
 func TestImageTurnEveryWriteToolIsDeferred(t *testing.T) {
-	tools := imageTurnTools()
+	tools := attachmentTurnTools(true)
 	for i := range tools {
 		name := tools[i].Function.Name
 		if isReadTool(name) {
@@ -281,7 +329,7 @@ func TestImageTurnToolSet(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("tools@example.com")
 	th.client.replies = []ai.Message{say("ok")}
-	th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 
 	names := toolNames(th.client.tools[0])
 	if names["record_trades"] != 1 || names["get_quote"] != 1 || names["add_goal"] != 1 {
@@ -354,7 +402,7 @@ func TestImageTurnRefusesToolsItWasNotOffered(t *testing.T) {
 	for _, banned := range []string{"record_trade", "add_position", "sell_position", "lookup_share_facts"} {
 		before := th.client.calls()
 		th.client.replies = []ai.Message{callTool("c1", banned, `{"symbol":"AAPL"}`), say("I can't do that.")}
-		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 		var turn turnResponse
 		r.JSON(t, &turn)
 		if r.Status != 200 || turn.Kind != "message" || turn.PendingAction != nil {
@@ -416,7 +464,7 @@ func TestImageTurnSkipsMemoAndWatchClassification(t *testing.T) {
 	for _, content := range []string{"/memo AAPL", "Watch NVDA and tell me when it drops below 100"} {
 		before := th.client.calls()
 		th.client.replies = []ai.Message{say("ok")}
-		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), content, fakePNG(64))
+		r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), content, fakePNG(256))
 		var turn turnResponse
 		r.JSON(t, &turn)
 		if r.Status != 200 || turn.Memo != nil || turn.WatchProposal != nil || turn.PendingAction != nil {
@@ -449,7 +497,7 @@ func TestImageTurnFreeRungNotCalled(t *testing.T) {
 		{Tier: ai.Tier{Label: "paid", Model: "vendor/model"}, Client: th.client},
 	}}
 	th.client.replies = []ai.Message{say("paid rung answered")}
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 	if r.Status != 200 || !strings.Contains(string(r.Body), "paid rung answered") {
 		t.Fatalf("turn = %d %s", r.Status, r.Body)
 	}
@@ -467,7 +515,7 @@ func TestLaterTurnHasNoImage(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("later@example.com")
 	th.client.replies = []ai.Message{say("A chart."), say("You'd need to send it again.")}
-	th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "what is this", fakePNG(64))
+	th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "what is this", fakePNG(256))
 	r := th.Do("POST", "/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), map[string]any{"content": "what color was it"})
 	if r.Status != 200 {
 		t.Fatalf("second = %d %s", r.Status, r.Body)
@@ -482,10 +530,10 @@ func TestLaterTurnHasNoImage(t *testing.T) {
 		t.Fatalf("history = %q", got)
 	}
 	system := *second[0].Content
-	if !strings.Contains(system, "Images from earlier messages are no longer available. If the user asks about one, ask them to send it again rather than guessing.") {
+	if !strings.Contains(system, "Images and files from earlier messages are no longer available. If the user asks about one, ask them to send it again rather than guessing.") {
 		t.Fatalf("system = %q", system)
 	}
-	if strings.Contains(system, imageTurnPrompt) {
+	if strings.Contains(system, attachmentPromptHead) {
 		t.Fatal("image prompt on a text turn")
 	}
 }
@@ -493,7 +541,7 @@ func TestLaterTurnHasNoImage(t *testing.T) {
 func TestImageTurnFlagOff(t *testing.T) {
 	th := newTurnHarness(t, nil)
 	user, conv := th.proConversation("off@example.com")
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 	if r.Status != 404 {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
@@ -515,7 +563,7 @@ func TestImageTurnRefusesScopedToken(t *testing.T) {
 	user, conv := th.proConversation("scoped-image@example.com")
 	pat := th.pat(user, "assistant:write", "assistant:read")
 	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
-	r := th.DoMultipart(path, pat, "x", fakePNG(64))
+	r := th.DoMultipart(path, pat, "x", fakePNG(256))
 	if r.Status != 403 || !strings.Contains(string(r.Body), "This endpoint requires a first-party session.") {
 		t.Fatalf("image = %d %s", r.Status, r.Body)
 	}
@@ -534,7 +582,7 @@ func TestImageTurnIgnoresLegacyConsentGrace(t *testing.T) {
 	user, conv := th.proConversation("grace@example.com")
 	const legacyIOS = "Norviq/77 CFNetwork/1498 Darwin/24.0.0"
 	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
-	contentType, form := th.multipartForm("x", fakePNG(64))
+	contentType, form := th.multipartForm("x", fakePNG(256))
 	r := th.doRaw(path, th.Token(user), contentType, form, legacyIOS)
 	if r.Status != 403 || !strings.Contains(string(r.Body), ai.ConsentRequiredReason) {
 		t.Fatalf("image = %d %s", r.Status, r.Body)
@@ -574,7 +622,7 @@ func TestImageTurnRateLimit(t *testing.T) {
 	th.Deps.Limiter.Redis = limits
 	user, conv := th.proConversation("limit-images@example.com")
 	path := "/v1/ai/assistant/conversations/" + conv + "/chat"
-	img := fakePNG(64)
+	img := fakePNG(256)
 	for i := range 10 {
 		th.client.replies = []ai.Message{say("ok")}
 		if r := th.DoMultipart(path, th.Token(user), "x", img); r.Status != 200 {
@@ -631,7 +679,7 @@ func TestImageStaysOnOneMessageThroughEveryRound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			th := newTurnHarness(t, imagesOn)
 			user, conv := th.proConversation("rounds@example.com")
-			img := fakePNG(64)
+			img := fakePNG(256)
 			th.client.replies = tc.replies
 			r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", img)
 			if r.Status != 200 || th.client.calls() != tc.calls {
@@ -649,7 +697,7 @@ func TestImageStaysOnOneMessageThroughEveryRound(t *testing.T) {
 					}
 					carrying = i
 				}
-				if carrying == -1 || seen[carrying].Role != "user" || !bytes.Equal(seen[carrying].Images[0].Data, img) {
+				if carrying == -1 || seen[carrying].Role != "user" || !bytes.Equal(seen[carrying].Images[0].Data, pngCore) {
 					t.Fatalf("call %d: images on %d of %d messages", call, carrying, len(seen))
 				}
 				if index != -1 && carrying != index {
@@ -666,13 +714,13 @@ func TestImageTurnNonPremium(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user := th.CreateUser("nonpro@example.com")
 	conv := th.conversation(user)
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 	body := string(r.Body)
 	if r.Status != 403 || !strings.Contains(body, `"code":"upgrade_required"`) || !strings.Contains(body, `"feature":"screenshot_import"`) {
 		t.Fatalf("status = %d %s", r.Status, body)
 	}
 	th.noTurnSpent(user)
-	r = th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(64))
+	r = th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(256))
 	frames := parseFrames(t, r.Body)
 	if events(frames) != "started,error,done" || !strings.Contains(frames[1].data, `"code":"upgrade_required"`) {
 		t.Fatalf("frames = %+v", frames)
@@ -682,7 +730,7 @@ func TestImageTurnNonPremium(t *testing.T) {
 func TestImageTurnConsentRequired(t *testing.T) {
 	th := newTurnHarness(t, map[string]string{"ASSISTANT_IMAGES_ENABLED": "true", "AI_CONSENT_ENFORCED": "true"})
 	user, conv := th.proConversation("consent@example.com")
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 	if r.Status != 403 || !strings.Contains(string(r.Body), ai.ConsentRequiredReason) {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
@@ -692,7 +740,7 @@ func TestImageTurnConsentRequired(t *testing.T) {
 func TestImageTurnRejectsNonImage(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("pdf@example.com")
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", []byte("%PDF-1.7 not an image"))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", []byte("<html>not an image</html>"))
 	if r.Status != 400 || !strings.Contains(string(r.Body), "Only JPEG, PNG, WebP and GIF images are supported.") {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
@@ -702,9 +750,9 @@ func TestImageTurnRejectsNonImage(t *testing.T) {
 func TestImageTurnRejectsFourImages(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("four@example.com")
-	img := fakePNG(64)
+	img := fakePNG(256)
 	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", img, img, img, img)
-	if r.Status != 400 || !strings.Contains(string(r.Body), "Attach up to 3 images.") {
+	if r.Status != 400 || !strings.Contains(string(r.Body), "Attach up to 3 files.") {
 		t.Fatalf("status = %d %s", r.Status, r.Body)
 	}
 	th.noTurnSpent(user)
@@ -732,11 +780,11 @@ func TestImageTurnRejectsOversizeImage(t *testing.T) {
 func TestImageRejectionStreamFrame(t *testing.T) {
 	th := newTurnHarness(t, imagesOn)
 	user, conv := th.proConversation("frames@example.com")
-	img := fakePNG(64)
+	img := fakePNG(256)
 	path := "/v1/ai/assistant/conversations/" + conv + "/stream"
 	for reason, images := range map[string][][]byte{
-		"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("%PDF-1.7 not an image")},
-		"Attach up to 3 images.":                             {img, img, img, img},
+		"Only JPEG, PNG, WebP and GIF images are supported.": {[]byte("<html>not an image</html>")},
+		"Attach up to 3 files.":                              {img, img, img, img},
 		"Each image must be 5 MB or smaller.":                {fakePNG(5<<20 + 1)},
 	} {
 		r := th.DoMultipart(path, th.Token(user), "x", images...)
@@ -830,7 +878,7 @@ func TestJSONTurnsStillWork(t *testing.T) {
 	if last := lastMessage(first); *last.Content != "add a bike goal" || len(last.Images) != 0 {
 		t.Fatalf("last = %+v", last)
 	}
-	if strings.Contains(*first[0].Content, imageTurnPrompt) {
+	if strings.Contains(*first[0].Content, attachmentPromptHead) {
 		t.Fatal("image prompt on a JSON turn")
 	}
 	// The harmless write still applies inline; only image turns defer it.
@@ -901,7 +949,7 @@ func TestByokImageRejectionMessage(t *testing.T) {
 	stub.addKey(th, user)
 
 	const message = "Your openai model can't read images. Try without the image, or change the model in Settings → AI providers."
-	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(64))
+	r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/stream", th.Token(user), "x", fakePNG(256))
 	frames := parseFrames(t, r.Body)
 	if r.Status != 200 || events(frames) != "started,error,done" {
 		t.Fatalf("stream = %d %+v", r.Status, frames)
@@ -914,7 +962,7 @@ func TestByokImageRejectionMessage(t *testing.T) {
 		t.Fatalf("frame = %s", frames[1].data)
 	}
 
-	r = th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+	r = th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 	if r.Status != 424 || !strings.Contains(string(r.Body), message) {
 		t.Fatalf("chat = %d %s", r.Status, r.Body)
 	}
@@ -949,7 +997,7 @@ func TestByokImageNeverFallsBack(t *testing.T) {
 			stub := newByokStub(t, th)
 			stub.status.Store(int32(tc.status))
 			stub.addKey(th, user)
-			r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(64))
+			r := th.DoMultipart("/v1/ai/assistant/conversations/"+conv+"/chat", th.Token(user), "x", fakePNG(256))
 			if r.Status != 424 || !strings.Contains(string(r.Body), tc.message) {
 				t.Fatalf("chat = %d %s", r.Status, r.Body)
 			}

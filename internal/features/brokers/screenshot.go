@@ -265,7 +265,7 @@ func (s *service) screenshotPreview(ctx context.Context, images []screenshotImag
 	if err != nil {
 		return ScreenshotPreviewResponse{}, err
 	}
-	enriched, err := s.preview(ctx, items, errs, provider, rawListID, userID)
+	enriched, err := s.preview(ctx, items, errs, provider, rawListID, userID, nil)
 	if err != nil {
 		return ScreenshotPreviewResponse{}, err
 	}

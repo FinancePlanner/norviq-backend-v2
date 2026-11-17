@@ -134,4 +134,11 @@ ORDER BY date DESC LIMIT 1;
 -- name: HistoryIngestionSymbols :many
 SELECT upper(symbol)::text AS symbol FROM stocks
 UNION ALL
-SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_proxy IS NOT NULL;
+SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_proxy IS NOT NULL
+UNION ALL
+SELECT upper(symbol)::text FROM watchlist_items;
+
+-- name: MarketPriceBarCloses :many
+SELECT date, adjusted_close FROM market_price_bars
+WHERE instrument_key = $1 AND date BETWEEN sqlc.arg(from_date)::date AND sqlc.arg(to_date)::date
+ORDER BY date ASC;

@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -340,5 +343,244 @@ func TestChartBuilderRoutes(t *testing.T) {
 		r.Header.Get("Content-Disposition") != `attachment; filename="AAPL-chart-builder-annual.csv"` ||
 		string(r.Body[3:]) != "Period,Fiscal Year,Revenue\nFY2023,2023,383\nFY2024,2024,391\n" {
 		t.Fatalf("csv %d %v %q", r.Status, r.Header, r.Body)
+	}
+}
+
+// candleStub is a Finnhub stand-in serving /stock/candle from series
+// (yyyy-MM-dd to close) and recording the `from` of every candle request.
+type candleStub struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	series map[string]float64
+	froms  []time.Time
+}
+
+func newCandleStub(t *testing.T, series map[string]float64) *candleStub {
+	t.Helper()
+	c := &candleStub{series: series}
+	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/stock/candle" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		sec, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		from := time.Unix(sec, 0).UTC()
+		c.mu.Lock()
+		c.froms = append(c.froms, from)
+		c.mu.Unlock()
+		dates := make([]string, 0, len(c.series))
+		for d := range c.series {
+			if day, _ := time.Parse("2006-01-02", d); !day.Before(from.Truncate(24 * time.Hour)) {
+				dates = append(dates, d)
+			}
+		}
+		sort.Strings(dates)
+		var cl, ts, vol []float64
+		for _, d := range dates {
+			day, _ := time.Parse("2006-01-02", d)
+			cl = append(cl, c.series[d])
+			ts = append(ts, float64(day.Unix()))
+			vol = append(vol, 1000)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"s": "ok", "c": cl, "o": cl, "h": cl, "l": cl, "t": ts, "v": vol})
+	}))
+	t.Cleanup(c.srv.Close)
+	return c
+}
+
+func (c *candleStub) requests() []time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]time.Time(nil), c.froms...)
+}
+
+func ingestApp(t *testing.T, stub *candleStub) (*testutil.App, *marketdata.Service) {
+	t.Helper()
+	app := testutil.NewApp(t, nil)
+	svc := marketdata.NewFromSettings(
+		marketdata.Settings{MarketProvider: "finnhub", FinnhubAPIKey: "test", FinnhubBaseURL: stub.srv.URL},
+		marketdatadb.New(app.Deps.DB), nil, &http.Client{Timeout: 5 * time.Second}, slog.New(slog.DiscardHandler))
+	svc.Cache = cache.NewMemory()
+	return app, svc
+}
+
+// seedBars stores closes (yyyy-MM-dd to close) for symbol.
+func seedBars(t *testing.T, svc *marketdata.Service, symbol string, closes map[string]float64) {
+	t.Helper()
+	bars := make([]marketdata.PriceBarResponse, 0, len(closes))
+	for d, c := range closes {
+		bars = append(bars, marketdata.PriceBarResponse{Date: d, Open: c, High: c, Low: c, Close: c})
+	}
+	if err := svc.UpsertMarketPriceBars(context.Background(), symbol, "USD", "market", bars); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+}
+
+func storedCloses(t *testing.T, app *testutil.App, symbol string) map[string]float64 {
+	t.Helper()
+	rows, err := app.Deps.DB.Query(context.Background(),
+		`SELECT to_char(date, 'YYYY-MM-DD'), close FROM market_price_bars WHERE instrument_key = $1`, symbol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]float64{}
+	for rows.Next() {
+		var d string
+		var c float64
+		if err := rows.Scan(&d, &c); err != nil {
+			t.Fatal(err)
+		}
+		out[d] = c
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// weekdays returns n consecutive weekday dates ending 2024-06-07.
+func weekdays(n int) []string {
+	day := time.Date(2024, 6, 7, 0, 0, 0, 0, time.UTC)
+	var out []string
+	for len(out) < n {
+		if wd := day.Weekday(); wd != time.Saturday && wd != time.Sunday {
+			out = append([]string{day.Format("2006-01-02")}, out...)
+		}
+		day = day.AddDate(0, 0, -1)
+	}
+	return out
+}
+
+func seriesAt(dates []string, level float64) map[string]float64 {
+	m := map[string]float64{}
+	for i, d := range dates {
+		m[d] = level + float64(i)
+	}
+	return m
+}
+
+func addWatchlistSymbol(t *testing.T, app *testutil.App, symbol string) {
+	t.Helper()
+	ctx := context.Background()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	list := uuid.New()
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO watchlist_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Main', true, now())`, list, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO watchlist_items (id, user_id, symbol, status, watchlist_list_id, created_at) VALUES ($1, $2, $3, 'watching', $4, now())`, uuid.New(), user, symbol, list); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSweepIngestsWatchlistSymbols(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 400))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "msft")
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "MSFT"); len(got) != len(dates) {
+		t.Fatalf("MSFT bars %v", got)
+	}
+}
+
+func TestSweepRebackfillsAfterSplit(t *testing.T) {
+	dates := weekdays(10)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	stub.series["2024-06-10"] = 121.79
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, "NVDA", seriesAt(dates, 1200))
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	got := storedCloses(t, app, "NVDA")
+	if len(got) != len(dates)+1 {
+		t.Fatalf("NVDA bars %v", got)
+	}
+	for d, c := range got {
+		if c >= 200 {
+			t.Errorf("%s still unadjusted: %v", d, c)
+		}
+	}
+	froms := stub.requests()
+	if len(froms) != 2 {
+		t.Fatalf("requests %v", froms)
+	}
+	if want := time.Now().UTC().AddDate(-30, 0, 0); froms[1].After(want.AddDate(0, 0, 1)) {
+		t.Fatalf("rebackfill from %v, want about %v", froms[1], want)
+	}
+}
+
+func TestSweepAppendsWithoutRebackfill(t *testing.T) {
+	dates := weekdays(10)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	stub.series["2024-06-10"] = 121.79
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, "NVDA", seriesAt(dates, 120))
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "NVDA"); len(got) != len(dates)+1 {
+		t.Fatalf("NVDA bars %v", got)
+	}
+	froms := stub.requests()
+	want := time.Date(2024, 5, 31, 0, 0, 0, 0, time.UTC) // seven days before 2024-06-07
+	if len(froms) != 1 || !froms[0].Equal(want) {
+		t.Fatalf("requests %v, want one from %v", froms, want)
+	}
+}
+
+func TestHistoryJobRunsWhenOnlyCadenceEnabled(t *testing.T) {
+	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
+	t.Setenv("CADENCE_ENABLED", "true")
+	stub := newCandleStub(t, seriesAt(weekdays(3), 100))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "AAPL")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		market.HistoryIngestionJob{Service: svc, InitialDelay: time.Millisecond}.Run(ctx, app.Deps)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(stub.requests()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if n := len(stub.requests()); n != 1 {
+		t.Fatalf("sweep requests %d, want 1", n)
+	}
+}
+
+func TestHistoryJobIdleWhenBothFlagsOff(t *testing.T) {
+	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
+	t.Setenv("CADENCE_ENABLED", "false")
+	stub := newCandleStub(t, seriesAt(weekdays(3), 100))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "AAPL")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		market.HistoryIngestionJob{Service: svc, InitialDelay: time.Millisecond}.Run(context.Background(), app.Deps)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("job did not return with both flags off")
+	}
+	if n := len(stub.requests()); n != 0 {
+		t.Fatalf("sweep ran with both flags off: %d requests", n)
 	}
 }

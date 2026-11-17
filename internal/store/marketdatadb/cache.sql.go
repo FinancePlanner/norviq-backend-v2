@@ -273,6 +273,8 @@ const historyIngestionSymbols = `-- name: HistoryIngestionSymbols :many
 SELECT upper(symbol)::text AS symbol FROM stocks
 UNION ALL
 SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_proxy IS NOT NULL
+UNION ALL
+SELECT upper(symbol)::text FROM watchlist_items
 `
 
 func (q *Queries) HistoryIngestionSymbols(ctx context.Context) ([]string, error) {
@@ -366,6 +368,43 @@ func (q *Queries) ListPriceHistory(ctx context.Context, arg ListPriceHistoryPara
 			&i.Close,
 			&i.Volume,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const marketPriceBarCloses = `-- name: MarketPriceBarCloses :many
+SELECT date, adjusted_close FROM market_price_bars
+WHERE instrument_key = $1 AND date BETWEEN $2::date AND $3::date
+ORDER BY date ASC
+`
+
+type MarketPriceBarClosesParams struct {
+	InstrumentKey string
+	FromDate      time.Time
+	ToDate        time.Time
+}
+
+type MarketPriceBarClosesRow struct {
+	Date          time.Time
+	AdjustedClose float64
+}
+
+func (q *Queries) MarketPriceBarCloses(ctx context.Context, arg MarketPriceBarClosesParams) ([]MarketPriceBarClosesRow, error) {
+	rows, err := q.db.Query(ctx, marketPriceBarCloses, arg.InstrumentKey, arg.FromDate, arg.ToDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MarketPriceBarClosesRow{}
+	for rows.Next() {
+		var i MarketPriceBarClosesRow
+		if err := rows.Scan(&i.Date, &i.AdjustedClose); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

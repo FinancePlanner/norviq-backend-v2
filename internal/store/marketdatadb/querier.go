@@ -25,6 +25,7 @@ type Querier interface {
 	HistoryIngestionSymbols(ctx context.Context) ([]string, error)
 	LatestFxRate(ctx context.Context, arg LatestFxRateParams) (LatestFxRateRow, error)
 	ListPriceHistory(ctx context.Context, arg ListPriceHistoryParams) ([]ListPriceHistoryRow, error)
+	MarketPriceBarCloses(ctx context.Context, arg MarketPriceBarClosesParams) ([]MarketPriceBarClosesRow, error)
 	// Zero rows means no coverage (Swift's coverage.lastDate == nil).
 	MarketPriceBarLastDate(ctx context.Context, arg MarketPriceBarLastDateParams) ([]time.Time, error)
 	UpsertAnalystEstimatesCache(ctx context.Context, arg UpsertAnalystEstimatesCacheParams) error

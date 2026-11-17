@@ -142,3 +142,14 @@ SELECT upper(symbol)::text FROM watchlist_items;
 SELECT date, adjusted_close FROM market_price_bars
 WHERE instrument_key = $1 AND date BETWEEN sqlc.arg(from_date)::date AND sqlc.arg(to_date)::date
 ORDER BY date ASC;
+
+-- name: MarketHistoryAnchor :many
+-- Zero rows means no anchor: the history has not been verified by the job.
+SELECT anchor_date, anchor_close FROM market_history_anchors
+WHERE instrument_key = $1;
+
+-- name: UpsertMarketHistoryAnchor :exec
+INSERT INTO market_history_anchors (instrument_key, anchor_date, anchor_close, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (instrument_key) DO UPDATE SET
+    anchor_date = EXCLUDED.anchor_date, anchor_close = EXCLUDED.anchor_close, updated_at = now();

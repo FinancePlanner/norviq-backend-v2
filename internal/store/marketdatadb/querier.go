@@ -25,6 +25,8 @@ type Querier interface {
 	HistoryIngestionSymbols(ctx context.Context) ([]string, error)
 	LatestFxRate(ctx context.Context, arg LatestFxRateParams) (LatestFxRateRow, error)
 	ListPriceHistory(ctx context.Context, arg ListPriceHistoryParams) ([]ListPriceHistoryRow, error)
+	// Zero rows means no anchor: the history has not been verified by the job.
+	MarketHistoryAnchor(ctx context.Context, instrumentKey string) ([]MarketHistoryAnchorRow, error)
 	MarketPriceBarCloses(ctx context.Context, arg MarketPriceBarClosesParams) ([]MarketPriceBarClosesRow, error)
 	// Zero rows means no coverage (Swift's coverage.lastDate == nil).
 	MarketPriceBarLastDate(ctx context.Context, arg MarketPriceBarLastDateParams) ([]time.Time, error)
@@ -32,6 +34,7 @@ type Querier interface {
 	UpsertBasicFinancialsCache(ctx context.Context, arg UpsertBasicFinancialsCacheParams) (string, error)
 	UpsertFinancialGrowthCache(ctx context.Context, arg UpsertFinancialGrowthCacheParams) error
 	UpsertFxRate(ctx context.Context, arg UpsertFxRateParams) (UpsertFxRateRow, error)
+	UpsertMarketHistoryAnchor(ctx context.Context, arg UpsertMarketHistoryAnchorParams) error
 	UpsertMarketPriceBar(ctx context.Context, arg UpsertMarketPriceBarParams) error
 	UpsertPriceHistory(ctx context.Context, arg UpsertPriceHistoryParams) error
 	UpsertProfileCache(ctx context.Context, arg UpsertProfileCacheParams) (UpsertProfileCacheRow, error)

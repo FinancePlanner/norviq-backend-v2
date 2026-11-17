@@ -353,6 +353,8 @@ type candleStub struct {
 	mu     sync.Mutex
 	series map[string]float64
 	froms  []time.Time
+	// failRequest, when above zero, makes that (1-based) candle request fail.
+	failRequest int
 }
 
 func newCandleStub(t *testing.T, series map[string]float64) *candleStub {
@@ -371,7 +373,12 @@ func newCandleStub(t *testing.T, series map[string]float64) *candleStub {
 		from := time.Unix(sec, 0).UTC()
 		c.mu.Lock()
 		c.froms = append(c.froms, from)
+		fail := len(c.froms) == c.failRequest
 		c.mu.Unlock()
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		dates := make([]string, 0, len(c.series))
 		for d := range c.series {
 			if day, _ := time.Parse("2006-01-02", d); !day.Before(from.Truncate(24 * time.Hour)) {
@@ -410,13 +417,13 @@ func ingestApp(t *testing.T, stub *candleStub) (*testutil.App, *marketdata.Servi
 }
 
 // seedBars stores closes (yyyy-MM-dd to close) for symbol.
-func seedBars(t *testing.T, svc *marketdata.Service, symbol string, closes map[string]float64) {
+func seedBars(t *testing.T, svc *marketdata.Service, closes map[string]float64) {
 	t.Helper()
 	bars := make([]marketdata.PriceBarResponse, 0, len(closes))
 	for d, c := range closes {
 		bars = append(bars, marketdata.PriceBarResponse{Date: d, Open: c, High: c, Low: c, Close: c})
 	}
-	if err := svc.UpsertMarketPriceBars(context.Background(), symbol, "USD", "market", bars); err != nil {
+	if err := svc.UpsertMarketPriceBars(context.Background(), "NVDA", "USD", "market", bars); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 }
@@ -491,52 +498,172 @@ func TestSweepIngestsWatchlistSymbols(t *testing.T) {
 	}
 }
 
-func TestSweepRebackfillsAfterSplit(t *testing.T) {
-	dates := weekdays(10)
-	stub := newCandleStub(t, seriesAt(dates, 120))
-	stub.series["2024-06-10"] = 121.79
-	app, svc := ingestApp(t, stub)
-	addWatchlistSymbol(t, app, "NVDA")
-	seedBars(t, svc, "NVDA", seriesAt(dates, 1200))
-
-	market.Sweep(context.Background(), app.Deps, svc)
-
-	got := storedCloses(t, app, "NVDA")
-	if len(got) != len(dates)+1 {
-		t.Fatalf("NVDA bars %v", got)
+func setAnchor(t *testing.T, app *testutil.App, date string, closeAt float64) {
+	t.Helper()
+	day, _ := time.Parse("2006-01-02", date)
+	if err := marketdatadb.New(app.Deps.DB).UpsertMarketHistoryAnchor(context.Background(),
+		marketdatadb.UpsertMarketHistoryAnchorParams{InstrumentKey: "NVDA", AnchorDate: day, AnchorClose: closeAt}); err != nil {
+		t.Fatal(err)
 	}
+}
+
+func getAnchor(t *testing.T, app *testutil.App, symbol string) (string, float64, bool) {
+	t.Helper()
+	rows, err := marketdatadb.New(app.Deps.DB).MarketHistoryAnchor(context.Background(), symbol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		return "", 0, false
+	}
+	return rows[0].AnchorDate.Format("2006-01-02"), rows[0].AnchorClose, true
+}
+
+func requireAnchor(t *testing.T, app *testutil.App, wantDate string, wantClose float64) {
+	t.Helper()
+	date, c, ok := getAnchor(t, app, "NVDA")
+	if !ok || date != wantDate || c != wantClose {
+		t.Fatalf("anchor %s %v (exists %v), want %s %v", date, c, ok, wantDate, wantClose)
+	}
+}
+
+func requireAllUnder200(t *testing.T, got map[string]float64) {
+	t.Helper()
 	for d, c := range got {
 		if c >= 200 {
 			t.Errorf("%s still unadjusted: %v", d, c)
 		}
 	}
+}
+
+// requireThirtyYearsBack checks a request began 30 years before today, give
+// or take a day.
+func requireThirtyYearsBack(t *testing.T, from time.Time) {
+	t.Helper()
+	want := time.Now().UTC().AddDate(-30, 0, 0)
+	if from.Before(want.AddDate(0, 0, -1)) || from.After(want.AddDate(0, 0, 1)) {
+		t.Fatalf("request from %v, want within a day of %v", from, want)
+	}
+}
+
+func todayKey() string { return time.Now().UTC().Format("2006-01-02") }
+
+func TestSweepRebackfillsAfterSplit(t *testing.T) {
+	dates := weekdays(10)
+	last := dates[len(dates)-1]
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	stub.series["2024-06-10"] = 121.79
+	stub.series[todayKey()] = 130
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, seriesAt(dates, 1200))
+	setAnchor(t, app, last, 1209)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	got := storedCloses(t, app, "NVDA")
+	if len(got) != len(dates)+2 {
+		t.Fatalf("NVDA bars %v", got)
+	}
+	requireAllUnder200(t, got)
 	froms := stub.requests()
 	if len(froms) != 2 {
 		t.Fatalf("requests %v", froms)
 	}
-	if want := time.Now().UTC().AddDate(-30, 0, 0); froms[1].After(want.AddDate(0, 0, 1)) {
-		t.Fatalf("rebackfill from %v, want about %v", froms[1], want)
+	requireThirtyYearsBack(t, froms[1])
+	requireAnchor(t, app, "2024-06-10", 121.79)
+}
+
+func TestSweepRetriesRebackfillAfterFailure(t *testing.T) {
+	dates := weekdays(10)
+	last := dates[len(dates)-1]
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	stub.failRequest = 2
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, seriesAt(dates, 1200))
+	setAnchor(t, app, last, 1209)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+	requireAnchor(t, app, last, 1209)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	requireAllUnder200(t, storedCloses(t, app, "NVDA"))
+	requireAnchor(t, app, last, 129)
+	froms := stub.requests()
+	if len(froms) != 4 {
+		t.Fatalf("requests %v", froms)
 	}
+	requireThirtyYearsBack(t, froms[3])
+}
+
+func TestSweepRebackfillsDespiteDualWrittenRecentBars(t *testing.T) {
+	dates := weekdays(15)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, seriesAt(dates, 1200))
+	setAnchor(t, app, dates[2], 1202)
+	// A user's history request wrote adjusted bars over the last ten days.
+	recent := map[string]float64{}
+	for i := 5; i < len(dates); i++ {
+		recent[dates[i]] = 120 + float64(i)
+	}
+	seedBars(t, svc, recent)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	requireAllUnder200(t, storedCloses(t, app, "NVDA"))
+	froms := stub.requests()
+	if len(froms) != 2 {
+		t.Fatalf("requests %v", froms)
+	}
+	requireThirtyYearsBack(t, froms[1])
+}
+
+func TestSweepBackfillsWhenNoAnchor(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, seriesAt(dates, 1200))
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	froms := stub.requests()
+	if len(froms) != 1 {
+		t.Fatalf("requests %v", froms)
+	}
+	requireThirtyYearsBack(t, froms[0])
+	requireAllUnder200(t, storedCloses(t, app, "NVDA"))
+	requireAnchor(t, app, dates[len(dates)-1], 124)
 }
 
 func TestSweepAppendsWithoutRebackfill(t *testing.T) {
 	dates := weekdays(10)
+	last := dates[len(dates)-1]
 	stub := newCandleStub(t, seriesAt(dates, 120))
 	stub.series["2024-06-10"] = 121.79
+	stub.series[todayKey()] = 130
 	app, svc := ingestApp(t, stub)
 	addWatchlistSymbol(t, app, "NVDA")
-	seedBars(t, svc, "NVDA", seriesAt(dates, 120))
+	seedBars(t, svc, seriesAt(dates, 120))
+	setAnchor(t, app, last, 129)
 
 	market.Sweep(context.Background(), app.Deps, svc)
 
-	if got := storedCloses(t, app, "NVDA"); len(got) != len(dates)+1 {
+	got := storedCloses(t, app, "NVDA")
+	if len(got) != len(dates)+2 {
 		t.Fatalf("NVDA bars %v", got)
 	}
 	froms := stub.requests()
-	want := time.Date(2024, 5, 31, 0, 0, 0, 0, time.UTC) // seven days before 2024-06-07
+	want, _ := time.Parse("2006-01-02", last)
 	if len(froms) != 1 || !froms[0].Equal(want) {
 		t.Fatalf("requests %v, want one from %v", froms, want)
 	}
+	// Today's bar is in the store but never the anchor.
+	requireAnchor(t, app, "2024-06-10", 121.79)
 }
 
 func TestHistoryJobRunsWhenOnlyCadenceEnabled(t *testing.T) {

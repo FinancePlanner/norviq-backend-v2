@@ -378,6 +378,37 @@ func (q *Queries) ListPriceHistory(ctx context.Context, arg ListPriceHistoryPara
 	return items, nil
 }
 
+const marketHistoryAnchor = `-- name: MarketHistoryAnchor :many
+SELECT anchor_date, anchor_close FROM market_history_anchors
+WHERE instrument_key = $1
+`
+
+type MarketHistoryAnchorRow struct {
+	AnchorDate  time.Time
+	AnchorClose float64
+}
+
+// Zero rows means no anchor: the history has not been verified by the job.
+func (q *Queries) MarketHistoryAnchor(ctx context.Context, instrumentKey string) ([]MarketHistoryAnchorRow, error) {
+	rows, err := q.db.Query(ctx, marketHistoryAnchor, instrumentKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MarketHistoryAnchorRow{}
+	for rows.Next() {
+		var i MarketHistoryAnchorRow
+		if err := rows.Scan(&i.AnchorDate, &i.AnchorClose); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const marketPriceBarCloses = `-- name: MarketPriceBarCloses :many
 SELECT date, adjusted_close FROM market_price_bars
 WHERE instrument_key = $1 AND date BETWEEN $2::date AND $3::date
@@ -564,6 +595,24 @@ func (q *Queries) UpsertFxRate(ctx context.Context, arg UpsertFxRateParams) (Ups
 		&i.Rate,
 	)
 	return i, err
+}
+
+const upsertMarketHistoryAnchor = `-- name: UpsertMarketHistoryAnchor :exec
+INSERT INTO market_history_anchors (instrument_key, anchor_date, anchor_close, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (instrument_key) DO UPDATE SET
+    anchor_date = EXCLUDED.anchor_date, anchor_close = EXCLUDED.anchor_close, updated_at = now()
+`
+
+type UpsertMarketHistoryAnchorParams struct {
+	InstrumentKey string
+	AnchorDate    time.Time
+	AnchorClose   float64
+}
+
+func (q *Queries) UpsertMarketHistoryAnchor(ctx context.Context, arg UpsertMarketHistoryAnchorParams) error {
+	_, err := q.db.Exec(ctx, upsertMarketHistoryAnchor, arg.InstrumentKey, arg.AnchorDate, arg.AnchorClose)
+	return err
 }
 
 const upsertMarketPriceBar = `-- name: UpsertMarketPriceBar :exec

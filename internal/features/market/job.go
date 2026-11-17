@@ -85,8 +85,9 @@ func parseInt(raw string) (int, bool) {
 	return n, err == nil
 }
 
-// Sweep is one pass over every held, watchlisted and benchmark symbol. A rate-limited provider stops
-// the sweep; any other per-symbol failure is logged and skipped.
+// Sweep is one pass over every held, watchlisted and benchmark symbol. A
+// rate-limited provider stops the sweep; any other per-symbol failure is
+// logged and skipped.
 func Sweep(ctx context.Context, d *server.Deps, svc *marketdata.Service) {
 	q := marketdatadb.New(d.DB)
 	raw, err := q.HistoryIngestionSymbols(ctx)
@@ -126,19 +127,9 @@ func FetchStart(lastDate *time.Time, fallbackStart time.Time) time.Time {
 	return marketdata.StartOfDay(*lastDate).AddDate(0, 0, 1)
 }
 
-// overlapDays is how far back an incremental fetch reaches into stored bars,
-// so a split shows up as a disagreement on dates already held.
-const overlapDays = 7
-
-// divergenceTolerance is the relative close difference above which a stored
-// bar and the provider's current bar are considered to disagree.
+// divergenceTolerance is the relative close difference above which an anchor
+// close and the provider's current bar are considered to disagree.
 const divergenceTolerance = 0.005
-
-// OverlapStart is where an incremental fetch begins: seven days before the
-// last stored bar, so it re-reads bars that already exist.
-func OverlapStart(last time.Time) time.Time {
-	return marketdata.StartOfDay(last).AddDate(0, 0, -overlapDays)
-}
 
 // HistoryDiverged reports whether any date present in both maps (keys are
 // yyyy-MM-dd) differs by more than 0.5%, which is what a stock split in the
@@ -163,14 +154,32 @@ type fetchedBars struct {
 }
 
 // fetchBars loads bars from the market provider, falling back to FMP end of
-// day data when it returns none. RefreshHistory also upserts what it fetched.
-func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, start, today time.Time) (fetchedBars, error) {
+// day data when it returns none. An incremental fetch goes through
+// RefreshHistory, which also upserts what it fetched.
+//
+// A full-history fetch (full) asks the provider directly and returns only what
+// it sent: when the provider fails (Finnhub turns errors into an empty
+// history) RefreshHistory answers with whatever is stored, which would pass
+// for a successful fetch of stale, unadjusted bars.
+func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, start, today time.Time, full bool) (fetchedBars, error) {
 	from, to := marketdata.FormatDateOnly(start), marketdata.FormatDateOnly(today)
-	resp, err := svc.RefreshHistory(ctx, symbol, &from, &to)
-	if err != nil {
-		return fetchedBars{}, err
+	var out fetchedBars
+	if full {
+		h, err := svc.Provider.History(ctx, symbol, &start, &today)
+		if err != nil {
+			return fetchedBars{}, err
+		}
+		out = fetchedBars{currency: h.Currency, provider: svc.Provider.Name()}
+		for _, b := range h.Bars {
+			out.bars = append(out.bars, marketdata.PriceBarResponse{Date: marketdata.FormatDateOnly(b.Date), Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume})
+		}
+	} else {
+		resp, err := svc.RefreshHistory(ctx, symbol, &from, &to)
+		if err != nil {
+			return fetchedBars{}, err
+		}
+		out = fetchedBars{bars: resp.Bars, currency: resp.Currency, provider: "market"}
 	}
-	out := fetchedBars{bars: resp.Bars, currency: resp.Currency, provider: "market"}
 	if len(out.bars) == 0 && svc.FMP != nil {
 		points, err := svc.FMP.StockHistoricalEOD(ctx, symbol, &from, &to)
 		if err != nil {
@@ -192,35 +201,30 @@ func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, star
 func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *marketdata.Service, symbol string, now time.Time) error {
 	today := marketdata.StartOfDay(now)
 	fallbackStart := today.AddDate(-30, 0, 0)
-	dates, err := q.MarketPriceBarLastDate(ctx, marketdatadb.MarketPriceBarLastDateParams{InstrumentKey: symbol, FromDate: fallbackStart, ToDate: today})
+	anchors, err := q.MarketHistoryAnchor(ctx, symbol)
 	if err != nil {
 		return err
 	}
+	// Without an anchor the stored history is unverified: backfill it all.
 	start := fallbackStart
-	stored := map[string]float64{}
-	if len(dates) > 0 {
-		start = OverlapStart(dates[0])
-		// Read before fetching: RefreshHistory overwrites the overlap window.
-		rows, err := q.MarketPriceBarCloses(ctx, marketdatadb.MarketPriceBarClosesParams{InstrumentKey: symbol, FromDate: start, ToDate: today})
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			stored[marketdata.FormatDateOnly(r.Date)] = r.AdjustedClose
-		}
+	if len(anchors) > 0 {
+		start = marketdata.StartOfDay(anchors[0].AnchorDate)
 	}
-	got, err := fetchBars(ctx, svc, symbol, start, today)
+	got, err := fetchBars(ctx, svc, symbol, start, today, len(anchors) == 0)
 	if err != nil {
 		return err
 	}
-	if len(got.bars) > 0 && len(stored) > 0 {
-		fresh := make(map[string]float64, len(got.bars))
+	if len(anchors) > 0 && start.After(fallbackStart) {
+		key := marketdata.FormatDateOnly(start)
+		var fresh map[string]float64
 		for _, b := range got.bars {
-			fresh[b.Date] = b.Close
+			if b.Date == key {
+				fresh = map[string]float64{key: b.Close}
+			}
 		}
-		if HistoryDiverged(stored, fresh) {
+		if fresh == nil || HistoryDiverged(map[string]float64{key: anchors[0].AnchorClose}, fresh) {
 			d.Logger.Warn("scenario_history_ingestion rebackfill", "symbol", symbol)
-			if got, err = fetchBars(ctx, svc, symbol, fallbackStart, today); err != nil {
+			if got, err = fetchBars(ctx, svc, symbol, fallbackStart, today, true); err != nil {
 				return err
 			}
 		}
@@ -229,5 +233,24 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		d.Logger.Warn("scenario_history_ingestion returned no bars", "symbol", symbol)
 		return nil
 	}
-	return svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.provider, got.bars)
+	if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.provider, got.bars); err != nil {
+		return err
+	}
+	// Anchor on the newest completed day: today's bar may be a partial one.
+	var anchorDay string
+	var anchorClose float64
+	todayKey := marketdata.FormatDateOnly(today)
+	for _, b := range got.bars {
+		if b.Date < todayKey && b.Date > anchorDay {
+			anchorDay, anchorClose = b.Date, b.Close
+		}
+	}
+	if anchorDay == "" {
+		return nil
+	}
+	day, err := time.Parse("2006-01-02", anchorDay)
+	if err != nil {
+		return err
+	}
+	return q.UpsertMarketHistoryAnchor(ctx, marketdatadb.UpsertMarketHistoryAnchorParams{InstrumentKey: symbol, AnchorDate: day, AnchorClose: anchorClose})
 }

@@ -2,6 +2,8 @@ package cadence
 
 import (
 	"math"
+	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -189,34 +191,57 @@ func TestComputeIsPointInTime(t *testing.T) {
 		b := Compute(more, tf, DefaultRules, d(2040, 1, 1))
 		// the last reading of base may be a partial period that the appended days extend
 		for i := 0; i < len(a)-1; i++ {
-			if a[i].PeriodEnd != b[i].PeriodEnd || a[i].Zone != b[i].Zone ||
-				!eqPtr(a[i].Percentile, b[i].Percentile) || !eqPtr(a[i].Trend, b[i].Trend) {
-				t.Fatalf("%s reading %d (%v) changed after appending future data", tf, i, a[i].PeriodEnd)
+			if !reflect.DeepEqual(a[i], b[i]) {
+				t.Fatalf("%s reading %d (%v) changed after appending future data:\n%+v\n%+v", tf, i, a[i].PeriodEnd, a[i], b[i])
 			}
 		}
 	}
-}
-
-func eqPtr(a, b *float64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 func TestComputeFormingPeriod(t *testing.T) {
 	bars := series(d(2012, 1, 1), 365*12+10, rising) // ends mid-month
 	endDate := bars[len(bars)-1].Date
 	rs := Compute(bars, TimeframeMonth, DefaultRules, endDate)
-	if last(rs).Confirmed || !rs[len(rs)-2].Confirmed {
-		t.Fatalf("mid-month: last=%v prev=%v", last(rs).Confirmed, rs[len(rs)-2].Confirmed)
+	lastR := last(rs)
+	if lastR.Confirmed || !rs[len(rs)-2].Confirmed {
+		t.Fatalf("mid-month: last=%v prev=%v", lastR.Confirmed, rs[len(rs)-2].Confirmed)
 	}
-	monthEnd := d(endDate.Year(), endDate.Month()+1, 0)
-	if !last(Compute(bars, TimeframeMonth, DefaultRules, monthEnd)).Confirmed {
-		t.Fatal("on last day of month the reading should be confirmed")
+	monthEndDay := d(endDate.Year(), endDate.Month()+1, 0)
+	if lastR.PeriodEnd != monthEndDay {
+		t.Fatalf("PeriodEnd = %v, want %v", lastR.PeriodEnd, monthEndDay)
 	}
-	if got := last(rs).PeriodEnd; got != monthEnd {
-		t.Fatalf("PeriodEnd = %v, want %v", got, monthEnd)
+	if last(Compute(bars, TimeframeMonth, DefaultRules, monthEndDay)).Confirmed {
+		t.Fatal("on the last day of the month the close may not exist yet: reading must stay unconfirmed")
+	}
+	if !last(Compute(bars, TimeframeMonth, DefaultRules, monthEndDay.AddDate(0, 0, 1))).Confirmed {
+		t.Fatal("on the first day of the next month the reading must be confirmed")
+	}
+	// The forming sample is not part of its own window: SampleCount equals the
+	// number of earlier readings with a distance inside the 15-year window.
+	want := 0
+	cutoff := lastR.AsOf.AddDate(-15, 0, 0)
+	for _, p := range rs[:len(rs)-1] {
+		if p.Distance != nil && !p.AsOf.Before(cutoff) {
+			want++
+		}
+	}
+	if lastR.SampleCount != want {
+		t.Fatalf("SampleCount = %d, want %d (prior usable samples in window)", lastR.SampleCount, want)
+	}
+}
+
+func TestComputeLastDayOfPeriodIsNotConfirmedBeforeItsClose(t *testing.T) {
+	// Data through Thu 2024-05-30; Fri 2024-05-31 is the last day of May.
+	bars := series(d(2014, 1, 1), 3900, flat(100))
+	for len(bars) > 0 && bars[len(bars)-1].Date.After(d(2024, 5, 30)) {
+		bars = bars[:len(bars)-1]
+	}
+	r := last(Compute(bars, TimeframeMonth, DefaultRules, d(2024, 5, 31)))
+	if r.PeriodEnd != d(2024, 5, 31) || r.AsOf != d(2024, 5, 30) {
+		t.Fatalf("PeriodEnd %v AsOf %v", r.PeriodEnd, r.AsOf)
+	}
+	if r.Confirmed {
+		t.Fatal("May reading confirmed before the 31st's close exists")
 	}
 }
 
@@ -273,22 +298,142 @@ func TestComputeTouch(t *testing.T) {
 	}
 }
 
-func TestComputeGapsDoNotPanic(t *testing.T) {
-	start := d(2008, 1, 1)
+func gapSeries(start time.Time, days int, gapStart time.Time, gapDays int) []Bar {
+	gapEnd := gapStart.AddDate(0, 0, gapDays)
 	var bars []Bar
-	for _, b := range series(start, 365*14, rising) {
-		if b.Date.After(d(2013, 1, 1)) && b.Date.Before(d(2013, 1, 1).AddDate(0, 0, 400)) {
+	for _, b := range series(start, days, rising) {
+		if !b.Date.Before(gapStart) && b.Date.Before(gapEnd) {
 			continue
 		}
 		bars = append(bars, b)
 	}
+	return bars
+}
+
+func TestComputeGapYieldsInsufficientUntilTrendRecovers(t *testing.T) {
+	// Gap 2013-01-02 .. 2014-02-05: Jan 2013 keeps a lone bar on Jan 1.
+	bars := gapSeries(d(2000, 1, 1), 365*20, d(2013, 1, 2), 400)
 	rs := Compute(bars, TimeframeMonth, DefaultRules, d(2040, 1, 1))
-	if len(rs) == 0 || last(rs).PeriodEnd.Year() < 2020 {
-		t.Fatalf("no readings after gap")
-	}
+	preGap, firstReal := d(2012, 12, 31), time.Time{}
 	for _, r := range rs {
-		if r.PeriodEnd.After(d(2013, 1, 31)) && r.PeriodEnd.Before(d(2014, 1, 31)) {
-			t.Fatalf("period %v inside gap should be skipped", r.PeriodEnd)
+		// (2) the lone bar of Jan 2013 is not a month-end sample; no month of 2013 exists.
+		if r.PeriodEnd.Year() == 2013 {
+			t.Fatalf("reading for %v inside the gap", r.PeriodEnd)
+		}
+		// (1) every reading whose trailing 10 months span the gap is insufficient.
+		if r.AsOf.After(preGap) && r.AsOf.Before(d(2014, 11, 1)) {
+			if r.Zone != ZoneInsufficient || r.Trend != nil || r.Distance != nil || r.Percentile != nil {
+				t.Fatalf("reading %v spans the gap but has zone %s", r.PeriodEnd, r.Zone)
+			}
+		}
+		if firstReal.IsZero() && r.AsOf.After(preGap) && r.Zone != ZoneInsufficient {
+			firstReal = r.PeriodEnd
+		}
+	}
+	// (3) Feb 2014 is the first post-gap sample, so the 10th is Nov 2014.
+	if firstReal != d(2014, 11, 30) {
+		t.Fatalf("first real zone after the gap = %v, want 2014-11-30", firstReal)
+	}
+	// (4) no distance computed across the gap sits in a later window.
+	for _, r := range rs {
+		if r.PeriodEnd == d(2016, 6, 30) && r.Zone != ZoneSteady {
+			t.Fatalf("Jun 2016 zone %s percentile %v, want steady", r.Zone, r.Percentile)
+		}
+	}
+}
+
+func TestComputeWeeklyToleratesOneMissingWeek(t *testing.T) {
+	var bars []Bar
+	for _, b := range series(d(2010, 1, 4), 365*12, rising) {
+		if !b.Date.Before(d(2016, 3, 14)) && b.Date.Before(d(2016, 3, 21)) {
+			continue
+		}
+		bars = append(bars, b)
+	}
+	n := 0
+	for _, r := range Compute(bars, TimeframeWeek, DefaultRules, d(2040, 1, 1)) {
+		if r.AsOf.After(d(2016, 3, 13)) && r.AsOf.Before(d(2017, 1, 1)) {
+			n++
+			if r.Zone == ZoneInsufficient {
+				t.Fatalf("week %v lost its zone after one missing week", r.AsOf)
+			}
+		}
+	}
+	if n < 40 {
+		t.Fatalf("only %d readings after the missing week", n)
+	}
+}
+
+func TestComputeWeeklyTwoMissingWeeksBreaksTrend(t *testing.T) {
+	var bars []Bar
+	for _, b := range series(d(2010, 1, 4), 365*12, rising) {
+		if !b.Date.Before(d(2016, 3, 14)) && b.Date.Before(d(2016, 3, 28)) {
+			continue
+		}
+		bars = append(bars, b)
+	}
+	var covered, recovered int
+	for _, r := range Compute(bars, TimeframeWeek, DefaultRules, d(2040, 1, 1)) {
+		// first post-gap week starts 2016-03-28; its 40th sample is ~2016-12-26.
+		if r.AsOf.After(d(2016, 3, 27)) && r.AsOf.Before(d(2016, 12, 17)) {
+			covered++
+			if r.Zone != ZoneInsufficient || r.Trend != nil {
+				t.Fatalf("week %v covers the gap but has zone %s", r.AsOf, r.Zone)
+			}
+		}
+		if r.AsOf.After(d(2017, 1, 31)) && r.Zone != ZoneInsufficient {
+			recovered++
+		}
+	}
+	if covered < 30 || recovered == 0 {
+		t.Fatalf("covered %d recovered %d", covered, recovered)
+	}
+}
+
+func TestComputeIgnoresBarsAfterNow(t *testing.T) {
+	bars := series(d(2008, 1, 1), 365*12, rising)
+	now := bars[len(bars)-1].Date.AddDate(-5, 0, 0)
+	var truncated []Bar
+	for _, b := range bars {
+		if !b.Date.After(now) {
+			truncated = append(truncated, b)
+		}
+	}
+	for _, tf := range AllTimeframes() {
+		full := Compute(bars, tf, DefaultRules, now)
+		if len(full) == 0 {
+			t.Fatalf("%s: no readings", tf)
+		}
+		if !reflect.DeepEqual(full, Compute(truncated, tf, DefaultRules, now)) {
+			t.Errorf("%s: future bars changed the result", tf)
+		}
+		if got := last(full); got.AsOf.After(now) || got.PeriodEnd.Before(now) {
+			t.Errorf("%s: last reading AsOf %v PeriodEnd %v for now %v", tf, got.AsOf, got.PeriodEnd, now)
+		}
+	}
+}
+
+func TestComputeUnsortedInputMatchesSorted(t *testing.T) {
+	bars := series(d(2008, 1, 1), 365*12, rising)
+	shuffled := append([]Bar{}, bars...)
+	rng := rand.New(rand.NewSource(1))
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	for _, tf := range AllTimeframes() {
+		if !reflect.DeepEqual(Compute(bars, tf, DefaultRules, d(2040, 1, 1)), Compute(shuffled, tf, DefaultRules, d(2040, 1, 1))) {
+			t.Errorf("%s: shuffled input differs", tf)
+		}
+	}
+}
+
+func TestComputeDuplicateDatesKeepLast(t *testing.T) {
+	bars := series(d(2008, 1, 1), 365*12, rising)
+	var doubled []Bar
+	for _, b := range bars {
+		doubled = append(doubled, Bar{Date: b.Date, Close: 999}, b)
+	}
+	for _, tf := range AllTimeframes() {
+		if !reflect.DeepEqual(Compute(bars, tf, DefaultRules, d(2040, 1, 1)), Compute(doubled, tf, DefaultRules, d(2040, 1, 1))) {
+			t.Errorf("%s: duplicates not collapsed to the last occurrence", tf)
 		}
 	}
 }

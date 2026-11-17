@@ -6,6 +6,7 @@ package cadence
 
 import (
 	"math"
+	"sort"
 	"time"
 
 	"norviq-api/internal/platform/marketdata"
@@ -156,49 +157,108 @@ func utcDay(t time.Time) time.Time {
 }
 
 // sample is one grid point: the last close of its week or month, plus the
-// lowest daily close seen in that bucket.
+// lowest daily close seen in that bucket. grid is the consecutive index of the
+// bucket (calendar month or ISO week), used to detect gaps.
 type sample struct {
 	date  time.Time
 	close float64
 	low   float64
+	grid  int
 }
 
-// buildSamples groups consecutive bars into buckets and keeps the last close of
-// each. Bars with a NaN, infinite or non-positive close are skipped; buckets
-// with no bar produce no sample.
-func buildSamples(daily []Bar, sp spec) []sample {
-	grid := monthPeriod
-	if sp.weekly {
-		grid = weekPeriod
-	}
-	var out []sample
-	curKey := 0
+// cleanBars returns a copy of daily that is safe to bucket: bars with a NaN,
+// infinite or non-positive close are dropped, bars dated after today are
+// ignored, the rest are sorted ascending by UTC date (stable) and duplicate
+// dates collapse to the last occurrence.
+func cleanBars(daily []Bar, today time.Time) []Bar {
+	bars := make([]Bar, 0, len(daily))
 	for _, b := range daily {
 		if !(b.Close > 0) || math.IsInf(b.Close, 0) {
 			continue
 		}
 		date := utcDay(b.Date)
-		key, _ := grid(date)
-		if n := len(out); n > 0 && key == curKey {
-			out[n-1].date, out[n-1].close = date, b.Close
-			out[n-1].low = math.Min(out[n-1].low, b.Close)
+		if date.After(today) {
 			continue
 		}
-		curKey = key
-		out = append(out, sample{date: date, close: b.Close, low: b.Close})
+		bars = append(bars, Bar{Date: date, Close: b.Close})
 	}
+	sort.SliceStable(bars, func(i, j int) bool { return bars[i].Date.Before(bars[j].Date) })
+	out := bars[:0]
+	for _, b := range bars {
+		if n := len(out); n > 0 && out[n-1].Date.Equal(b.Date) {
+			out[n-1] = b
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+func monthGrid(t time.Time) int { return t.Year()*12 + int(t.Month()) - 1 }
+
+// weekGrid numbers ISO weeks consecutively: the day number of the week's Monday
+// divided by seven.
+func weekGrid(t time.Time) int {
+	days := int(t.Unix() / 86400)
+	return (days - (int(isoWeekday(t)) - 1)) / 7
+}
+
+// buildSamples groups bars into week or month buckets and keeps the last close
+// of each. A month bucket only counts as a month-end sample when its last bar
+// is in the final seven calendar days of the month, or it is the forming month
+// (the one containing today). Buckets with no bar produce no sample.
+func buildSamples(bars []Bar, sp spec, today time.Time) []sample {
+	grid := monthGrid
+	if sp.weekly {
+		grid = weekGrid
+	}
+	var out []sample
+	var cur *sample
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		keep := sp.weekly
+		if !keep {
+			end := monthEnd(cur.date.Year(), cur.date.Month())
+			forming := cur.date.Year() == today.Year() && cur.date.Month() == today.Month()
+			keep = forming || !cur.date.Before(end.AddDate(0, 0, -6))
+		}
+		if keep {
+			out = append(out, *cur)
+		}
+		cur = nil
+	}
+	for _, b := range bars {
+		g := grid(b.Date)
+		if cur != nil && cur.grid == g {
+			cur.date, cur.close = b.Date, b.Close
+			cur.low = math.Min(cur.low, b.Close)
+			continue
+		}
+		flush()
+		cur = &sample{date: b.Date, close: b.Close, low: b.Close, grid: g}
+	}
+	flush()
 	return out
 }
 
 // Compute returns one Reading per timeframe period, from the first with a
 // trend value to the current one, ascending. Percentiles are point-in-time: a
 // sample is ranked only against earlier samples within the last 15 years.
+//
+// A trend is usable only when its trailing samples are consecutive grid
+// buckets (weeks tolerate one missing week). Periods without a usable trend
+// after the first usable one come back as insufficient readings and are never
+// part of a ranking window. Bars dated after now are ignored. A reading is
+// confirmed only when its period ended before now's UTC date.
 func Compute(daily []Bar, tf Timeframe, r RuleSet, now time.Time) []Reading {
 	sp, ok := specFor(tf)
 	if !ok {
 		return nil
 	}
-	samples := buildSamples(daily, sp)
+	today := utcDay(now)
+	samples := buildSamples(cleanBars(daily, today), sp, today)
 	if len(samples) == 0 {
 		return nil
 	}
@@ -206,12 +266,19 @@ func Compute(daily []Bar, tf Timeframe, r RuleSet, now time.Time) []Reading {
 	for i, s := range samples {
 		closes[i] = s.close
 	}
-	trend := marketdata.MovingAverageSeries(closes, sp.trendLen)
+	sma := marketdata.MovingAverageSeries(closes, sp.trendLen)
+	trend := make([]*float64, len(samples))
 	dist := make([]*float64, len(samples))
-	for i, t := range trend {
-		if t != nil {
-			dist[i] = ptr(closes[i]/(*t) - 1)
+	for i := range samples {
+		if sma[i] == nil {
+			continue
 		}
+		span := samples[i].grid - samples[i-sp.trendLen+1].grid
+		if (sp.weekly && span > sp.trendLen) || (!sp.weekly && span != sp.trendLen-1) {
+			continue
+		}
+		trend[i] = sma[i]
+		dist[i] = ptr(closes[i]/(*sma[i]) - 1)
 	}
 
 	// The reading for a period uses the last sample in it; its low is the lowest
@@ -234,24 +301,27 @@ func Compute(daily []Bar, tf Timeframe, r RuleSet, now time.Time) []Reading {
 		periods = append(periods, periodRef{idx: i, end: end, low: s.low})
 	}
 
-	today := utcDay(now)
 	var out []Reading
-	for pi, p := range periods {
+	seenTrend := false
+	for _, p := range periods {
 		i := p.idx
-		if trend[i] == nil {
-			continue
-		}
 		s := samples[i]
 		rd := Reading{
 			Timeframe: tf,
 			PeriodEnd: p.end,
 			AsOf:      s.date,
 			Close:     s.close,
-			Trend:     trend[i],
-			Distance:  dist[i],
 			Zone:      ZoneInsufficient,
-			Confirmed: pi < len(periods)-1 || !p.end.After(today),
+			Confirmed: p.end.Before(today),
 		}
+		if trend[i] == nil {
+			if seenTrend {
+				out = append(out, rd)
+			}
+			continue
+		}
+		seenTrend = true
+		rd.Trend, rd.Distance = trend[i], dist[i]
 		window := historyWindow(samples, dist, i)
 		rd.SampleCount = len(window)
 		if len(window) >= sp.minSamples {

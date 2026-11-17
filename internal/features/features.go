@@ -30,6 +30,7 @@ import (
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/cadence"
 	"norviq-api/internal/features/crypto"
 	"norviq-api/internal/features/dashboard"
 	"norviq-api/internal/features/dataexport"
@@ -269,6 +270,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		cadence.ZonesJob{},
 		reporting.WorkerJob{},
 		reporting.RetentionJob{},
 		expenseimport.RetentionJob{},

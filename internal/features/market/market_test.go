@@ -666,6 +666,100 @@ func TestSweepAppendsWithoutRebackfill(t *testing.T) {
 	requireAnchor(t, app, "2024-06-10", 121.79)
 }
 
+// seedPriceHistory stores closes in the legacy price_history table.
+func seedPriceHistory(t *testing.T, app *testutil.App, closes map[string]float64) {
+	t.Helper()
+	for d, c := range closes {
+		if _, err := app.Deps.DB.Exec(context.Background(),
+			`INSERT INTO price_history (id, symbol, date, open, high, low, close, created_at) VALUES ($1, 'NVDA', $2::date, $3, $3, $3, $3, now())`,
+			uuid.New(), d, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func priceHistoryCloses(t *testing.T, app *testutil.App) map[string]float64 {
+	t.Helper()
+	rows, err := app.Deps.DB.Query(context.Background(),
+		`SELECT to_char(date, 'YYYY-MM-DD'), close FROM price_history WHERE symbol = 'NVDA'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]float64{}
+	for rows.Next() {
+		var d string
+		var c float64
+		if err := rows.Scan(&d, &c); err != nil {
+			t.Fatal(err)
+		}
+		out[d] = c
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestSweepRebackfillRewritesPriceHistory(t *testing.T) {
+	dates := weekdays(10)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	seedBars(t, svc, seriesAt(dates, 1200))
+	seedPriceHistory(t, app, seriesAt(dates, 1200))
+	setAnchor(t, app, dates[len(dates)-1], 1209)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	got := priceHistoryCloses(t, app)
+	if len(got) != len(dates) {
+		t.Fatalf("price_history %v", got)
+	}
+	requireAllUnder200(t, got)
+	requireAllUnder200(t, storedCloses(t, app, "NVDA"))
+}
+
+func TestSweepBackfillWritesPriceHistory(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := priceHistoryCloses(t, app); len(got) != len(dates) {
+		t.Fatalf("price_history %v", got)
+	}
+}
+
+func TestSweepIncrementalEmptyProviderLeavesAnchor(t *testing.T) {
+	dates := weekdays(10)
+	last := dates[len(dates)-1]
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	stub.failRequest = 1
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	old := seriesAt(dates, 1200)
+	seedBars(t, svc, old)
+	seedPriceHistory(t, app, old)
+	setAnchor(t, app, last, 1209)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	requireAnchor(t, app, last, 1209)
+	for name, got := range map[string]map[string]float64{"market_price_bars": storedCloses(t, app, "NVDA"), "price_history": priceHistoryCloses(t, app)} {
+		if len(got) != len(old) {
+			t.Fatalf("%s %v", name, got)
+		}
+		for d, c := range got {
+			if c != old[d] {
+				t.Errorf("%s %s rewritten to %v", name, d, c)
+			}
+		}
+	}
+}
+
 func TestHistoryJobRunsWhenOnlyCadenceEnabled(t *testing.T) {
 	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
 	t.Setenv("CADENCE_ENABLED", "true")

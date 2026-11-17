@@ -150,36 +150,21 @@ func HistoryDiverged(stored, fresh map[string]float64) bool {
 type fetchedBars struct {
 	bars     []marketdata.PriceBarResponse
 	currency string
-	provider string
+	// fallback is set when the bars came from the FMP fallback, which the
+	// service has not stored; primary bars are already in both history tables.
+	fallback string
 }
 
-// fetchBars loads bars from the market provider, falling back to FMP end of
-// day data when it returns none. An incremental fetch goes through
-// RefreshHistory, which also upserts what it fetched.
-//
-// A full-history fetch (full) asks the provider directly and returns only what
-// it sent: when the provider fails (Finnhub turns errors into an empty
-// history) RefreshHistory answers with whatever is stored, which would pass
-// for a successful fetch of stale, unadjusted bars.
-func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, start, today time.Time, full bool) (fetchedBars, error) {
+// fetchBars loads bars from the market provider, which stores them in
+// price_history and market_price_bars and returns only what it sent, never
+// stored rows. When it sent none it falls back to FMP end of day data.
+func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, start, today time.Time) (fetchedBars, error) {
 	from, to := marketdata.FormatDateOnly(start), marketdata.FormatDateOnly(today)
-	var out fetchedBars
-	if full {
-		h, err := svc.Provider.History(ctx, symbol, &start, &today)
-		if err != nil {
-			return fetchedBars{}, err
-		}
-		out = fetchedBars{currency: h.Currency, provider: svc.Provider.Name()}
-		for _, b := range h.Bars {
-			out.bars = append(out.bars, marketdata.PriceBarResponse{Date: marketdata.FormatDateOnly(b.Date), Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume})
-		}
-	} else {
-		resp, err := svc.RefreshHistory(ctx, symbol, &from, &to)
-		if err != nil {
-			return fetchedBars{}, err
-		}
-		out = fetchedBars{bars: resp.Bars, currency: resp.Currency, provider: "market"}
+	resp, err := svc.FetchAndStoreProviderHistory(ctx, symbol, &from, &to)
+	if err != nil {
+		return fetchedBars{}, err
 	}
+	out := fetchedBars{bars: resp.Bars, currency: resp.Currency}
 	if len(out.bars) == 0 && svc.FMP != nil {
 		points, err := svc.FMP.StockHistoricalEOD(ctx, symbol, &from, &to)
 		if err != nil {
@@ -193,7 +178,7 @@ func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, star
 			}
 			out.bars = append(out.bars, marketdata.PriceBarResponse{Date: p.Date, Open: p.Price, High: p.Price, Low: p.Price, Close: p.Price, Volume: vol})
 		}
-		out.provider = svc.FMP.Name()
+		out.fallback = svc.FMP.Name()
 	}
 	return out, nil
 }
@@ -210,9 +195,14 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 	if len(anchors) > 0 {
 		start = marketdata.StartOfDay(anchors[0].AnchorDate)
 	}
-	got, err := fetchBars(ctx, svc, symbol, start, today, len(anchors) == 0)
+	got, err := fetchBars(ctx, svc, symbol, start, today)
 	if err != nil {
 		return err
+	}
+	if len(got.bars) == 0 {
+		// Nothing to compare or store; the provider may be failing quietly.
+		d.Logger.Warn("scenario_history_ingestion returned no bars", "symbol", symbol)
+		return nil
 	}
 	if len(anchors) > 0 && start.After(fallbackStart) {
 		key := marketdata.FormatDateOnly(start)
@@ -224,7 +214,7 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		}
 		if fresh == nil || HistoryDiverged(map[string]float64{key: anchors[0].AnchorClose}, fresh) {
 			d.Logger.Warn("scenario_history_ingestion rebackfill", "symbol", symbol)
-			if got, err = fetchBars(ctx, svc, symbol, fallbackStart, today, true); err != nil {
+			if got, err = fetchBars(ctx, svc, symbol, fallbackStart, today); err != nil {
 				return err
 			}
 		}
@@ -233,8 +223,10 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		d.Logger.Warn("scenario_history_ingestion returned no bars", "symbol", symbol)
 		return nil
 	}
-	if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.provider, got.bars); err != nil {
-		return err
+	if got.fallback != "" {
+		if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.fallback, got.bars); err != nil {
+			return err
+		}
 	}
 	// Anchor on the newest completed day: today's bar may be a partial one.
 	var anchorDay string

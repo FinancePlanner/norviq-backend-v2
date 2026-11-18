@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -409,9 +408,7 @@ func (c *candleStub) requests() []time.Time {
 
 func ingestApp(t *testing.T, stub *candleStub) (*testutil.App, *marketdata.Service) {
 	t.Helper()
-	if _, set := os.LookupEnv("CADENCE_ENABLED"); !set {
-		t.Setenv("CADENCE_ENABLED", "true") // watchlist symbols are ingested only with Cadence on
-	}
+	t.Setenv("CADENCE_ENABLED", "true") // watchlist symbols are ingested only with Cadence on
 	app := testutil.NewApp(t, nil)
 	svc := marketdata.NewFromSettings(
 		marketdata.Settings{MarketProvider: "finnhub", FinnhubAPIKey: "test", FinnhubBaseURL: stub.srv.URL},
@@ -873,10 +870,10 @@ func TestHistoryJobRunsWhenOnlyCadenceEnabled(t *testing.T) {
 }
 
 func TestHistoryJobIdleWhenBothFlagsOff(t *testing.T) {
-	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
-	t.Setenv("CADENCE_ENABLED", "false")
 	stub := newCandleStub(t, seriesAt(weekdays(3), 100))
 	app, svc := ingestApp(t, stub)
+	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
+	t.Setenv("CADENCE_ENABLED", "false")
 	addWatchlistSymbol(t, app, "AAPL")
 
 	done := make(chan struct{})

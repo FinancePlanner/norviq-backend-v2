@@ -252,6 +252,51 @@ func TestComputeSymbolAppliesGuardToNewestReading(t *testing.T) {
 	}
 }
 
+// TestComputeSymbolGuardsConfirmedWhenNewestInsufficient: October has no
+// bars, so November is the newest reading and its trend spans the gap
+// (insufficient on every timeframe). The newest confirmed M reading is
+// September, which sits low against its trend and must still be guarded.
+func TestComputeSymbolGuardsConfirmedWhenNewestInsufficient(t *testing.T) {
+	stub := newGrowthStub(t, 200, `[{"symbol":"AAPL","date":"2025-09-30","period":"FY","revenueGrowth":-0.1,"freeCashFlowGrowth":-0.2}]`)
+	app, svc := newEnv(t, stub)
+	var dates []time.Time
+	var closes []float64
+	for d := barsStart; !d.After(anchorDay); d = d.AddDate(0, 0, 1) {
+		if wd := d.Weekday(); wd == time.Saturday || wd == time.Sunday || d.Month() == time.October && d.Year() == 2026 {
+			continue
+		}
+		dates = append(dates, d)
+		closes = append(closes, closeAt(d, true))
+	}
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO market_price_bars (instrument_key, date, open, high, low, close, adjusted_close, currency, provider)
+		 SELECT $1, d, c, c, c, c, c, 'USD', 'test' FROM unnest($2::date[], $3::float8[]) AS t(d, c)`,
+		"AAPL", dates, closes); err != nil {
+		t.Fatalf("seed gapped bars: %v", err)
+	}
+	seedAnchor(t, app, closeAt(anchorDay, true))
+	compute(t, app, svc, "AAPL", day(2026, time.November, 18))
+
+	if n := stub.calls.Load(); n != 1 {
+		t.Fatalf("growth endpoint called %d times, want 1", n)
+	}
+	rows := rowsFor(t, app, "AAPL", cadence.TimeframeMonth)
+	newestConfirmed := -1
+	for i, r := range rows {
+		if r.Confirmed {
+			newestConfirmed = i
+		}
+	}
+	if newestConfirmed < 0 {
+		t.Fatal("no confirmed M row")
+	}
+	r := rows[newestConfirmed]
+	if r.CappedZone != string(cadence.ZoneSteady) || r.GuardReason == nil ||
+		*r.GuardReason != cadence.GuardFundamentalsWeakening || !r.GuardChecked {
+		t.Fatalf("newest confirmed M row %v (zone %q) not guarded: %+v", r.PeriodEnd, r.Zone, r)
+	}
+}
+
 func TestComputeSymbolClearsGuardOnOlderRows(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
 	seedHistory(t, app, barsStart, true)

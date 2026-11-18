@@ -151,9 +151,21 @@ func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service,
 	hasReadings := false
 	for _, tf := range AllTimeframes() {
 		readings[tf] = Compute(bars, tf, rules, now)
-		// Nothing to judge when the newest reading has no trend.
-		if rs := readings[tf]; len(rs) > 0 && rs[len(rs)-1].Zone != ZoneInsufficient {
+		// Nothing to judge when neither the newest reading nor the newest
+		// confirmed one has a trend. A gap in the history can leave the
+		// newest reading insufficient while the confirmed one before it is
+		// a real zone that the API still serves.
+		rs := readings[tf]
+		if len(rs) > 0 && rs[len(rs)-1].Zone != ZoneInsufficient {
 			hasReadings = true
+		}
+		for i := len(rs) - 1; i >= 0; i-- {
+			if rs[i].Confirmed {
+				if rs[i].Zone != ZoneInsufficient {
+					hasReadings = true
+				}
+				break
+			}
 		}
 	}
 

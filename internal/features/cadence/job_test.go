@@ -290,7 +290,13 @@ func TestComputeSymbolGuardsConfirmedWhenNewestInsufficient(t *testing.T) {
 	if newestConfirmed < 0 {
 		t.Fatal("no confirmed M row")
 	}
+	if newest := rows[len(rows)-1]; !newest.PeriodEnd.Equal(day(2026, time.November, 30)) || newest.Zone != string(cadence.ZoneInsufficient) {
+		t.Fatalf("precondition: newest stored M row is %v zone %q, want 2026-11-30 insufficient", newest.PeriodEnd, newest.Zone)
+	}
 	r := rows[newestConfirmed]
+	if z := cadence.Zone(r.Zone); z != cadence.ZoneX2 && z != cadence.ZoneX3 && z != cadence.ZoneX4 {
+		t.Fatalf("precondition: newest confirmed M row zone %q (pre-guard) must be x2, x3 or x4", r.Zone)
+	}
 	if r.CappedZone != string(cadence.ZoneSteady) || r.GuardReason == nil ||
 		*r.GuardReason != cadence.GuardFundamentalsWeakening || !r.GuardChecked {
 		t.Fatalf("newest confirmed M row %v (zone %q) not guarded: %+v", r.PeriodEnd, r.Zone, r)

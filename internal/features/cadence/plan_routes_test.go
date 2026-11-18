@@ -136,11 +136,12 @@ type planBody struct {
 	Currency string     `json:"currency"`
 	Lines    []planLine `json:"lines"`
 	Totals   struct {
-		Baseline    float64  `json:"baseline"`
-		Wanted      float64  `json:"wanted"`
-		Planned     float64  `json:"planned"`
-		Surplus     *float64 `json:"surplus"`
-		Unallocated *float64 `json:"unallocated"`
+		Baseline              float64  `json:"baseline"`
+		Wanted                float64  `json:"wanted"`
+		Planned               float64  `json:"planned"`
+		Surplus               *float64 `json:"surplus"`
+		Unallocated           *float64 `json:"unallocated"`
+		OtherRecurringMonthly float64  `json:"otherRecurringMonthly"`
 	} `json:"totals"`
 	Scaled     bool     `json:"scaled"`
 	Notes      []string `json:"notes"`
@@ -266,6 +267,9 @@ func TestPlanHappyPath(t *testing.T) {
 	if a.Zone == nil || a.Zone.PeriodEnd != "2026-10-31" {
 		t.Fatalf("zone %+v", a.Zone)
 	}
+	if v.Baseline == nil || *v.Baseline != 216.67 {
+		t.Fatalf("weekly baseline is rounded in the JSON: %v", v.Baseline)
+	}
 }
 
 func TestPlanSumsAutobuysPerTicker(t *testing.T) {
@@ -352,5 +356,62 @@ func TestPlanQuoteFailure(t *testing.T) {
 	}
 	if a.Shares == nil || *a.Shares != 1 {
 		t.Fatalf("aapl %+v", a)
+	}
+}
+
+func TestPlanOtherRecurringFormingAndPercent(t *testing.T) {
+	app := planApp(t, allowGate, planUpstream{quotes: map[string]float64{"AAPL": 100, "VWCE": 100}})
+	u := newPlanUser(t, app)
+	hold(t, app, u.id, "AAPL")
+	planAutobuy(t, app, u.id, "AAPL", 100, "monthly", true)
+	// An active autobuy without a ticker is not a line (D7).
+	mustExec(t, app, `INSERT INTO autobuys (id, user_id, ticker, label, amount, cadence, percent, active, created_at, updated_at)
+		VALUES ($1, $2, NULL, 'Other', 80, 'monthly', NULL, true, now(), now())`, uuid.New(), u.id)
+	// A percent-of-contribution autobuy: 5000 * 0.04.
+	mustExec(t, app, `INSERT INTO autobuys (id, user_id, ticker, label, amount, cadence, percent, active, created_at, updated_at)
+		VALUES ($1, $2, 'VWCE', 'Pct', 5000, 'percentOfContribution', 0.04, true, now(), now())`, uuid.New(), u.id)
+	// D8: the forming November row never moves money; the confirmed October one does.
+	seed(t, app,
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.October), closeV: 100, zone: "steady", confirmed: true},
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.November), closeV: 100, zone: "x4", confirmed: false},
+	)
+	planSurplus(t, app, u.id, 900, "USD")
+
+	p := getPlan(t, app, u.token)
+	if len(p.Lines) != 2 {
+		t.Fatalf("the untickered autobuy must not be a line: %+v", p.Lines)
+	}
+	if p.Totals.OtherRecurringMonthly != 80 {
+		t.Fatalf("other recurring %v", p.Totals.OtherRecurringMonthly)
+	}
+	if v := lineOf(t, p, "VWCE"); v.Baseline == nil || *v.Baseline != 200 {
+		t.Fatalf("percent baseline %+v", v)
+	}
+	a := lineOf(t, p, "AAPL")
+	if a.Multiplier != 1 || a.Zone == nil || a.Zone.PeriodEnd != "2026-10-31" {
+		t.Fatalf("forming row leaked: %+v zone %+v", a, a.Zone)
+	}
+	if !closeTo(p.Totals.Unallocated, 900-p.Totals.Planned) || !closeTo(p.Totals.Unallocated, 600) {
+		t.Fatalf("unallocated %v planned %v", p.Totals.Unallocated, p.Totals.Planned)
+	}
+}
+
+func TestPlanConvertsQuoteCurrency(t *testing.T) {
+	up := planUpstream{
+		quotes: map[string]float64{"AAPL": 100},
+		fx:     map[string]map[string]float64{"USD": {"EUR": 0.9}},
+	}
+	app := planApp(t, allowGate, up)
+	u := newPlanUser(t, app)
+	hold(t, app, u.id, "AAPL")
+	mustExec(t, app, `UPDATE portfolio_lists SET base_currency = 'EUR' WHERE user_id = $1`, u.id)
+	planAutobuy(t, app, u.id, "AAPL", 180, "monthly", true)
+	p := getPlan(t, app, u.token)
+	l := lineOf(t, p, "AAPL")
+	if p.Currency != "EUR" || l.Price == nil || *l.Price != 100 || l.PriceCurrency == nil || *l.PriceCurrency != "USD" {
+		t.Fatalf("plan %s line %+v", p.Currency, l)
+	}
+	if l.Shares == nil || *l.Shares != 2 { // 180 / (100 * 0.9)
+		t.Fatalf("shares %+v", l)
 	}
 }

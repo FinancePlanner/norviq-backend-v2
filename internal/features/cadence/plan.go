@@ -18,6 +18,7 @@ const (
 	NoteQuoteStale          = "quote_stale"
 	NoteFxUnavailable       = "fx_unavailable"
 	NoteBelowMinimumTrade   = "below_minimum_trade"
+	NoteZoneOutdated        = "zone_outdated"
 )
 
 // Plan note codes.
@@ -66,7 +67,7 @@ type PlanInput struct {
 type PlanLineDTO struct {
 	Symbol        string   `json:"symbol"`
 	Held          bool     `json:"held"`
-	ZoneStatus    string   `json:"zoneStatus"` // "ready" | "pending" | "insufficient"
+	ZoneStatus    string   `json:"zoneStatus"` // "ready" | "pending" | "insufficient" | "outdated"
 	Zone          *ZoneDTO `json:"zone"`
 	Baseline      *float64 `json:"baseline"`
 	Multiplier    float64  `json:"multiplier"`
@@ -131,6 +132,9 @@ func BuildPlan(in PlanInput) PlanDTO {
 		case s.Zone.Zone == string(ZoneInsufficient):
 			l.ZoneStatus = "insufficient"
 			l.Notes = append(l.Notes, NoteInsufficientHistory)
+		case !zoneCurrent(s.Zone.PeriodEnd, in.Now):
+			l.ZoneStatus = "outdated"
+			l.Notes = append(l.Notes, NoteZoneOutdated)
 		default:
 			l.ZoneStatus = "ready"
 			l.Multiplier = s.Zone.Multiplier
@@ -178,10 +182,24 @@ func BuildPlan(in PlanInput) PlanDTO {
 		OtherRecurringMonthly: in.OtherRecurringMonthly,
 	}
 	if in.Surplus != nil {
-		u := rebalancing.RoundedMoney(*in.Surplus - planned)
+		u := max(rebalancing.RoundedMoney(*in.Surplus-planned), 0) + 0 // +0 turns -0 into 0
 		plan.Totals.Unallocated = &u
 	}
 	return plan
+}
+
+// zoneCurrent reports whether a zone's period end is on or after the last day
+// of the month two months before now's (UTC): the job may not have run yet at
+// a month start, and one missing month is tolerated. An unparsable date is not
+// current.
+func zoneCurrent(periodEnd string, now time.Time) bool {
+	end, err := time.Parse("2006-01-02", periodEnd)
+	if err != nil {
+		return false
+	}
+	n := now.UTC()
+	cutoff := time.Date(n.Year(), n.Month()-1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+	return !end.Before(cutoff)
 }
 
 // applyQuote copies the quote onto the line and flags a missing or stale one.
@@ -212,9 +230,10 @@ func sharesFor(l *PlanLineDTO, s PlanSymbolInput, in PlanInput, amount float64) 
 	case in.MinimumTrade > 0 && amount < in.MinimumTrade:
 		l.Notes = append(l.Notes, NoteBelowMinimumTrade)
 	case !(planPrice > 0):
+		l.Notes = append(l.Notes, NoteQuoteUnavailable)
 		return nil
 	case in.QuantityIncrement > 0:
-		shares = rebalancing.RoundedQuantity(amount/planPrice, in.QuantityIncrement)
+		shares = math.Round(rebalancing.RoundedQuantity(amount/planPrice+floatEpsilon, in.QuantityIncrement)*1e8) / 1e8
 	default:
 		shares = math.Floor(amount/planPrice*1e4+floatEpsilon) / 1e4
 	}

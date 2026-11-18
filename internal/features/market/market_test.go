@@ -902,6 +902,20 @@ func addAutobuy(t *testing.T, app *testutil.App, ticker string, active bool) {
 	}
 }
 
+func addHolding(t *testing.T, app *testutil.App, symbol string) {
+	t.Helper()
+	ctx := context.Background()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	list := uuid.New()
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Main', true, now())`, list, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, $3, 1, 1, '2024-01-02', now(), $4)`, uuid.New(), user, symbol, list); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSweepIngestsActiveAutobuyTickers(t *testing.T) {
 	dates := weekdays(5)
 	stub := newCandleStub(t, seriesAt(dates, 400))
@@ -924,9 +938,13 @@ func TestSweepSkipsAutobuyTickersWhenCadenceOff(t *testing.T) {
 	app, svc := ingestApp(t, stub)
 	t.Setenv("CADENCE_ENABLED", "false")
 	addAutobuy(t, app, "vwce", true)
+	addHolding(t, app, "AAPL") // positive control: the sweep does ingest
 
 	market.Sweep(context.Background(), app.Deps, svc)
 
+	if got := storedCloses(t, app, "AAPL"); len(got) == 0 {
+		t.Fatal("held AAPL not ingested: the sweep did nothing, so the check below proves nothing")
+	}
 	if got := storedCloses(t, app, "VWCE"); len(got) != 0 {
 		t.Fatalf("VWCE ingested with Cadence off: %v", got)
 	}

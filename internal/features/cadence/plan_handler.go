@@ -7,6 +7,7 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/features/autobuys"
+	"norviq-api/internal/features/rebalancing"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
 	"norviq-api/internal/store/autobuysdb"
@@ -36,7 +37,7 @@ func (h *handlers) plan(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	in.OtherRecurringMonthly = other
+	in.OtherRecurringMonthly = rebalancing.RoundedMoney(other)
 	held, err := h.q.UserHoldingSymbols(ctx, s.UserID)
 	if err != nil {
 		return err
@@ -116,7 +117,7 @@ func (h *handlers) symbolInputs(c *echo.Context, userID uuid.UUID, held []string
 		add(sym).Held = true
 	}
 	for sym, v := range baselines {
-		b := v
+		b := rebalancing.RoundedMoney(v)
 		add(sym).Baseline = &b
 	}
 	if len(symbols) == 0 {
@@ -162,7 +163,7 @@ func (h *handlers) surplusIn(ctx context.Context, userID uuid.UUID, planCurrency
 		if rate == nil {
 			return nil, NoteSurplusFxUnavailable, nil
 		}
-		amount *= *rate
+		amount = rebalancing.RoundedMoney(amount * *rate)
 	}
 	return &amount, "", nil
 }

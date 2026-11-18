@@ -11006,7 +11006,7 @@ components:
       properties:
         symbol: { type: string }
         held: { type: boolean, description: The symbol is an open position }
-        zoneStatus: { type: string, enum: [ready, pending, insufficient], description: "pending means no confirmed zone yet; insufficient means not enough history to rank" }
+        zoneStatus: { type: string, enum: [ready, pending, insufficient, outdated], description: "pending means no confirmed zone yet; insufficient means not enough history to rank; outdated means the newest confirmed zone ended more than a month before the last completed month, so it does not change the amount (multiplier 1)" }
         zone:
           nullable: true
           description: Newest confirmed monthly reading, after both guards
@@ -11024,7 +11024,7 @@ components:
           type: array
           items:
             type: string
-            enum: [no_recurring_buy, no_zone_yet, insufficient_history, quote_unavailable, quote_stale, fx_unavailable, below_minimum_trade]
+            enum: [no_recurring_buy, no_zone_yet, insufficient_history, quote_unavailable, quote_stale, fx_unavailable, below_minimum_trade, zone_outdated]
     CadencePlanTotals:
       type: object
       required: [baseline, wanted, planned, surplus, unallocated, otherRecurringMonthly]
@@ -11040,7 +11040,7 @@ components:
       required: [month, currency, lines, totals, scaled, scale, notes, ruleVersion, disclaimer]
       properties:
         month: { type: string, example: "2026-11", description: UTC month }
-        currency: { type: string, description: Plan currency (the default portfolio's) }
+        currency: { type: string, description: "Plan currency: the default portfolio's base currency, else any portfolio's, else MARKET_DEFAULT_CURRENCY, else USD" }
         lines:
           type: array
           items:

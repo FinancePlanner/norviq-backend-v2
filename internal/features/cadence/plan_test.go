@@ -16,7 +16,7 @@ var planNow = time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 func fp(v float64) *float64 { return &v }
 
 func zoneOf(zone string, mult float64) *cadence.ZoneDTO {
-	return &cadence.ZoneDTO{Zone: zone, CappedZone: zone, Multiplier: mult}
+	return &cadence.ZoneDTO{Zone: zone, CappedZone: zone, Multiplier: mult, PeriodEnd: "2026-10-31"}
 }
 
 func eurQuote() *cadence.PlanQuote {
@@ -222,4 +222,74 @@ func TestBuildPlanShape(t *testing.T) {
 		}
 	}
 	walk(tree)
+}
+
+func zoneEnding(zone string, mult float64, periodEnd string) *cadence.ZoneDTO {
+	z := zoneOf(zone, mult)
+	z.PeriodEnd = periodEnd
+	return z
+}
+
+func TestBuildPlanOutdatedZoneKeepsBaseline(t *testing.T) {
+	mk := func(now time.Time, zone *cadence.ZoneDTO) cadence.PlanLineDTO {
+		in := baseInput(fp(1000), []cadence.PlanSymbolInput{{Symbol: "AAPL", Baseline: fp(100), Zone: zone, Quote: eurQuote(), QuoteToPlan: fp(1)}})
+		in.Now = now
+		return line(t, cadence.BuildPlan(in), "AAPL")
+	}
+	l := mk(planNow, zoneEnding("x4", 4, "2026-08-31"))
+	if l.Multiplier != 1 || *l.Amount != 100 || l.ZoneStatus != "outdated" || !hasNote(l.Notes, cadence.NoteZoneOutdated) || l.Zone == nil {
+		t.Fatalf("aug %+v", l)
+	}
+	if l := mk(planNow, zoneEnding("x4", 4, "2026-09-30")); l.Multiplier != 4 || l.ZoneStatus != "ready" || hasNote(l.Notes, cadence.NoteZoneOutdated) {
+		t.Fatalf("sep %+v", l)
+	}
+	if l := mk(planNow, zoneEnding("extended", 0, "2026-10-31")); l.Multiplier != 0 || *l.Amount != 0 {
+		t.Fatalf("oct %+v", l)
+	}
+	dec := time.Date(2026, 12, 1, 0, 5, 0, 0, time.UTC)
+	if l := mk(dec, zoneEnding("x4", 4, "2026-10-31")); l.Multiplier != 4 {
+		t.Fatalf("dec oct %+v", l)
+	}
+	if l := mk(dec, zoneEnding("x4", 4, "2026-09-30")); l.Multiplier != 1 || l.ZoneStatus != "outdated" {
+		t.Fatalf("dec sep %+v", l)
+	}
+	if l := mk(planNow, zoneEnding("x4", 4, "garbage")); l.Multiplier != 1 || l.ZoneStatus != "outdated" {
+		t.Fatalf("garbage %+v", l)
+	}
+}
+
+func TestBuildPlanIncrementEpsilon(t *testing.T) {
+	mk := func(inc float64) cadence.PlanLineDTO {
+		in := baseInput(fp(1000), []cadence.PlanSymbolInput{{
+			Symbol: "AAPL", Baseline: fp(110), Zone: zoneOf("steady", 1),
+			Quote:       &cadence.PlanQuote{Price: 100, Currency: "USD", AsOf: planNow},
+			QuoteToPlan: fp(1.1),
+		}})
+		in.QuantityIncrement = inc
+		return line(t, cadence.BuildPlan(in), "AAPL")
+	}
+	if l := mk(1); *l.Shares != 1 {
+		t.Fatalf("inc1 %v", *l.Shares)
+	}
+	if l := mk(0.001); *l.Shares != 1 {
+		t.Fatalf("inc.001 %v", *l.Shares)
+	}
+}
+
+func TestBuildPlanZeroPlanPrice(t *testing.T) {
+	in := baseInput(fp(1000), []cadence.PlanSymbolInput{{
+		Symbol: "AAPL", Baseline: fp(100), Zone: zoneOf("steady", 1),
+		Quote: &cadence.PlanQuote{Price: 0, Currency: "EUR", AsOf: planNow}, QuoteToPlan: fp(1),
+	}})
+	l := line(t, cadence.BuildPlan(in), "AAPL")
+	if l.Shares != nil || !hasNote(l.Notes, cadence.NoteQuoteUnavailable) {
+		t.Fatalf("%+v", l)
+	}
+}
+
+func TestBuildPlanUnallocatedNeverNegative(t *testing.T) {
+	p := cadence.BuildPlan(baseInput(fp(699.996), twoSymbols()))
+	if p.Scaled || p.Totals.Unallocated == nil || *p.Totals.Unallocated != 0 || math.Signbit(*p.Totals.Unallocated) {
+		t.Fatalf("%+v %v", p.Totals, p.Scaled)
+	}
 }

@@ -111,6 +111,9 @@ func All(ctx context.Context) []server.Feature {
 		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
+		cadence.Feature{Premium: func(d *server.Deps) cadence.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
 		// MarketBriefController (/v1/market/brief, behind MARKET_BRIEF_ENABLED).
 		marketbrief.Feature{},
 		earnings.Feature{},

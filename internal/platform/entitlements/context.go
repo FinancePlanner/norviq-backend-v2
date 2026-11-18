@@ -140,6 +140,7 @@ var featureDescriptors = []featureDescriptor{
 	{FeatureRebalancingRules, "Custom rebalancing rules", true},
 	{FeatureGoalPlanning, "Goal-based financial planning", false},
 	{FeatureTerminalPositionAI, "AI terminal scenario research", true},
+	{FeatureCadence, "Cadence", true},
 	{FeatureAIInsights, "AI assistant and insights", true},
 	{FeatureMCPAccess, "MCP integrations", true},
 	{FeatureScenarioPlanning, "Scenario planning", true},

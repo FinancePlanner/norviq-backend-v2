@@ -49,3 +49,21 @@ ORDER BY symbol, confirmed, period_end DESC;
 SELECT EXISTS (
     SELECT 1 FROM stocks WHERE upper(symbol) = upper(sqlc.arg(symbol)::text) AND category = 'etf'
 ) AS is_etf;
+
+-- name: UserHoldingSymbols :many
+SELECT DISTINCT upper(symbol)::text AS symbol FROM stocks
+WHERE user_id = $1
+ORDER BY 1;
+
+-- name: UserWatchlistSymbols :many
+SELECT DISTINCT upper(symbol)::text AS symbol FROM watchlist_items
+WHERE user_id = $1
+ORDER BY 1;
+
+-- name: UserBullHighs :many
+-- The user's newest valuation per symbol: its bull range high feeds the
+-- read-time bull range guard.
+SELECT DISTINCT ON (upper(symbol)) upper(symbol)::text AS symbol, bull_high
+FROM stock_valuations
+WHERE user_id = $1 AND upper(symbol) = ANY(sqlc.arg(symbols)::text[])
+ORDER BY upper(symbol), COALESCE(updated_at, created_at) DESC;

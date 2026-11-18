@@ -8,6 +8,8 @@ package cadencedb
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const deleteZonesNotIn = `-- name: DeleteZonesNotIn :exec
@@ -161,6 +163,97 @@ func (q *Queries) UpsertZone(ctx context.Context, arg UpsertZoneParams) error {
 		arg.RuleVersion,
 	)
 	return err
+}
+
+const userBullHighs = `-- name: UserBullHighs :many
+SELECT DISTINCT ON (upper(symbol)) upper(symbol)::text AS symbol, bull_high
+FROM stock_valuations
+WHERE user_id = $1 AND upper(symbol) = ANY($2::text[])
+ORDER BY upper(symbol), COALESCE(updated_at, created_at) DESC
+`
+
+type UserBullHighsParams struct {
+	UserID  uuid.UUID
+	Symbols []string
+}
+
+type UserBullHighsRow struct {
+	Symbol   string
+	BullHigh float64
+}
+
+// The user's newest valuation per symbol: its bull range high feeds the
+// read-time bull range guard.
+func (q *Queries) UserBullHighs(ctx context.Context, arg UserBullHighsParams) ([]UserBullHighsRow, error) {
+	rows, err := q.db.Query(ctx, userBullHighs, arg.UserID, arg.Symbols)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserBullHighsRow{}
+	for rows.Next() {
+		var i UserBullHighsRow
+		if err := rows.Scan(&i.Symbol, &i.BullHigh); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const userHoldingSymbols = `-- name: UserHoldingSymbols :many
+SELECT DISTINCT upper(symbol)::text AS symbol FROM stocks
+WHERE user_id = $1
+ORDER BY 1
+`
+
+func (q *Queries) UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, userHoldingSymbols, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			return nil, err
+		}
+		items = append(items, symbol)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const userWatchlistSymbols = `-- name: UserWatchlistSymbols :many
+SELECT DISTINCT upper(symbol)::text AS symbol FROM watchlist_items
+WHERE user_id = $1
+ORDER BY 1
+`
+
+func (q *Queries) UserWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, userWatchlistSymbols, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			return nil, err
+		}
+		items = append(items, symbol)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const zonesForSymbol = `-- name: ZonesForSymbol :many

@@ -6,6 +6,8 @@ package cadencedb
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
@@ -19,6 +21,11 @@ type Querier interface {
 	SymbolIsETF(ctx context.Context, symbol string) (bool, error)
 	// Cadence zones: the zones job writes, the read endpoints read.
 	UpsertZone(ctx context.Context, arg UpsertZoneParams) error
+	// The user's newest valuation per symbol: its bull range high feeds the
+	// read-time bull range guard.
+	UserBullHighs(ctx context.Context, arg UserBullHighsParams) ([]UserBullHighsRow, error)
+	UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
+	UserWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ZonesForSymbol(ctx context.Context, arg ZonesForSymbolParams) ([]CadenceZone, error)
 }
 

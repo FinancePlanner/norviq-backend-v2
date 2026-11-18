@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -408,6 +409,9 @@ func (c *candleStub) requests() []time.Time {
 
 func ingestApp(t *testing.T, stub *candleStub) (*testutil.App, *marketdata.Service) {
 	t.Helper()
+	if _, set := os.LookupEnv("CADENCE_ENABLED"); !set {
+		t.Setenv("CADENCE_ENABLED", "true") // watchlist symbols are ingested only with Cadence on
+	}
 	app := testutil.NewApp(t, nil)
 	svc := marketdata.NewFromSettings(
 		marketdata.Settings{MarketProvider: "finnhub", FinnhubAPIKey: "test", FinnhubBaseURL: stub.srv.URL},
@@ -474,13 +478,18 @@ func seriesAt(dates []string, level float64) map[string]float64 {
 
 func addWatchlistSymbol(t *testing.T, app *testutil.App, symbol string) {
 	t.Helper()
+	addWatchlistItem(t, app, symbol, "watching")
+}
+
+func addWatchlistItem(t *testing.T, app *testutil.App, symbol, status string) {
+	t.Helper()
 	ctx := context.Background()
 	user := app.CreateUser(uuid.NewString() + "@example.com")
 	list := uuid.New()
 	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO watchlist_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Main', true, now())`, list, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO watchlist_items (id, user_id, symbol, status, watchlist_list_id, created_at) VALUES ($1, $2, $3, 'watching', $4, now())`, uuid.New(), user, symbol, list); err != nil {
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO watchlist_items (id, user_id, symbol, status, watchlist_list_id, created_at) VALUES ($1, $2, $3, $4, $5, now())`, uuid.New(), user, symbol, status, list); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -489,13 +498,88 @@ func TestSweepIngestsWatchlistSymbols(t *testing.T) {
 	dates := weekdays(5)
 	stub := newCandleStub(t, seriesAt(dates, 400))
 	app, svc := ingestApp(t, stub)
+	t.Setenv("CADENCE_ENABLED", "true")
 	addWatchlistSymbol(t, app, "msft")
+	addWatchlistItem(t, app, "aapl", "archived")
+	addWatchlistItem(t, app, "tsla", "exited")
 
 	market.Sweep(context.Background(), app.Deps, svc)
 
 	if got := storedCloses(t, app, "MSFT"); len(got) != len(dates) {
 		t.Fatalf("MSFT bars %v", got)
 	}
+	for _, sym := range []string{"AAPL", "TSLA"} {
+		if got := storedCloses(t, app, sym); len(got) != 0 {
+			t.Fatalf("%s is archived or exited but was ingested: %v", sym, got)
+		}
+	}
+	if n := len(stub.requests()); n != 1 {
+		t.Fatalf("requests %d, want only the active symbol", n)
+	}
+}
+
+func TestSweepSkipsWatchlistWhenCadenceOff(t *testing.T) {
+	stub := newCandleStub(t, seriesAt(weekdays(5), 400))
+	app, svc := ingestApp(t, stub)
+	t.Setenv("CADENCE_ENABLED", "false")
+	addWatchlistSymbol(t, app, "msft")
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if n := len(stub.requests()); n != 0 {
+		t.Fatalf("watchlist symbol ingested with Cadence off: %d requests", n)
+	}
+	if got := storedCloses(t, app, "MSFT"); len(got) != 0 {
+		t.Fatalf("MSFT bars %v", got)
+	}
+}
+
+// failingBarsStore makes every market_price_bars insert for symbol fail.
+func failingBarsStore(t *testing.T, app *testutil.App, symbol string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`CREATE FUNCTION test_reject_bars() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'bars rejected'; END $$`,
+		`CREATE TRIGGER test_reject_bars BEFORE INSERT OR UPDATE ON market_price_bars FOR EACH ROW WHEN (NEW.instrument_key = '` + symbol + `') EXECUTE FUNCTION test_reject_bars()`,
+	} {
+		if _, err := app.Deps.DB.Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = app.Deps.DB.Exec(context.Background(), `DROP TRIGGER IF EXISTS test_reject_bars ON market_price_bars`)
+		_, _ = app.Deps.DB.Exec(context.Background(), `DROP FUNCTION IF EXISTS test_reject_bars()`)
+	})
+}
+
+func TestFetchAndStoreProviderHistoryFailsWhenBarsWriteFails(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	failingBarsStore(t, app, "NVDA")
+	from, to := dates[0], dates[len(dates)-1]
+
+	if _, err := svc.FetchAndStoreProviderHistory(context.Background(), "NVDA", &from, &to); err == nil {
+		t.Fatal("expected an error when the market_price_bars write fails")
+	}
+	// The request path stays best-effort.
+	if _, err := svc.RefreshHistory(context.Background(), "NVDA", &from, &to); err != nil {
+		t.Fatalf("RefreshHistory must stay best-effort: %v", err)
+	}
+}
+
+func TestSweepLeavesAnchorWhenBarsWriteFails(t *testing.T) {
+	dates := weekdays(10)
+	last := dates[len(dates)-1]
+	stub := newCandleStub(t, seriesAt(dates, 120))
+	app, svc := ingestApp(t, stub)
+	addWatchlistSymbol(t, app, "NVDA")
+	setAnchor(t, app, last, 1209)
+	failingBarsStore(t, app, "NVDA")
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	requireAnchor(t, app, last, 1209)
 }
 
 func setAnchor(t *testing.T, app *testutil.App, date string, closeAt float64) {
@@ -585,17 +669,21 @@ func TestSweepRetriesRebackfillAfterFailure(t *testing.T) {
 	setAnchor(t, app, last, 1209)
 
 	market.Sweep(context.Background(), app.Deps, svc)
-	requireAnchor(t, app, last, 1209)
+	// The failed re-backfill leaves no anchor, so the zones gate skips NVDA.
+	if date, c, ok := getAnchor(t, app, "NVDA"); ok {
+		t.Fatalf("anchor %s %v survived a failed re-backfill", date, c)
+	}
 
 	market.Sweep(context.Background(), app.Deps, svc)
 
 	requireAllUnder200(t, storedCloses(t, app, "NVDA"))
 	requireAnchor(t, app, last, 129)
 	froms := stub.requests()
-	if len(froms) != 4 {
+	// The anchor is gone after the failure, so the retry is one full backfill.
+	if len(froms) != 3 {
 		t.Fatalf("requests %v", froms)
 	}
-	requireThirtyYearsBack(t, froms[3])
+	requireThirtyYearsBack(t, froms[2])
 }
 
 func TestSweepRebackfillsDespiteDualWrittenRecentBars(t *testing.T) {

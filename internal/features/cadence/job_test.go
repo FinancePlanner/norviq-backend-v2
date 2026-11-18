@@ -225,7 +225,7 @@ func TestComputeSymbolIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestComputeSymbolAppliesGuardToLatestOnly(t *testing.T) {
+func TestComputeSymbolAppliesGuardToNewestReading(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
 	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
@@ -240,7 +240,11 @@ func TestComputeSymbolAppliesGuardToLatestOnly(t *testing.T) {
 			*last.GuardReason != cadence.GuardFundamentalsWeakening || !last.GuardChecked {
 			t.Fatalf("%s newest row not capped by the guard: %+v", tf, last)
 		}
-		for _, r := range rows[:len(rows)-1] {
+		older := rows[:len(rows)-1]
+		for i, r := range older {
+			if r.Confirmed && !older[min(i+1, len(older)-1)].Confirmed || r.Confirmed && i == len(older)-1 {
+				continue // newest confirmed row, covered by TestComputeSymbolCapsNewestConfirmedAndForming
+			}
 			if r.CappedZone != r.Zone || r.GuardReason != nil || r.GuardChecked {
 				t.Fatalf("%s older row %v carries guard state: %+v", tf, r.PeriodEnd, r)
 			}
@@ -260,20 +264,62 @@ func TestComputeSymbolClearsGuardOnOlderRows(t *testing.T) {
 
 	compute(t, app, svc, "AAPL", decNow)
 	rows := rowsFor(t, app, "AAPL", cadence.TimeframeMonth)
-	var got *cadencedb.CadenceZone
-	for i := range rows {
-		if rows[i].PeriodEnd.Equal(nov.PeriodEnd) {
-			got = &rows[i]
-		}
+	byEnd := map[time.Time]cadencedb.CadenceZone{}
+	for _, r := range rows {
+		byEnd[r.PeriodEnd] = r
 	}
-	if got == nil {
+	got, ok := byEnd[nov.PeriodEnd]
+	if !ok {
 		t.Fatal("November row disappeared")
 	}
-	if got.CappedZone != got.Zone || got.GuardReason != nil || got.GuardChecked {
-		t.Fatalf("November row kept stale guard state: %+v", got)
+	// November is now the newest confirmed month, so it keeps the verdict.
+	if !got.Confirmed || got.CappedZone == got.Zone || got.GuardReason == nil || !got.GuardChecked {
+		t.Fatalf("November row should be the capped confirmed row: %+v", got)
 	}
 	if last := newest(rows); !last.PeriodEnd.Equal(day(2026, time.December, 31)) || last.GuardReason == nil {
-		t.Fatalf("December row should now carry the guard: %+v", last)
+		t.Fatalf("December row should carry the guard: %+v", last)
+	}
+	// October was the newest confirmed row last run; it must be cleared now.
+	oct, ok := byEnd[day(2026, time.October, 31)]
+	if !ok {
+		t.Fatal("October row missing")
+	}
+	if oct.CappedZone != oct.Zone || oct.GuardReason != nil || oct.GuardChecked {
+		t.Fatalf("October row kept stale guard state: %+v", oct)
+	}
+}
+
+func TestComputeSymbolCapsNewestConfirmedAndForming(t *testing.T) {
+	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
+	seedHistory(t, app, barsStart, true)
+	compute(t, app, svc, "AAPL", novNow)
+
+	for _, tf := range cadence.AllTimeframes() {
+		rows := rowsFor(t, app, "AAPL", tf)
+		newestConfirmed := -1
+		for i, r := range rows {
+			if r.Confirmed {
+				newestConfirmed = i
+			}
+		}
+		if newestConfirmed < 0 {
+			t.Fatalf("%s has no confirmed row", tf)
+		}
+		for i, r := range rows {
+			guarded := i == newestConfirmed || i == len(rows)-1
+			if !guarded {
+				if r.CappedZone != r.Zone || r.GuardReason != nil || r.GuardChecked {
+					t.Fatalf("%s row %v should be uncapped: %+v", tf, r.PeriodEnd, r)
+				}
+				continue
+			}
+			if !r.GuardChecked || r.GuardReason == nil || *r.GuardReason != cadence.GuardFundamentalsWeakening {
+				t.Fatalf("%s row %v (confirmed=%v) should carry the guard: %+v", tf, r.PeriodEnd, r.Confirmed, r)
+			}
+			if deeperThanSteady(r.Zone) && r.CappedZone != string(cadence.ZoneSteady) {
+				t.Fatalf("%s row %v deep zone %q not capped: %+v", tf, r.PeriodEnd, r.Zone, r)
+			}
+		}
 	}
 }
 

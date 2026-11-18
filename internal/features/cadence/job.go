@@ -90,7 +90,7 @@ func (j ZonesJob) Run(ctx context.Context, d *server.Deps) {
 
 // sweep is one pass over every symbol; a failing symbol is logged and skipped.
 func sweep(ctx context.Context, d *server.Deps, svc *marketdata.Service, now time.Time) {
-	raw, err := marketdatadb.New(d.DB).HistoryIngestionSymbols(ctx)
+	raw, err := marketdatadb.New(d.DB).HistoryIngestionSymbols(ctx, true)
 	if err != nil {
 		d.Logger.Warn("cadence_zones symbols failed", "error", err)
 		return
@@ -115,9 +115,10 @@ func sweep(ctx context.Context, d *server.Deps, svc *marketdata.Service, now tim
 }
 
 // ComputeSymbol recomputes every timeframe of one symbol and stores it in one
-// transaction. The fundamentals guard applies to the newest reading of each
-// timeframe only; every other row is stored uncapped, so a row that stopped
-// being the newest loses its guard on the next run. Periods stored but no
+// transaction. The fundamentals guard applies to the newest confirmed reading
+// and the newest reading (the forming one) of each timeframe, the two rows the
+// API serves; every other row is stored uncapped, so a row that stopped being
+// one of them loses its guard on the next run. Periods stored but no
 // longer computed (the 21 year window slid forward, or the history became
 // shorter for any reason) are deleted.
 //
@@ -170,11 +171,19 @@ func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service,
 		for _, tf := range AllTimeframes() {
 			rs := readings[tf]
 			keep := make([]time.Time, 0, len(rs))
+			// The guard verdict covers the two rows the API reads: the newest
+			// confirmed reading and the newest reading (the forming one).
+			newestConfirmed := -1
+			for i := range rs {
+				if rs[i].Confirmed {
+					newestConfirmed = i
+				}
+			}
 			for i := range rs {
 				r := &rs[i]
 				keep = append(keep, r.PeriodEnd)
 				p := zoneParams(symbol, r, rules.Version)
-				if i == len(rs)-1 {
+				if i == len(rs)-1 || i == newestConfirmed {
 					p.CappedZone = string(Capped(r.Zone, reason))
 					p.GuardChecked = checked
 					if reason != "" {

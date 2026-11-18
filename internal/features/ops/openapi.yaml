@@ -10892,8 +10892,8 @@ components:
       type: object
       required: [zone, cappedZone, multiplier, guardReason, guardChecked, periodEnd, asOf, close, trend, distance, percentile, sampleCount, touchZone, ruleVersion]
       properties:
-        zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: The engine's zone }
-        cappedZone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: The zone after the fundamentals and bull range guards }
+        zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: "The engine's zone. `insufficient` means there is not enough consecutive history to rank the symbol: the engine needs a minimum number of samples with a trend (weekly 260, monthly, quarterly and yearly 60), which in practice is roughly 6, 8 and 10 years of unbroken monthly history for M, Q and Y. Clients must not hardcode a number of years." }
+        cappedZone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: "The zone after the fundamentals and bull range guards. insufficient is never capped and means not enough consecutive history to rank (see zone)." }
         multiplier: { type: number, description: Contribution multiplier of cappedZone }
         guardReason: { type: string, nullable: true, enum: [fundamentals_weakening, above_bull_range, null], description: A fundamentals reason stored on the reading wins over the bull range reason }
         guardChecked: { type: boolean, description: Whether the fundamentals guard could be evaluated }
@@ -10911,7 +10911,7 @@ components:
       required: [symbol, status, confirmed, forming]
       properties:
         symbol: { type: string }
-        status: { type: string, enum: [ready, pending] }
+        status: { type: string, enum: [ready, pending], description: "pending means no zone rows exist yet. A ready symbol can still have readings whose zone is insufficient (not enough consecutive history to rank; see the zone field)." }
         confirmed:
           nullable: true
           allOf:

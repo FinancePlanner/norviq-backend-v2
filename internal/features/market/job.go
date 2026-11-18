@@ -26,7 +26,7 @@ type HistoryJobSettings struct {
 }
 
 // HistoryIngestionJob is MarketHistoryIngestionJob: keeps market_price_bars
-// filled for every held symbol, watchlist symbol and risk-profile benchmark
+// filled for every held symbol, active watchlist symbol (Cadence on) and risk-profile benchmark
 // proxy. It is a no-op unless SCENARIO_PLANNING_ENABLED or CADENCE_ENABLED is
 // true.
 type HistoryIngestionJob struct {
@@ -85,12 +85,16 @@ func parseInt(raw string) (int, bool) {
 	return n, err == nil
 }
 
-// Sweep is one pass over every held, watchlisted and benchmark symbol. A
-// rate-limited provider stops the sweep; any other per-symbol failure is
-// logged and skipped.
+// Sweep is one pass over every held and benchmark symbol, plus the active
+// watchlist symbols when CADENCE_ENABLED is true. A rate-limited provider
+// stops the sweep; any other per-symbol failure is logged and skipped.
 func Sweep(ctx context.Context, d *server.Deps, svc *marketdata.Service) {
 	q := marketdatadb.New(d.DB)
-	raw, err := q.HistoryIngestionSymbols(ctx)
+	includeWatchlist := false
+	if s, err := config.Load[HistoryJobSettings](); err == nil {
+		includeWatchlist = config.Bool(s.CadenceEnabled, false)
+	}
+	raw, err := q.HistoryIngestionSymbols(ctx, includeWatchlist)
 	if err != nil {
 		d.Logger.Warn("scenario_history_ingestion failed", "error", err)
 		return
@@ -214,6 +218,12 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		}
 		if fresh == nil || HistoryDiverged(map[string]float64{key: anchors[0].AnchorClose}, fresh) {
 			d.Logger.Warn("scenario_history_ingestion rebackfill", "symbol", symbol)
+			// Drop the anchor first: until the re-backfill is stored the
+			// history is unverified, and the zones job skips symbols without
+			// one, whatever order the new bars land in.
+			if err := q.DeleteMarketHistoryAnchor(ctx, symbol); err != nil {
+				return err
+			}
 			if got, err = fetchBars(ctx, svc, symbol, fallbackStart, today); err != nil {
 				return err
 			}

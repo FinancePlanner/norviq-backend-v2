@@ -173,7 +173,7 @@ func TestZonesListHoldings(t *testing.T) {
 	seed(t, app,
 		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.September), closeV: 190, zone: "steady", confirmed: true},
 		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.October), closeV: 201.4, zone: "x2", capped: "steady", reason: ptr("fundamentals_weakening"), confirmed: true},
-		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.November), closeV: 205, zone: "steady", confirmed: false},
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.November), closeV: 205, zone: "x2", capped: "steady", reason: ptr("fundamentals_weakening"), confirmed: false},
 		seedRow{symbol: "TSLA", tf: "M", periodEnd: monthEndOf(2026, time.October), closeV: 300, zone: "x4", confirmed: true},
 	)
 	r := app.Do("GET", "/v1/cadence/zones", app.Token(me), nil)
@@ -195,7 +195,7 @@ func TestZonesListHoldings(t *testing.T) {
 		c.RuleVersion != 1 || c.TouchZone != nil || c.Trend == nil || *c.Trend != 223.1 {
 		t.Fatalf("confirmed %+v", *c)
 	}
-	if a.Forming.PeriodEnd != "2026-11-30" || a.Forming.Zone != "steady" {
+	if a.Forming.PeriodEnd != "2026-11-30" || a.Forming.Zone != "x2" || a.Forming.CappedZone != "steady" || a.Forming.GuardReason == nil {
 		t.Fatalf("forming %+v", *a.Forming)
 	}
 	n := items[1]

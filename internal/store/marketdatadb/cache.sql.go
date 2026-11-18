@@ -12,6 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteMarketHistoryAnchor = `-- name: DeleteMarketHistoryAnchor :exec
+DELETE FROM market_history_anchors WHERE instrument_key = $1
+`
+
+func (q *Queries) DeleteMarketHistoryAnchor(ctx context.Context, instrumentKey string) error {
+	_, err := q.db.Exec(ctx, deleteMarketHistoryAnchor, instrumentKey)
+	return err
+}
+
 const getAnalystEstimatesCache = `-- name: GetAnalystEstimatesCache :one
 SELECT payload, created_at, updated_at FROM analyst_estimates_cache
 WHERE provider = $1 AND symbol = $2 AND period = $3 LIMIT 1
@@ -275,10 +284,12 @@ UNION ALL
 SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_proxy IS NOT NULL
 UNION ALL
 SELECT upper(symbol)::text FROM watchlist_items
+WHERE $1::bool AND status NOT IN ('archived', 'exited')
 `
 
-func (q *Queries) HistoryIngestionSymbols(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, historyIngestionSymbols)
+// Watchlist symbols join only when include_watchlist is set (Cadence on).
+func (q *Queries) HistoryIngestionSymbols(ctx context.Context, includeWatchlist bool) ([]string, error) {
+	rows, err := q.db.Query(ctx, historyIngestionSymbols, includeWatchlist)
 	if err != nil {
 		return nil, err
 	}

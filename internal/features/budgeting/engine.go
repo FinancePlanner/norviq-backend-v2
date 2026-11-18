@@ -133,6 +133,42 @@ func nextMonthStart(t time.Time) time.Time { return addMonths(monthStartOf(t), 1
 
 // --- spend to units ----------------------------------------------------------
 
+// MonthSurplus is this month's investable surplus as the dca-capacity route computes it.
+type MonthSurplus struct {
+	Found    bool    // false when the user has no budget snapshot near this month
+	Amount   float64 // spendSurplus(...), 0 when !Found
+	Currency string  // the snapshot's CurrencyCode, "" when !Found
+}
+
+// MonthSurplus resolves the snapshot nearest the current month and reports
+// its investable surplus, for other domains (the dca-capacity route uses the
+// same computation).
+func (e *Engine) MonthSurplus(ctx context.Context, userID uuid.UUID) (MonthSurplus, error) {
+	drift, found, err := e.monthDrift(ctx, userID)
+	if err != nil || !found {
+		return MonthSurplus{}, err
+	}
+	return MonthSurplus{
+		Found:    true,
+		Amount:   spendSurplus(drift.InvestmentContributionTarget, drift.LostInvestmentCapital, drift.TotalTarget, drift.TotalActual),
+		Currency: drift.CurrencyCode,
+	}, nil
+}
+
+// monthDrift is the dashboard of the snapshot nearest the current month;
+// found is false when the user has none.
+func (e *Engine) monthDrift(ctx context.Context, userID uuid.UUID) (BudgetDriftDashboard, bool, error) {
+	snap, err := snapshotNear(ctx, e.q(nil), userID, monthStartOf(e.now()))
+	if err != nil || snap == nil {
+		return BudgetDriftDashboard{}, false, err
+	}
+	drift, err := e.Dashboard(ctx, nil, userID, snap.ID)
+	if err != nil {
+		return BudgetDriftDashboard{}, false, err
+	}
+	return drift, true, nil
+}
+
 func (e *Engine) spendToUnits(ctx context.Context, userID uuid.UUID) (spendToUnitsCapacity, error) {
 	q := e.q(nil)
 	var preference string
@@ -160,15 +196,11 @@ func (e *Engine) spendToUnits(ctx context.Context, userID uuid.UUID) (spendToUni
 	currency := "EUR"
 	var cats []spendToUnitsCategory
 	now := e.now()
-	snap, err := snapshotNear(ctx, q, userID, monthStartOf(now))
+	drift, found, err := e.monthDrift(ctx, userID)
 	if err != nil {
 		return spendToUnitsCapacity{}, err
 	}
-	if snap != nil {
-		drift, err := e.Dashboard(ctx, nil, userID, snap.ID)
-		if err != nil {
-			return spendToUnitsCapacity{}, err
-		}
+	if found {
 		surplus = spendSurplus(drift.InvestmentContributionTarget, drift.LostInvestmentCapital, drift.TotalTarget, drift.TotalActual)
 		currency = drift.CurrencyCode
 		for _, c := range drift.Categories {
@@ -205,7 +237,7 @@ func (e *Engine) spendToUnits(ctx context.Context, userID uuid.UUID) (spendToUni
 	out := spendToUnitsCapacity{
 		Symbol: symbol, ResolvedFrom: source, Price: price, PriceCurrency: priceCur, QuoteAsOf: asOf,
 		QuoteStale: stale, SurplusAmount: surplus, SurplusUnits: spendUnits(surplus, price),
-		CurrencyCode: currency, Categories: make([]spendToUnitsCategory, 0, len(cats)), Disclaimer: spendDisclaimer,
+		CurrencyCode: currency, Categories: make([]spendToUnitsCategory, 0, len(cats)), Disclaimer: SpendDisclaimer,
 	}
 	for _, c := range cats {
 		c.Units = spendUnits(c.OverspendAmount, price)

@@ -249,17 +249,22 @@ func (h *handler) userAndID(c *echo.Context) (uuid.UUID, uuid.UUID, error) {
 	return s.UserID, id, nil
 }
 
-// currency is TerminalPositionsService.currency(userId:on:): the default
-// portfolio's, then any portfolio's, then MARKET_DEFAULT_CURRENCY ?? "USD".
+// currency is PlanCurrency on the handler's queries.
 func (h *handler) currency(ctx context.Context, userID uuid.UUID) (string, error) {
-	rows, err := h.q.DefaultPortfolioCurrency(ctx, userID)
+	return PlanCurrency(ctx, h.q, userID)
+}
+
+// PlanCurrency is TerminalPositionsService.currency(userId:on:): the default
+// portfolio's, then any portfolio's, then MARKET_DEFAULT_CURRENCY ?? "USD".
+func PlanCurrency(ctx context.Context, q autobuysdb.Querier, userID uuid.UUID) (string, error) {
+	rows, err := q.DefaultPortfolioCurrency(ctx, userID)
 	if err != nil {
 		return "", err
 	}
 	if len(rows) > 0 {
 		return rows[0], nil
 	}
-	if rows, err = h.q.AnyPortfolioCurrency(ctx, userID); err != nil {
+	if rows, err = q.AnyPortfolioCurrency(ctx, userID); err != nil {
 		return "", err
 	}
 	if len(rows) > 0 {

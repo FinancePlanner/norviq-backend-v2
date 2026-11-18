@@ -71,3 +71,13 @@ SELECT DISTINCT ON (upper(symbol)) upper(symbol)::text AS symbol, bull_high
 FROM stock_valuations
 WHERE user_id = $1 AND upper(symbol) = ANY(sqlc.arg(symbols)::text[])
 ORDER BY upper(symbol), COALESCE(updated_at, created_at) DESC;
+
+-- name: UserTradeSizing :many
+-- The sizing rules of the newest-updated active allocation model on the
+-- user's default portfolio. No row means fractional shares and no minimum.
+SELECT am.quantity_increment, am.minimum_trade_amount
+FROM allocation_models am
+JOIN portfolio_lists pl ON pl.id = am.portfolio_id
+WHERE pl.user_id = $1 AND pl.is_default = true AND pl.archived_at IS NULL AND am.is_active
+ORDER BY COALESCE(am.updated_at, am.created_at) DESC
+LIMIT 1;

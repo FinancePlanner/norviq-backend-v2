@@ -890,3 +890,44 @@ func TestHistoryJobIdleWhenBothFlagsOff(t *testing.T) {
 		t.Fatalf("sweep ran with both flags off: %d requests", n)
 	}
 }
+
+func addAutobuy(t *testing.T, app *testutil.App, ticker string, active bool) {
+	t.Helper()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO autobuys (id, user_id, ticker, label, amount, cadence, percent, active, created_at, updated_at)
+		 VALUES ($1, $2, $3, 'Plan', 100, 'monthly', NULL, $4, now(), now())`,
+		uuid.New(), user, ticker, active); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSweepIngestsActiveAutobuyTickers(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 400))
+	app, svc := ingestApp(t, stub)
+	addAutobuy(t, app, "vwce", true)
+	addAutobuy(t, app, "qqq", false)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "VWCE"); len(got) != len(dates) {
+		t.Fatalf("VWCE bars %v", got)
+	}
+	if got := storedCloses(t, app, "QQQ"); len(got) != 0 {
+		t.Fatalf("QQQ autobuy is inactive but was ingested: %v", got)
+	}
+}
+
+func TestSweepSkipsAutobuyTickersWhenCadenceOff(t *testing.T) {
+	stub := newCandleStub(t, seriesAt(weekdays(5), 400))
+	app, svc := ingestApp(t, stub)
+	t.Setenv("CADENCE_ENABLED", "false")
+	addAutobuy(t, app, "vwce", true)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "VWCE"); len(got) != 0 {
+		t.Fatalf("VWCE ingested with Cadence off: %v", got)
+	}
+}

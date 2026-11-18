@@ -576,3 +576,26 @@ func TestZonesJobOffByDefault(t *testing.T) {
 		t.Fatalf("job name %q", name)
 	}
 }
+
+func seedAutobuy(t *testing.T, app *testutil.App, ticker string, active bool) {
+	t.Helper()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO autobuys (id, user_id, ticker, label, amount, cadence, percent, active, created_at, updated_at)
+		 VALUES ($1, $2, $3, 'Plan', 100, 'monthly', NULL, $4, now(), now())`,
+		uuid.New(), user, ticker, active); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSweepComputesAutobuyTicker(t *testing.T) {
+	app, svc := newEnv(t, newGrowthStub(t, 200, "[]"))
+	seedHistory(t, app, barsStart, false)
+	seedAutobuy(t, app, "aapl", true)
+
+	cadence.Sweep(context.Background(), app.Deps, svc, novNow)
+
+	if len(allRows(t, app, "AAPL")) == 0 {
+		t.Fatal("no cadence_zones rows for an autobuy-only symbol")
+	}
+}

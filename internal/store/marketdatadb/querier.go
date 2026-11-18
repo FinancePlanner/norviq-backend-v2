@@ -23,7 +23,8 @@ type Querier interface {
 	GetRatiosCache(ctx context.Context, arg GetRatiosCacheParams) (GetRatiosCacheRow, error)
 	GetRatiosTTMCache(ctx context.Context, arg GetRatiosTTMCacheParams) (GetRatiosTTMCacheRow, error)
 	GetSearchCache(ctx context.Context, arg GetSearchCacheParams) (GetSearchCacheRow, error)
-	// Watchlist symbols join only when include_watchlist is set (Cadence on).
+	// Watchlist symbols and active autobuy tickers join only when
+	// include_watchlist is set (Cadence on).
 	HistoryIngestionSymbols(ctx context.Context, includeWatchlist bool) ([]string, error)
 	LatestFxRate(ctx context.Context, arg LatestFxRateParams) (LatestFxRateRow, error)
 	ListPriceHistory(ctx context.Context, arg ListPriceHistoryParams) ([]ListPriceHistoryRow, error)

@@ -34,8 +34,8 @@ type ZonesJobSettings struct {
 	IntervalSeconds string `env:"CADENCE_ZONES_INTERVAL_SECONDS"`
 }
 
-// ZonesJob computes the contribution zone of every held, watched and
-// benchmark symbol and stores it in cadence_zones. It is a no-op unless
+// ZonesJob computes the contribution zone of every held, watched,
+// autobuy and benchmark symbol and stores it in cadence_zones. It is a no-op unless
 // CADENCE_ENABLED is true.
 type ZonesJob struct {
 	// Service overrides the shared market data service (tests).

@@ -285,9 +285,13 @@ SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_p
 UNION ALL
 SELECT upper(symbol)::text FROM watchlist_items
 WHERE $1::bool AND status NOT IN ('archived', 'exited')
+UNION ALL
+SELECT upper(ticker)::text FROM autobuys
+WHERE $1::bool AND active AND ticker IS NOT NULL
 `
 
-// Watchlist symbols join only when include_watchlist is set (Cadence on).
+// Watchlist symbols and active autobuy tickers join only when
+// include_watchlist is set (Cadence on).
 func (q *Queries) HistoryIngestionSymbols(ctx context.Context, includeWatchlist bool) ([]string, error) {
 	rows, err := q.db.Query(ctx, historyIngestionSymbols, includeWatchlist)
 	if err != nil {

@@ -26,6 +26,9 @@ type Querier interface {
 	UserBullHighs(ctx context.Context, arg UserBullHighsParams) ([]UserBullHighsRow, error)
 	// Real holdings only: an open position in an active, actual portfolio.
 	UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
+	// The sizing rules of the newest-updated active allocation model on the
+	// user's default portfolio. No row means fractional shares and no minimum.
+	UserTradeSizing(ctx context.Context, userID uuid.UUID) ([]UserTradeSizingRow, error)
 	UserWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ZonesForSymbol(ctx context.Context, arg ZonesForSymbolParams) ([]CadenceZone, error)
 }

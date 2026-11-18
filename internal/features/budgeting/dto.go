@@ -163,7 +163,8 @@ type spendToUnitsCapacity struct {
 const (
 	defaultDcaSymbol  = "VWCE"
 	staleQuoteSeconds = 30 * 60
-	spendDisclaimer   = "Equivalent at last price. Not an order. Not financial advice."
+	// SpendDisclaimer accompanies every spend-to-units figure.
+	SpendDisclaimer = "Equivalent at last price. Not an order. Not financial advice."
 )
 
 // --- request decoding --------------------------------------------------------

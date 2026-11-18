@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -409,9 +408,7 @@ func (c *candleStub) requests() []time.Time {
 
 func ingestApp(t *testing.T, stub *candleStub) (*testutil.App, *marketdata.Service) {
 	t.Helper()
-	if _, set := os.LookupEnv("CADENCE_ENABLED"); !set {
-		t.Setenv("CADENCE_ENABLED", "true") // watchlist symbols are ingested only with Cadence on
-	}
+	t.Setenv("CADENCE_ENABLED", "true") // watchlist symbols are ingested only with Cadence on
 	app := testutil.NewApp(t, nil)
 	svc := marketdata.NewFromSettings(
 		marketdata.Settings{MarketProvider: "finnhub", FinnhubAPIKey: "test", FinnhubBaseURL: stub.srv.URL},
@@ -873,10 +870,10 @@ func TestHistoryJobRunsWhenOnlyCadenceEnabled(t *testing.T) {
 }
 
 func TestHistoryJobIdleWhenBothFlagsOff(t *testing.T) {
-	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
-	t.Setenv("CADENCE_ENABLED", "false")
 	stub := newCandleStub(t, seriesAt(weekdays(3), 100))
 	app, svc := ingestApp(t, stub)
+	t.Setenv("SCENARIO_PLANNING_ENABLED", "false")
+	t.Setenv("CADENCE_ENABLED", "false")
 	addWatchlistSymbol(t, app, "AAPL")
 
 	done := make(chan struct{})
@@ -891,5 +888,64 @@ func TestHistoryJobIdleWhenBothFlagsOff(t *testing.T) {
 	}
 	if n := len(stub.requests()); n != 0 {
 		t.Fatalf("sweep ran with both flags off: %d requests", n)
+	}
+}
+
+func addAutobuy(t *testing.T, app *testutil.App, ticker string, active bool) {
+	t.Helper()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO autobuys (id, user_id, ticker, label, amount, cadence, percent, active, created_at, updated_at)
+		 VALUES ($1, $2, $3, 'Plan', 100, 'monthly', NULL, $4, now(), now())`,
+		uuid.New(), user, ticker, active); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addHolding(t *testing.T, app *testutil.App, symbol string) {
+	t.Helper()
+	ctx := context.Background()
+	user := app.CreateUser(uuid.NewString() + "@example.com")
+	list := uuid.New()
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, 'Main', true, now())`, list, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Deps.DB.Exec(ctx, `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, $3, 1, 1, '2024-01-02', now(), $4)`, uuid.New(), user, symbol, list); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSweepIngestsActiveAutobuyTickers(t *testing.T) {
+	dates := weekdays(5)
+	stub := newCandleStub(t, seriesAt(dates, 400))
+	app, svc := ingestApp(t, stub)
+	addAutobuy(t, app, "vwce", true)
+	addAutobuy(t, app, "qqq", false)
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "VWCE"); len(got) != len(dates) {
+		t.Fatalf("VWCE bars %v", got)
+	}
+	if got := storedCloses(t, app, "QQQ"); len(got) != 0 {
+		t.Fatalf("QQQ autobuy is inactive but was ingested: %v", got)
+	}
+}
+
+func TestSweepSkipsAutobuyTickersWhenCadenceOff(t *testing.T) {
+	stub := newCandleStub(t, seriesAt(weekdays(5), 400))
+	app, svc := ingestApp(t, stub)
+	t.Setenv("CADENCE_ENABLED", "false")
+	addAutobuy(t, app, "vwce", true)
+	addHolding(t, app, "AAPL") // positive control: the sweep does ingest
+
+	market.Sweep(context.Background(), app.Deps, svc)
+
+	if got := storedCloses(t, app, "AAPL"); len(got) == 0 {
+		t.Fatal("held AAPL not ingested: the sweep did nothing, so the check below proves nothing")
+	}
+	if got := storedCloses(t, app, "VWCE"); len(got) != 0 {
+		t.Fatalf("VWCE ingested with Cadence off: %v", got)
 	}
 }

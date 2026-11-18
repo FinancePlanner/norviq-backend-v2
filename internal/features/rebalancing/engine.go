@@ -279,7 +279,7 @@ func (e Engine) Simulate(portfolioID string, model AllocationModel, req Simulati
 		if !(math.Abs(rawAmount) >= model.MinimumTradeAmount) {
 			return nil
 		}
-		quantity := roundedQuantity(math.Abs(rawAmount)/holding.Price, model.QuantityIncrement)
+		quantity := RoundedQuantity(math.Abs(rawAmount)/holding.Price, model.QuantityIncrement)
 		maxQuantity := quantity
 		if rawAmount < 0 {
 			maxQuantity = min(quantity, holding.Quantity)
@@ -599,7 +599,7 @@ func fundBuys(candidates []tradeCandidate, startingCash float64, model Allocatio
 	scale := min(1, maxBuyNotional/originalBuyNotional)
 	out := append([]tradeCandidate(nil), sells...)
 	for _, c := range buys {
-		quantity := roundedQuantity(c.quantity*scale, model.QuantityIncrement)
+		quantity := RoundedQuantity(c.quantity*scale, model.QuantityIncrement)
 		notional := RoundedMoney(quantity * c.holding.Price)
 		if !(quantity > 0) || !(notional >= model.MinimumTradeAmount) {
 			continue
@@ -653,7 +653,8 @@ func basisPoints(value, total float64) int {
 // RoundedMoney is `(value * 100).rounded() / 100`.
 func RoundedMoney(v float64) float64 { return math.Round(v*100) / 100 }
 
-func roundedQuantity(v, increment float64) float64 {
+// RoundedQuantity floors v to a multiple of increment; v is unchanged when increment is not positive.
+func RoundedQuantity(v, increment float64) float64 {
 	if !(increment > 0) {
 		return v
 	}

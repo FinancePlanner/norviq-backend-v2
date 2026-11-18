@@ -10827,6 +10827,36 @@ paths:
           description: Unauthorized
         '403':
           description: Token lacks the required scope
+  /v1/cadence/plan:
+    get:
+      operationId: getCadencePlan
+      tags: [Cadence]
+      summary: This month's contribution plan, per symbol
+      description: >
+        One line per symbol that is held or has an active recurring plan (sorted by symbol). Each line
+        starts from the user's recurring amount for the symbol (`baseline`, a monthly equivalent in the
+        plan currency, summed over active recurring plans), applies the multiplier of the newest
+        confirmed monthly zone (after the fundamentals and bull range guards) and, when the total
+        exceeds the month's surplus, scales every line down proportionally. `shares` is the amount at
+        the last price, rounded down to the user's quantity increment (default: four decimals). Quote and
+        FX problems never fail the request: the affected line carries a note and a null `shares`. A
+        surplus that is missing or cannot be converted is null with a plan note. Requires
+        `planning:read`, `budget:read` and `portfolio:read`, and a plan that includes Cadence.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CadencePlan'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Upgrade required (code upgrade_required, BillingUpgradeRequiredResponse) or token lacks a required scope
+        '404':
+          description: Cadence is not enabled on this deployment
 components:
   parameters:
     ScenarioResourceID:
@@ -10970,6 +11000,62 @@ components:
             x2: { type: number }
             extended: { type: number }
             veryExtended: { type: number }
+    CadencePlanLine:
+      type: object
+      required: [symbol, held, zoneStatus, zone, baseline, multiplier, wanted, amount, shares, price, priceCurrency, quoteAsOf, notes]
+      properties:
+        symbol: { type: string }
+        held: { type: boolean, description: The symbol is an open position }
+        zoneStatus: { type: string, enum: [ready, pending, insufficient, outdated], description: "pending means no confirmed zone yet; insufficient means not enough history to rank; outdated means the newest confirmed zone ended more than a month before the last completed month, so it does not change the amount (multiplier 1)" }
+        zone:
+          nullable: true
+          description: Newest confirmed monthly reading, after both guards
+          allOf:
+            - $ref: '#/components/schemas/CadenceZoneReading'
+        baseline: { type: number, nullable: true, description: Monthly recurring amount in the plan currency; null without an active recurring plan }
+        multiplier: { type: number, description: "Multiplier of the capped zone; 1 when there is no ready zone" }
+        wanted: { type: number, nullable: true, description: baseline times multiplier }
+        amount: { type: number, nullable: true, description: wanted, scaled down when the plan exceeds the surplus }
+        shares: { type: number, nullable: true, description: Share equivalent of amount at the last price }
+        price: { type: number, nullable: true, description: Last price in priceCurrency }
+        priceCurrency: { type: string, nullable: true }
+        quoteAsOf: { type: string, format: date-time, nullable: true }
+        notes:
+          type: array
+          items:
+            type: string
+            enum: [no_recurring_buy, no_zone_yet, insufficient_history, quote_unavailable, quote_stale, fx_unavailable, below_minimum_trade, zone_outdated]
+    CadencePlanTotals:
+      type: object
+      required: [baseline, wanted, planned, surplus, unallocated, otherRecurringMonthly]
+      properties:
+        baseline: { type: number }
+        wanted: { type: number }
+        planned: { type: number }
+        surplus: { type: number, nullable: true, description: Month surplus in the plan currency }
+        unallocated: { type: number, nullable: true, description: surplus minus planned }
+        otherRecurringMonthly: { type: number, description: Monthly total of active recurring plans that have no ticker }
+    CadencePlan:
+      type: object
+      required: [month, currency, lines, totals, scaled, scale, notes, ruleVersion, disclaimer]
+      properties:
+        month: { type: string, example: "2026-11", description: UTC month }
+        currency: { type: string, description: "Plan currency: the default portfolio's base currency, else any portfolio's, else MARKET_DEFAULT_CURRENCY, else USD" }
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CadencePlanLine'
+        totals:
+          $ref: '#/components/schemas/CadencePlanTotals'
+        scaled: { type: boolean }
+        scale: { type: number, nullable: true }
+        notes:
+          type: array
+          items:
+            type: string
+            enum: [no_budget, surplus_fx_unavailable, scaled_to_surplus]
+        ruleVersion: { type: integer }
+        disclaimer: { type: string }
     TelegramStatusResponse:
       type: object
       required: [available, connected, botUsername]

@@ -637,6 +637,51 @@ func TestDcaCapacityResolution(t *testing.T) {
 	}
 }
 
+func (e *env) monthSurplus() (budgeting.MonthSurplus, error) {
+	e.t.Helper()
+	eng, err := budgeting.NewEngine(e.Deps)
+	if err != nil {
+		e.t.Fatalf("engine: %v", err)
+	}
+	return eng.MonthSurplus(context.Background(), e.user)
+}
+
+func TestMonthSurplusNoSnapshot(t *testing.T) {
+	e := newEnv(t)
+	got, err := e.monthSurplus()
+	if err != nil {
+		t.Fatalf("MonthSurplus: %v", err)
+	}
+	if got.Found || got.Amount != 0 || got.Currency != "" {
+		t.Fatalf("surplus %+v", got)
+	}
+}
+
+func TestMonthSurplusMatchesDcaCapacity(t *testing.T) {
+	e := newEnv(t)
+	month := time.Now().UTC()
+	month = time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+	snap := e.snapshot(month.Format("2006-01-02"), 4000, "USD")
+	e.item(snap, "Monthly Investments", 500, itemOpts{kind: "investmentContribution"})
+	e.item(snap, "Dining Out", 150, itemOpts{})
+	e.expense("Dining Out", 210, month.AddDate(0, 0, 11).Format("2006-01-02"), nil)
+
+	r := e.do(http.MethodGet, "/v1/budget/dca-capacity", nil)
+	expectStatus(t, r, http.StatusOK)
+	var c struct {
+		SurplusAmount float64 `json:"surplusAmount"`
+		CurrencyCode  string  `json:"currencyCode"`
+	}
+	r.JSON(t, &c)
+	got, err := e.monthSurplus()
+	if err != nil {
+		t.Fatalf("MonthSurplus: %v", err)
+	}
+	if !got.Found || got.Amount != c.SurplusAmount || got.Currency != c.CurrencyCode || c.CurrencyCode != "USD" || c.SurplusAmount != 440 {
+		t.Fatalf("surplus %+v vs route %s", got, r.Body)
+	}
+}
+
 func TestDiscipline(t *testing.T) {
 	e := newEnv(t)
 	june := e.snapshot("2026-06-01", 4000, "EUR")

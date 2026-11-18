@@ -9,8 +9,11 @@ import (
 
 	"norviq-api/internal/auth"
 	"norviq-api/internal/config"
+	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/market"
 	"norviq-api/internal/httpx"
 	"norviq-api/internal/platform/entitlements"
+	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
 	"norviq-api/internal/store/cadencedb"
 
@@ -36,6 +39,19 @@ type PremiumGate interface {
 	RequirePremium(ctx context.Context, feature string, userID uuid.UUID) error
 }
 
+// SurplusSource reports the user's investable surplus for the month.
+// *budgeting.Engine satisfies it.
+type SurplusSource interface {
+	MonthSurplus(ctx context.Context, userID uuid.UUID) (budgeting.MonthSurplus, error)
+}
+
+// PlanMarket is the part of the market data service the plan reads.
+// *marketdata.Service satisfies it.
+type PlanMarket interface {
+	Quote(ctx context.Context, symbol string) (marketdata.QuoteResponse, error)
+	Fx(ctx context.Context, pair string) (marketdata.FxRateResponse, error)
+}
+
 // Feature mounts the cadence read routes. They only read cadence_zones; the
 // zones job is the only writer and nothing here calls a market data provider.
 type Feature struct {
@@ -44,6 +60,10 @@ type Feature struct {
 	Premium func(d *server.Deps) PremiumGate
 	// Now defaults to time.Now (tests).
 	Now func() time.Time
+	// Surplus and Market build the plan's inputs; nil builds them from d
+	// (budgeting.NewEngine, market.SharedService).
+	Surplus func(d *server.Deps) (SurplusSource, error)
+	Market  func(d *server.Deps) (PlanMarket, error)
 }
 
 // Name implements server.Feature.
@@ -54,6 +74,8 @@ type handlers struct {
 	q       *cadencedb.Queries
 	premium PremiumGate
 	now     func() time.Time
+	surplus SurplusSource
+	market  PlanMarket
 }
 
 // Register implements server.Feature. It mounts nothing unless
@@ -73,6 +95,12 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	if f.Premium != nil {
 		h.premium = f.Premium(d)
 	}
+	if h.surplus, err = f.surplusSource(d); err != nil {
+		return err
+	}
+	if h.market, err = f.marketSource(d); err != nil {
+		return err
+	}
 	g := r.V1.Group("/cadence",
 		d.Limiter.Limit(100, 60*time.Second, "ratelimit:cadence"),
 		d.Auth.Scoped(), auth.Guard(),
@@ -82,7 +110,22 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g.GET("/status", h.status)
 	g.GET("/zones", h.list)
 	g.GET("/zones/:symbol", h.detail, auth.RequireScope(auth.ScopeMarketRead))
+	g.GET("/plan", h.plan, auth.RequireScope(auth.ScopePlanningRead), auth.RequireScope(auth.ScopeBudgetRead), auth.RequireScope(auth.ScopePortfolioRead))
 	return nil
+}
+
+func (f Feature) surplusSource(d *server.Deps) (SurplusSource, error) {
+	if f.Surplus != nil {
+		return f.Surplus(d)
+	}
+	return budgeting.NewEngine(d)
+}
+
+func (f Feature) marketSource(d *server.Deps) (PlanMarket, error) {
+	if f.Market != nil {
+		return f.Market(d)
+	}
+	return market.SharedService(d)
 }
 
 func (h *handlers) status(c *echo.Context) error {

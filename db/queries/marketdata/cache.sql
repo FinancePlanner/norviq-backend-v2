@@ -132,13 +132,17 @@ WHERE instrument_key = $1 AND date BETWEEN sqlc.arg(from_date)::date AND sqlc.ar
 ORDER BY date DESC LIMIT 1;
 
 -- name: HistoryIngestionSymbols :many
--- Watchlist symbols join only when include_watchlist is set (Cadence on).
+-- Watchlist symbols and active autobuy tickers join only when
+-- include_watchlist is set (Cadence on).
 SELECT upper(symbol)::text AS symbol FROM stocks
 UNION ALL
 SELECT upper(benchmark_proxy)::text FROM holding_risk_profiles WHERE benchmark_proxy IS NOT NULL
 UNION ALL
 SELECT upper(symbol)::text FROM watchlist_items
-WHERE sqlc.arg(include_watchlist)::bool AND status NOT IN ('archived', 'exited');
+WHERE sqlc.arg(include_watchlist)::bool AND status NOT IN ('archived', 'exited')
+UNION ALL
+SELECT upper(ticker)::text FROM autobuys
+WHERE sqlc.arg(include_watchlist)::bool AND active AND ticker IS NOT NULL;
 
 -- name: MarketPriceBarCloses :many
 SELECT date, adjusted_close FROM market_price_bars

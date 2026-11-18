@@ -234,6 +234,42 @@ func (q *Queries) UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]s
 	return items, nil
 }
 
+const userTradeSizing = `-- name: UserTradeSizing :many
+SELECT am.quantity_increment, am.minimum_trade_amount
+FROM allocation_models am
+JOIN portfolio_lists pl ON pl.id = am.portfolio_id
+WHERE pl.user_id = $1 AND pl.is_default = true AND pl.archived_at IS NULL AND am.is_active
+ORDER BY COALESCE(am.updated_at, am.created_at) DESC
+LIMIT 1
+`
+
+type UserTradeSizingRow struct {
+	QuantityIncrement  float64
+	MinimumTradeAmount float64
+}
+
+// The sizing rules of the newest-updated active allocation model on the
+// user's default portfolio. No row means fractional shares and no minimum.
+func (q *Queries) UserTradeSizing(ctx context.Context, userID uuid.UUID) ([]UserTradeSizingRow, error) {
+	rows, err := q.db.Query(ctx, userTradeSizing, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserTradeSizingRow{}
+	for rows.Next() {
+		var i UserTradeSizingRow
+		if err := rows.Scan(&i.QuantityIncrement, &i.MinimumTradeAmount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const userWatchlistSymbols = `-- name: UserWatchlistSymbols :many
 SELECT DISTINCT upper(symbol)::text AS symbol FROM watchlist_items
 WHERE user_id = $1 AND status NOT IN ('archived', 'exited')

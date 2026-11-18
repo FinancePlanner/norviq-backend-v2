@@ -22,8 +22,9 @@ type DeleteZonesNotInParams struct {
 	Keep      []time.Time
 }
 
-// Removes periods the engine no longer returns (history rewritten by a
-// split re-backfill). An empty keep list removes every row of the timeframe.
+// Removes periods the engine no longer returns (the 21 year window slid
+// forward, or the history became shorter). An empty keep list removes every
+// row of the timeframe.
 func (q *Queries) DeleteZonesNotIn(ctx context.Context, arg DeleteZonesNotInParams) error {
 	_, err := q.db.Exec(ctx, deleteZonesNotIn, arg.Symbol, arg.Timeframe, arg.Keep)
 	return err
@@ -83,12 +84,12 @@ func (q *Queries) LatestZonesForSymbols(ctx context.Context, arg LatestZonesForS
 
 const symbolIsETF = `-- name: SymbolIsETF :one
 SELECT EXISTS (
-    SELECT 1 FROM stocks WHERE upper(symbol) = upper($1) AND category = 'etf'
+    SELECT 1 FROM stocks WHERE upper(symbol) = upper($1::text) AND category = 'etf'
 ) AS is_etf
 `
 
-func (q *Queries) SymbolIsETF(ctx context.Context, upper interface{}) (bool, error) {
-	row := q.db.QueryRow(ctx, symbolIsETF, upper)
+func (q *Queries) SymbolIsETF(ctx context.Context, symbol string) (bool, error) {
+	row := q.db.QueryRow(ctx, symbolIsETF, symbol)
 	var is_etf bool
 	err := row.Scan(&is_etf)
 	return is_etf, err

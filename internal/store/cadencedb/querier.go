@@ -9,13 +9,14 @@ import (
 )
 
 type Querier interface {
-	// Removes periods the engine no longer returns (history rewritten by a
-	// split re-backfill). An empty keep list removes every row of the timeframe.
+	// Removes periods the engine no longer returns (the 21 year window slid
+	// forward, or the history became shorter). An empty keep list removes every
+	// row of the timeframe.
 	DeleteZonesNotIn(ctx context.Context, arg DeleteZonesNotInParams) error
 	// Per symbol, the newest confirmed row and the newest row overall (they are
 	// the same row when the newest period is confirmed).
 	LatestZonesForSymbols(ctx context.Context, arg LatestZonesForSymbolsParams) ([]CadenceZone, error)
-	SymbolIsETF(ctx context.Context, upper interface{}) (bool, error)
+	SymbolIsETF(ctx context.Context, symbol string) (bool, error)
 	// Cadence zones: the zones job writes, the read endpoints read.
 	UpsertZone(ctx context.Context, arg UpsertZoneParams) error
 	ZonesForSymbol(ctx context.Context, arg ZonesForSymbolParams) ([]CadenceZone, error)

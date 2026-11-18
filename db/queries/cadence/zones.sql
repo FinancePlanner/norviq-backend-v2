@@ -25,8 +25,9 @@ ON CONFLICT (symbol, timeframe, period_end) DO UPDATE SET
     computed_at = now();
 
 -- name: DeleteZonesNotIn :exec
--- Removes periods the engine no longer returns (history rewritten by a
--- split re-backfill). An empty keep list removes every row of the timeframe.
+-- Removes periods the engine no longer returns (the 21 year window slid
+-- forward, or the history became shorter). An empty keep list removes every
+-- row of the timeframe.
 DELETE FROM cadence_zones
 WHERE symbol = $1 AND timeframe = $2
   AND NOT (period_end = ANY(sqlc.arg(keep)::date[]));
@@ -46,5 +47,5 @@ ORDER BY symbol, confirmed, period_end DESC;
 
 -- name: SymbolIsETF :one
 SELECT EXISTS (
-    SELECT 1 FROM stocks WHERE upper(symbol) = upper($1) AND category = 'etf'
+    SELECT 1 FROM stocks WHERE upper(symbol) = upper(sqlc.arg(symbol)::text) AND category = 'etf'
 ) AS is_etf;

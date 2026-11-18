@@ -108,6 +108,26 @@ func seedBars(t *testing.T, app *testutil.App, from time.Time, drop bool) {
 	}
 }
 
+// anchorDay is the newest completed day before novNow, as the ingestion job
+// would anchor it.
+var anchorDay = day(2026, time.November, 16)
+
+// seedAnchor stores the ingestion job's anchor for AAPL on anchorDay.
+func seedAnchor(t *testing.T, app *testutil.App, close float64) {
+	t.Helper()
+	if err := marketdatadb.New(app.Deps.DB).UpsertMarketHistoryAnchor(context.Background(),
+		marketdatadb.UpsertMarketHistoryAnchorParams{InstrumentKey: "AAPL", AnchorDate: anchorDay, AnchorClose: close}); err != nil {
+		t.Fatalf("seed anchor: %v", err)
+	}
+}
+
+// seedHistory stores verified history: bars plus a matching anchor.
+func seedHistory(t *testing.T, app *testutil.App, from time.Time, drop bool) {
+	t.Helper()
+	seedBars(t, app, from, drop)
+	seedAnchor(t, app, closeAt(anchorDay, drop))
+}
+
 func seedStock(t *testing.T, app *testutil.App, symbol, category string) {
 	t.Helper()
 	ctx := context.Background()
@@ -163,7 +183,7 @@ func deeperThanSteady(z string) bool {
 
 func TestComputeSymbolStoresAllTimeframes(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, "[]"))
-	seedBars(t, app, barsStart, false)
+	seedHistory(t, app, barsStart, false)
 	compute(t, app, svc, "AAPL", novNow)
 
 	for _, tf := range cadence.AllTimeframes() {
@@ -189,7 +209,7 @@ func TestComputeSymbolStoresAllTimeframes(t *testing.T) {
 
 func TestComputeSymbolIsIdempotent(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	strip := func(rows []cadencedb.CadenceZone) []cadencedb.CadenceZone {
 		for i := range rows {
 			rows[i].ComputedAt = time.Time{}
@@ -207,7 +227,7 @@ func TestComputeSymbolIsIdempotent(t *testing.T) {
 
 func TestComputeSymbolAppliesGuardToLatestOnly(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
 
 	for _, tf := range cadence.AllTimeframes() {
@@ -230,7 +250,7 @@ func TestComputeSymbolAppliesGuardToLatestOnly(t *testing.T) {
 
 func TestComputeSymbolClearsGuardOnOlderRows(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, weakGrowth))
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 
 	compute(t, app, svc, "AAPL", novNow)
 	nov := newest(rowsFor(t, app, "AAPL", cadence.TimeframeMonth))
@@ -259,7 +279,7 @@ func TestComputeSymbolClearsGuardOnOlderRows(t *testing.T) {
 
 func TestComputeSymbolRemovesPeriodsNoLongerComputed(t *testing.T) {
 	app, svc := newEnv(t, newGrowthStub(t, 200, "[]"))
-	seedBars(t, app, barsStart, false)
+	seedHistory(t, app, barsStart, false)
 	compute(t, app, svc, "AAPL", novNow)
 	before := len(rowsFor(t, app, "AAPL", cadence.TimeframeMonth))
 
@@ -282,7 +302,7 @@ func TestComputeSymbolRemovesPeriodsNoLongerComputed(t *testing.T) {
 func TestComputeSymbolSurvivesProviderOutage(t *testing.T) {
 	stub := newGrowthStub(t, http.StatusInternalServerError, `{"error":"down"}`)
 	app, svc := newEnv(t, stub)
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
 
 	if stub.calls.Load() == 0 {
@@ -303,7 +323,7 @@ func TestComputeSymbolSurvivesProviderOutage(t *testing.T) {
 func TestComputeSymbolMissingGrowthFigureIsUnchecked(t *testing.T) {
 	stub := newGrowthStub(t, 200, `[{"symbol":"AAPL","date":"2025-09-30","period":"FY","revenueGrowth":-0.05}]`)
 	app, svc := newEnv(t, stub)
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
 	last := newest(rowsFor(t, app, "AAPL", cadence.TimeframeMonth))
 	if last.GuardChecked || last.GuardReason != nil || last.CappedZone != last.Zone {
@@ -316,7 +336,7 @@ func TestComputeSymbolWithoutFMPIsUnchecked(t *testing.T) {
 	svc := marketdata.NewFromSettings(marketdata.Settings{},
 		marketdatadb.New(app.Deps.DB), nil, &http.Client{Timeout: 5 * time.Second}, slog.New(slog.DiscardHandler))
 	svc.Cache = cache.NewMemory()
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
 	last := newest(rowsFor(t, app, "AAPL", cadence.TimeframeMonth))
 	if last.GuardChecked || last.CappedZone != last.Zone {
@@ -328,7 +348,7 @@ func TestComputeSymbolETFSkipsGuard(t *testing.T) {
 	stub := newGrowthStub(t, 200, weakGrowth)
 	app, svc := newEnv(t, stub)
 	seedStock(t, app, "aapl", "etf")
-	seedBars(t, app, barsStart, true)
+	seedHistory(t, app, barsStart, true)
 	compute(t, app, svc, "AAPL", novNow)
 
 	if n := stub.calls.Load(); n != 0 {
@@ -343,10 +363,108 @@ func TestComputeSymbolETFSkipsGuard(t *testing.T) {
 }
 
 func TestComputeSymbolNoBars(t *testing.T) {
-	app, svc := newEnv(t, newGrowthStub(t, 200, "[]"))
+	stub := newGrowthStub(t, 200, "[]")
+	app, svc := newEnv(t, stub)
 	compute(t, app, svc, "ZZZZ", novNow)
 	if rows := allRows(t, app, "ZZZZ"); len(rows) != 0 {
 		t.Fatalf("%d rows for a symbol with no bars", len(rows))
+	}
+	if n := stub.calls.Load(); n != 0 {
+		t.Fatalf("%d growth requests for a symbol with no bars", n)
+	}
+}
+
+func TestComputeSymbolSkipsWhenNoAnchor(t *testing.T) {
+	stub := newGrowthStub(t, 200, weakGrowth)
+	app, svc := newEnv(t, stub)
+	seedBars(t, app, barsStart, true)
+	compute(t, app, svc, "AAPL", novNow)
+	if rows := allRows(t, app, "AAPL"); len(rows) != 0 {
+		t.Fatalf("%d rows written without an anchor", len(rows))
+	}
+
+	// Rows stored earlier stay exactly as they were.
+	existing := cadencedb.UpsertZoneParams{
+		Symbol: "AAPL", Timeframe: "M", PeriodEnd: day(2026, time.October, 31), AsOf: day(2026, time.October, 30),
+		Close: 1, SampleCount: 3, Zone: "steady", CappedZone: "steady", Confirmed: true, RuleVersion: 1,
+	}
+	if err := cadencedb.New(app.Deps.DB).UpsertZone(context.Background(), existing); err != nil {
+		t.Fatal(err)
+	}
+	before := allRows(t, app, "AAPL")
+	compute(t, app, svc, "AAPL", novNow)
+	if after := allRows(t, app, "AAPL"); len(before) != 1 || !reflect.DeepEqual(before, after) {
+		t.Fatalf("existing rows changed: before %+v after %+v", before, after)
+	}
+	if n := stub.calls.Load(); n != 0 {
+		t.Fatalf("%d growth requests for a skipped symbol", n)
+	}
+}
+
+func TestComputeSymbolSkipsWhenAnchorBarDiverges(t *testing.T) {
+	stub := newGrowthStub(t, 200, weakGrowth)
+	app, svc := newEnv(t, stub)
+	seedHistory(t, app, barsStart, true)
+	compute(t, app, svc, "AAPL", novNow)
+	before := allRows(t, app, "AAPL")
+	calls := stub.calls.Load()
+	if len(before) == 0 {
+		t.Fatal("precondition: rows expected")
+	}
+
+	// A half applied split: the anchor day now holds a close 4x lower.
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`UPDATE market_price_bars SET close = close / 4, adjusted_close = adjusted_close / 4 WHERE instrument_key = 'AAPL' AND date = $1`, anchorDay); err != nil {
+		t.Fatal(err)
+	}
+	compute(t, app, svc, "AAPL", novNow)
+	if after := allRows(t, app, "AAPL"); !reflect.DeepEqual(before, after) {
+		t.Fatal("rows changed although the history diverged from its anchor")
+	}
+	if n := stub.calls.Load(); n != calls {
+		t.Fatalf("%d growth requests after a skipped run", n-calls)
+	}
+
+	// A missing bar on the anchor day is skipped the same way.
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`DELETE FROM market_price_bars WHERE instrument_key = 'AAPL' AND date = $1`, anchorDay); err != nil {
+		t.Fatal(err)
+	}
+	compute(t, app, svc, "AAPL", novNow)
+	if after := allRows(t, app, "AAPL"); !reflect.DeepEqual(before, after) {
+		t.Fatal("rows changed although the anchor bar is missing")
+	}
+}
+
+func TestComputeSymbolComputesWhenAnchorMatches(t *testing.T) {
+	app, svc := newEnv(t, newGrowthStub(t, 200, "[]"))
+	seedBars(t, app, barsStart, false)
+	// Within the 0.5% tolerance of the stored close.
+	seedAnchor(t, app, closeAt(anchorDay, false)*1.004)
+	compute(t, app, svc, "AAPL", novNow)
+	for _, tf := range cadence.AllTimeframes() {
+		if len(rowsFor(t, app, "AAPL", tf)) == 0 {
+			t.Fatalf("no rows for %s although the anchor matches", tf)
+		}
+	}
+}
+
+func TestComputeSymbolInsufficientHistorySpendsNoGrowthRequest(t *testing.T) {
+	stub := newGrowthStub(t, 200, weakGrowth)
+	app, svc := newEnv(t, stub)
+	seedHistory(t, app, day(2023, time.November, 17), false)
+	compute(t, app, svc, "AAPL", novNow)
+	rows := allRows(t, app, "AAPL")
+	if len(rows) == 0 {
+		t.Fatal("expected insufficient rows to be stored")
+	}
+	for _, r := range rows {
+		if r.Zone != string(cadence.ZoneInsufficient) {
+			t.Fatalf("precondition: %s row is %s", r.Timeframe, r.Zone)
+		}
+	}
+	if n := stub.calls.Load(); n != 0 {
+		t.Fatalf("%d growth requests with nothing to judge", n)
 	}
 }
 

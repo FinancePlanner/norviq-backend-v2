@@ -118,7 +118,12 @@ func sweep(ctx context.Context, d *server.Deps, svc *marketdata.Service, now tim
 // transaction. The fundamentals guard applies to the newest reading of each
 // timeframe only; every other row is stored uncapped, so a row that stopped
 // being the newest loses its guard on the next run. Periods stored but no
-// longer computed (history rewritten by a split re-backfill) are deleted.
+// longer computed (the 21 year window slid forward, or the history became
+// shorter for any reason) are deleted.
+//
+// A symbol whose stored history is not verified by the ingestion job's anchor
+// is skipped with its zone rows left as they are: during a split the history
+// can mix pre and post split closes, which reads as a crash. It returns nil.
 // A growth lookup that fails leaves the guard unchecked; it never fails the
 // symbol.
 func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service, symbol string, now time.Time) error {
@@ -132,6 +137,10 @@ func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service,
 	if err != nil {
 		return err
 	}
+	if reason := historyInconsistent(ctx, marketdatadb.New(d.DB), symbol, closes); reason != "" {
+		d.Logger.Warn("cadence_zones skipped: history inconsistent", "symbol", symbol, "reason", reason)
+		return nil
+	}
 	bars := make([]Bar, len(closes))
 	for i, c := range closes {
 		bars[i] = Bar{Date: c.Date, Close: c.AdjustedClose}
@@ -141,7 +150,10 @@ func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service,
 	hasReadings := false
 	for _, tf := range AllTimeframes() {
 		readings[tf] = Compute(bars, tf, rules, now)
-		hasReadings = hasReadings || len(readings[tf]) > 0
+		// Nothing to judge when the newest reading has no trend.
+		if rs := readings[tf]; len(rs) > 0 && rs[len(rs)-1].Zone != ZoneInsufficient {
+			hasReadings = true
+		}
 	}
 
 	var reason string
@@ -181,6 +193,33 @@ func ComputeSymbol(ctx context.Context, d *server.Deps, svc *marketdata.Service,
 		}
 		return nil
 	})
+}
+
+// historyInconsistent returns why the stored closes cannot be trusted, or "".
+// The ingestion job keeps an anchor, the close of its newest completed day
+// as the provider reported it. A stored close that is missing or differs from
+// it by more than the job's tolerance means the history is half rewritten
+// (a split) or was never verified.
+func historyInconsistent(ctx context.Context, q *marketdatadb.Queries, symbol string, closes []marketdatadb.MarketPriceBarClosesRow) string {
+	anchors, err := q.MarketHistoryAnchor(ctx, symbol)
+	if err != nil {
+		return "anchor lookup failed: " + err.Error()
+	}
+	if len(anchors) == 0 {
+		return "no anchor"
+	}
+	key := marketdata.FormatDateOnly(anchors[0].AnchorDate)
+	for _, c := range closes {
+		if marketdata.FormatDateOnly(c.Date) != key {
+			continue
+		}
+		stored := map[string]float64{key: anchors[0].AnchorClose}
+		if market.HistoryDiverged(stored, map[string]float64{key: c.AdjustedClose}) {
+			return "anchor close differs from stored close"
+		}
+		return ""
+	}
+	return "no stored bar on anchor date"
 }
 
 func zoneParams(symbol string, r *Reading, ruleVersion int) cadencedb.UpsertZoneParams {

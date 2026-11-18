@@ -1,7 +1,8 @@
 -- Cadence: how far a security's price sits from its own long-term trend, as a
 -- contribution zone per timeframe (W, M, Q, Y). One row per symbol, timeframe
--- and period; the zones job upserts every period it computes, so a forming
--- period is overwritten as it fills and a confirmed one never changes.
+-- and period; the zones job upserts every period it computes on each run, so
+-- a forming period is overwritten as it fills and a row's guard fields change
+-- when a newer period starts.
 --
 -- zone is the engine's output; capped_zone is zone after the fundamentals
 -- guard, which applies to the newest row of each timeframe only.
@@ -31,9 +32,6 @@ CREATE TABLE IF NOT EXISTS public.cadence_zones (
     computed_at   timestamp with time zone NOT NULL DEFAULT now(),
     PRIMARY KEY (symbol, timeframe, period_end)
 );
-
-CREATE INDEX IF NOT EXISTS cadence_zones_latest_idx
-    ON public.cadence_zones (symbol, timeframe, period_end DESC);
 
 -- +goose Down
 DROP TABLE IF EXISTS public.cadence_zones;

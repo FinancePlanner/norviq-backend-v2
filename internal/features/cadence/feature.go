@@ -25,6 +25,8 @@ const (
 	defaultYears = 5
 	minYears     = 1
 	maxYears     = 15
+
+	maxSymbolLength = 32
 )
 
 // PremiumGate reports whether a user's plan includes a billing feature: nil
@@ -74,6 +76,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	g := r.V1.Group("/cadence",
 		d.Limiter.Limit(100, 60*time.Second, "ratelimit:cadence"),
 		d.Auth.Scoped(), auth.Guard(),
+		// After auth the limiter keys per user (market does the same).
+		d.Limiter.Limit(120, 60*time.Second, "ratelimit:cadence"),
 	)
 	g.GET("/status", h.status)
 	g.GET("/zones", h.list)
@@ -249,6 +253,9 @@ func pathSymbol(c *echo.Context) (string, error) {
 	s := strings.ToUpper(strings.TrimSpace(raw))
 	if s == "" {
 		return "", httpx.BadRequest("Symbol is required.")
+	}
+	if len(s) > maxSymbolLength {
+		return "", httpx.BadRequest("Symbol is too long.")
 	}
 	return s, nil
 }

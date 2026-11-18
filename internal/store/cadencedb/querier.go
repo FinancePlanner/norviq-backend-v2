@@ -24,6 +24,7 @@ type Querier interface {
 	// The user's newest valuation per symbol: its bull range high feeds the
 	// read-time bull range guard.
 	UserBullHighs(ctx context.Context, arg UserBullHighsParams) ([]UserBullHighsRow, error)
+	// Real holdings only: an open position in an active, actual portfolio.
 	UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
 	UserWatchlistSymbols(ctx context.Context, userID uuid.UUID) ([]string, error)
 	ZonesForSymbol(ctx context.Context, arg ZonesForSymbolParams) ([]CadenceZone, error)

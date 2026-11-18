@@ -51,13 +51,17 @@ SELECT EXISTS (
 ) AS is_etf;
 
 -- name: UserHoldingSymbols :many
-SELECT DISTINCT upper(symbol)::text AS symbol FROM stocks
-WHERE user_id = $1
+-- Real holdings only: an open position in an active, actual portfolio.
+SELECT DISTINCT upper(s.symbol)::text AS symbol
+FROM stocks s
+JOIN portfolio_lists pl ON pl.id = s.portfolio_list_id
+WHERE s.user_id = $1 AND s.shares > 0
+  AND pl.mode = 'actual' AND pl.archived_at IS NULL
 ORDER BY 1;
 
 -- name: UserWatchlistSymbols :many
 SELECT DISTINCT upper(symbol)::text AS symbol FROM watchlist_items
-WHERE user_id = $1
+WHERE user_id = $1 AND status NOT IN ('archived', 'exited')
 ORDER BY 1;
 
 -- name: UserBullHighs :many

@@ -205,11 +205,15 @@ func (q *Queries) UserBullHighs(ctx context.Context, arg UserBullHighsParams) ([
 }
 
 const userHoldingSymbols = `-- name: UserHoldingSymbols :many
-SELECT DISTINCT upper(symbol)::text AS symbol FROM stocks
-WHERE user_id = $1
+SELECT DISTINCT upper(s.symbol)::text AS symbol
+FROM stocks s
+JOIN portfolio_lists pl ON pl.id = s.portfolio_list_id
+WHERE s.user_id = $1 AND s.shares > 0
+  AND pl.mode = 'actual' AND pl.archived_at IS NULL
 ORDER BY 1
 `
 
+// Real holdings only: an open position in an active, actual portfolio.
 func (q *Queries) UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, userHoldingSymbols, userID)
 	if err != nil {
@@ -232,7 +236,7 @@ func (q *Queries) UserHoldingSymbols(ctx context.Context, userID uuid.UUID) ([]s
 
 const userWatchlistSymbols = `-- name: UserWatchlistSymbols :many
 SELECT DISTINCT upper(symbol)::text AS symbol FROM watchlist_items
-WHERE user_id = $1
+WHERE user_id = $1 AND status NOT IN ('archived', 'exited')
 ORDER BY 1
 `
 

@@ -2,6 +2,7 @@ package cadence_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,6 +24,12 @@ const proEmail = "pro-cadence@example.com"
 
 func routesApp(t *testing.T, enabled bool) *testutil.App {
 	t.Helper()
+	return routesAppGate(t, enabled, nil)
+}
+
+// routesAppGate is routesApp with a custom premium gate (nil: the real one).
+func routesAppGate(t *testing.T, enabled bool, gate cadence.PremiumGate) *testutil.App {
+	t.Helper()
 	if enabled {
 		t.Setenv("CADENCE_ENABLED", "true")
 	} else {
@@ -32,6 +39,9 @@ func routesApp(t *testing.T, enabled bool) *testutil.App {
 	t.Setenv("BILLING_PREMIUM_EMAILS", proEmail)
 	f := cadence.Feature{
 		Premium: func(d *server.Deps) cadence.PremiumGate {
+			if gate != nil {
+				return gate
+			}
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		},
 		Now: func() time.Time { return routesNow },
@@ -74,7 +84,7 @@ func watch(t *testing.T, app *testutil.App, user uuid.UUID, listName, symbol str
 		mustExec(t, app, `INSERT INTO watchlist_lists (id, user_id, name, is_default, created_at) VALUES ($1, $2, $3, false, now())`, list, user, listName)
 	}
 	mustExec(t, app, `INSERT INTO watchlist_items (id, user_id, symbol, created_at, status, watchlist_list_id)
-		VALUES ($1, $2, $3, now(), 'watching', $4)`, uuid.New(), user, symbol, list)
+		VALUES ($1, $2, $3, now(), 'active', $4)`, uuid.New(), user, symbol, list)
 }
 
 type seedRow struct {
@@ -434,5 +444,111 @@ func TestZonesScopedToken(t *testing.T) {
 		if r := app.Do("GET", c.path, pat(c.scopes...), nil); r.Status != c.want {
 			t.Fatalf("%s with %v: status %d want %d: %s", c.path, c.scopes, r.Status, c.want, r.Body)
 		}
+	}
+}
+
+type gateFunc func(ctx context.Context, feature string, userID uuid.UUID) error
+
+func (f gateFunc) RequirePremium(ctx context.Context, feature string, userID uuid.UUID) error {
+	return f(ctx, feature, userID)
+}
+
+// holdIn inserts a stock into a new portfolio list with the given mode and archive state.
+func holdIn(t *testing.T, app *testutil.App, user uuid.UUID, symbol, mode string, archived bool, shares float64) {
+	t.Helper()
+	list := uuid.New()
+	mustExec(t, app, `INSERT INTO portfolio_lists (id, user_id, name, is_default, created_at, mode, archived_at)
+		VALUES ($1, $2, $3, false, now(), $4, CASE WHEN $5 THEN now() END)`, list, user, "L-"+symbol, mode, archived)
+	mustExec(t, app, `INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id)
+		VALUES ($1, $2, $3, $4, 1, '2024-01-02', now(), $5)`, uuid.New(), user, symbol, shares, list)
+}
+
+func TestZonesListExcludesInactiveHoldings(t *testing.T) {
+	app := routesApp(t, true)
+	me := app.CreateUser(uuid.NewString() + "@example.com")
+	holdIn(t, app, me, "ARCH", "actual", true, 5)
+	holdIn(t, app, me, "HYPO", "hypothetical", false, 5)
+	holdIn(t, app, me, "ZERO", "actual", false, 0)
+	holdIn(t, app, me, "LIVE", "actual", false, 5)
+	r := app.Do("GET", "/v1/cadence/zones", app.Token(me), nil)
+	var items []listItem
+	r.JSON(t, &items)
+	if r.Status != 200 || len(items) != 1 || items[0].Symbol != "LIVE" {
+		t.Fatalf("status %d: %s", r.Status, r.Body)
+	}
+}
+
+func TestZonesListExcludesInactiveWatchlist(t *testing.T) {
+	app := routesApp(t, true)
+	me := app.CreateUser(uuid.NewString() + "@example.com")
+	for sym, status := range map[string]string{"ARCH": "archived", "EXIT": "exited", "LIVE": "active"} {
+		watch(t, app, me, "W-"+sym, sym)
+		mustExec(t, app, `UPDATE watchlist_items SET status = $1 WHERE user_id = $2 AND symbol = $3`, status, me, sym)
+	}
+	r := app.Do("GET", "/v1/cadence/zones?scope=watchlist", app.Token(me), nil)
+	var items []listItem
+	r.JSON(t, &items)
+	if r.Status != 200 || len(items) != 1 || items[0].Symbol != "LIVE" {
+		t.Fatalf("status %d: %s", r.Status, r.Body)
+	}
+}
+
+func TestZoneSymbolTooLong(t *testing.T) {
+	app := routesApp(t, true)
+	tok := app.Token(app.CreateUser(uuid.NewString() + "@example.com"))
+	if r := app.Do("GET", "/v1/cadence/zones/"+strings.Repeat("A", 33), tok, nil); r.Status != 400 {
+		t.Fatalf("33 chars: status %d: %s", r.Status, r.Body)
+	}
+	if r := app.Do("GET", "/v1/cadence/zones/"+strings.Repeat("A", 32), tok, nil); r.Status != 200 {
+		t.Fatalf("32 chars: status %d: %s", r.Status, r.Body)
+	}
+}
+
+func TestZonesFormingNullWhenNewestConfirmed(t *testing.T) {
+	app := routesApp(t, true)
+	me := app.CreateUser(uuid.NewString() + "@example.com")
+	hold(t, app, me, "AAPL")
+	seed(t, app,
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.September), closeV: 190, zone: "steady", confirmed: true},
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.October), closeV: 191, zone: "steady", confirmed: true},
+	)
+	r := app.Do("GET", "/v1/cadence/zones", app.Token(me), nil)
+	var items []listItem
+	r.JSON(t, &items)
+	if len(items) != 1 || items[0].Confirmed == nil || items[0].Forming != nil || !strings.Contains(string(r.Body), `"forming":null`) {
+		t.Fatalf("list: %s", r.Body)
+	}
+	r = app.Do("GET", "/v1/cadence/zones/AAPL", app.Token(me), nil)
+	var d detailBody
+	r.JSON(t, &d)
+	m := d.Timeframes["M"]
+	if m.Confirmed == nil || m.Forming != nil || m.Confirmed.PeriodEnd != "2026-10-31" {
+		t.Fatalf("detail: %s", r.Body)
+	}
+}
+
+func TestZonesStaleFormingDropped(t *testing.T) {
+	app := routesApp(t, true)
+	me := app.CreateUser(uuid.NewString() + "@example.com")
+	hold(t, app, me, "AAPL")
+	seed(t, app,
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.August), closeV: 190, zone: "steady", confirmed: false},
+		seedRow{symbol: "AAPL", tf: "M", periodEnd: monthEndOf(2026, time.October), closeV: 191, zone: "steady", confirmed: true},
+	)
+	r := app.Do("GET", "/v1/cadence/zones", app.Token(me), nil)
+	var items []listItem
+	r.JSON(t, &items)
+	if len(items) != 1 || items[0].Confirmed == nil || items[0].Forming != nil {
+		t.Fatalf("stale forming served: %s", r.Body)
+	}
+}
+
+func TestZoneDetailGateErrorIs500(t *testing.T) {
+	app := routesAppGate(t, true, gateFunc(func(context.Context, string, uuid.UUID) error {
+		return errors.New("billing down")
+	}))
+	tok := app.Token(app.CreateUser(uuid.NewString() + "@example.com"))
+	if r := app.Do("GET", "/v1/cadence/zones/AAPL", tok, nil); r.Status != 500 {
+		t.Fatalf("status %d: %s", r.Status, r.Body)
 	}
 }

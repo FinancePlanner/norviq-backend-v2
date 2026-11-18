@@ -10895,7 +10895,7 @@ components:
         zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: The engine's zone }
         cappedZone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: The zone after the fundamentals and bull range guards }
         multiplier: { type: number, description: Contribution multiplier of cappedZone }
-        guardReason: { type: string, nullable: true, enum: [fundamentals_weakening, above_bull_range], description: A fundamentals reason stored on the reading wins over the bull range reason }
+        guardReason: { type: string, nullable: true, enum: [fundamentals_weakening, above_bull_range, null], description: A fundamentals reason stored on the reading wins over the bull range reason }
         guardChecked: { type: boolean, description: Whether the fundamentals guard could be evaluated }
         periodEnd: { type: string, format: date }
         asOf: { type: string, format: date }
@@ -10904,7 +10904,7 @@ components:
         distance: { type: number, nullable: true }
         percentile: { type: number, nullable: true }
         sampleCount: { type: integer }
-        touchZone: { type: string, nullable: true }
+        touchZone: { type: string, nullable: true, enum: [x4, x3, x2, steady, extended, very_extended, insufficient, null] }
         ruleVersion: { type: integer }
     CadenceZoneListItem:
       type: object
@@ -10958,8 +10958,8 @@ components:
                         periodEnd: { type: string, format: date }
                         close: { type: number }
                         trend: { type: number, nullable: true }
-                        zone: { type: string }
-                        touchZone: { type: string, nullable: true }
+                        zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient] }
+                        touchZone: { type: string, nullable: true, enum: [x4, x3, x2, steady, extended, very_extended, insufficient, null] }
         rules:
           type: object
           required: [version, x4, x3, x2, extended, veryExtended]

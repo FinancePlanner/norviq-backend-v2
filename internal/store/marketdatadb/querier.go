@@ -10,6 +10,7 @@ import (
 )
 
 type Querier interface {
+	DeleteMarketHistoryAnchor(ctx context.Context, instrumentKey string) error
 	GetAnalystEstimatesCache(ctx context.Context, arg GetAnalystEstimatesCacheParams) (GetAnalystEstimatesCacheRow, error)
 	GetBasicFinancialsCache(ctx context.Context, arg GetBasicFinancialsCacheParams) (GetBasicFinancialsCacheRow, error)
 	GetFinancialGrowthCache(ctx context.Context, arg GetFinancialGrowthCacheParams) (GetFinancialGrowthCacheRow, error)
@@ -22,15 +23,20 @@ type Querier interface {
 	GetRatiosCache(ctx context.Context, arg GetRatiosCacheParams) (GetRatiosCacheRow, error)
 	GetRatiosTTMCache(ctx context.Context, arg GetRatiosTTMCacheParams) (GetRatiosTTMCacheRow, error)
 	GetSearchCache(ctx context.Context, arg GetSearchCacheParams) (GetSearchCacheRow, error)
-	HistoryIngestionSymbols(ctx context.Context) ([]string, error)
+	// Watchlist symbols join only when include_watchlist is set (Cadence on).
+	HistoryIngestionSymbols(ctx context.Context, includeWatchlist bool) ([]string, error)
 	LatestFxRate(ctx context.Context, arg LatestFxRateParams) (LatestFxRateRow, error)
 	ListPriceHistory(ctx context.Context, arg ListPriceHistoryParams) ([]ListPriceHistoryRow, error)
+	// Zero rows means no anchor: the history has not been verified by the job.
+	MarketHistoryAnchor(ctx context.Context, instrumentKey string) ([]MarketHistoryAnchorRow, error)
+	MarketPriceBarCloses(ctx context.Context, arg MarketPriceBarClosesParams) ([]MarketPriceBarClosesRow, error)
 	// Zero rows means no coverage (Swift's coverage.lastDate == nil).
 	MarketPriceBarLastDate(ctx context.Context, arg MarketPriceBarLastDateParams) ([]time.Time, error)
 	UpsertAnalystEstimatesCache(ctx context.Context, arg UpsertAnalystEstimatesCacheParams) error
 	UpsertBasicFinancialsCache(ctx context.Context, arg UpsertBasicFinancialsCacheParams) (string, error)
 	UpsertFinancialGrowthCache(ctx context.Context, arg UpsertFinancialGrowthCacheParams) error
 	UpsertFxRate(ctx context.Context, arg UpsertFxRateParams) (UpsertFxRateRow, error)
+	UpsertMarketHistoryAnchor(ctx context.Context, arg UpsertMarketHistoryAnchorParams) error
 	UpsertMarketPriceBar(ctx context.Context, arg UpsertMarketPriceBarParams) error
 	UpsertPriceHistory(ctx context.Context, arg UpsertPriceHistoryParams) error
 	UpsertProfileCache(ctx context.Context, arg UpsertProfileCacheParams) (UpsertProfileCacheRow, error)

@@ -476,7 +476,48 @@ func (s *Service) RefreshHistory(ctx context.Context, rawSymbol string, rawFrom,
 	return s.fetchAndStoreHistory(ctx, symbol, from, to)
 }
 
+// FetchAndStoreProviderHistory is RefreshHistory for callers that must know
+// what the provider itself sent: it stores the fetched bars in price_history
+// and market_price_bars the same way, but returns only those bars and never
+// stored rows. RefreshHistory answers with stored rows when the provider
+// fails quietly (Finnhub turns errors into an empty history), which would
+// pass for a fresh fetch. An empty provider result writes nothing.
+func (s *Service) FetchAndStoreProviderHistory(ctx context.Context, rawSymbol string, rawFrom, rawTo *string) (HistoryResponse, error) {
+	symbol, err := normalizeSymbol(rawSymbol)
+	if err != nil {
+		return HistoryResponse{}, err
+	}
+	from, to, err := parseHistoryRange(rawFrom, rawTo)
+	if err != nil {
+		return HistoryResponse{}, err
+	}
+	fresh, err := s.Provider.History(ctx, symbol, from, to)
+	if err != nil {
+		return HistoryResponse{}, err
+	}
+	if err := s.upsertPriceHistory(ctx, symbol, fresh.Bars); err != nil {
+		return HistoryResponse{}, err
+	}
+	// The ingestion job anchors on market_price_bars, so unlike the request
+	// path a failed write here must fail the call.
+	if err := s.UpsertMarketPriceBars(ctx, symbol, fresh.Currency, s.Provider.Name(), priceBarsFromProvider(fresh.Bars)); err != nil {
+		return HistoryResponse{}, err
+	}
+	return HistoryResponse{Symbol: symbol, Currency: fresh.Currency, Bars: priceBarsFromProvider(fresh.Bars)}, nil
+}
+
 func (s *Service) upsertHistoryBars(ctx context.Context, symbol, currency, provider string, bars []PriceBar) error {
+	if err := s.upsertPriceHistory(ctx, symbol, bars); err != nil {
+		return err
+	}
+	// Best-effort dual-write into the canonical scenario store.
+	if err := s.UpsertMarketPriceBars(ctx, symbol, currency, provider, priceBarsFromProvider(bars)); err != nil {
+		s.logger().Warn("market history canonical dual-write failed", "symbol", symbol, "error", err)
+	}
+	return nil
+}
+
+func (s *Service) upsertPriceHistory(ctx context.Context, symbol string, bars []PriceBar) error {
 	for _, b := range bars {
 		var vol *int64
 		if b.Volume != nil {
@@ -488,10 +529,6 @@ func (s *Service) upsertHistoryBars(ctx context.Context, symbol, currency, provi
 		}); err != nil {
 			return err
 		}
-	}
-	// Best-effort dual-write into the canonical scenario store.
-	if err := s.UpsertMarketPriceBars(ctx, symbol, currency, provider, priceBarsFromProvider(bars)); err != nil {
-		s.logger().Warn("market history canonical dual-write failed", "symbol", symbol, "error", err)
 	}
 	return nil
 }

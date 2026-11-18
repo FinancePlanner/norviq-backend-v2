@@ -30,6 +30,7 @@ import (
 	"norviq-api/internal/features/boards"
 	"norviq-api/internal/features/brokers"
 	"norviq-api/internal/features/budgeting"
+	"norviq-api/internal/features/cadence"
 	"norviq-api/internal/features/crypto"
 	"norviq-api/internal/features/dashboard"
 	"norviq-api/internal/features/dataexport"
@@ -108,6 +109,9 @@ func All(ctx context.Context) []server.Feature {
 		}},
 		aiplatform.Feature{},
 		market.Feature{Premium: func(d *server.Deps) market.PremiumGate {
+			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
+		}},
+		cadence.Feature{Premium: func(d *server.Deps) cadence.PremiumGate {
 			return entitlements.NamedGate{Service: entitlements.NewFromEnv(d.DB)}
 		}},
 		// MarketBriefController (/v1/market/brief, behind MARKET_BRIEF_ENABLED).
@@ -269,6 +273,7 @@ func AllJobs() []Job {
 		identity.CleanupJob{},
 		billing.TrialExpirationJob{},
 		market.HistoryIngestionJob{},
+		cadence.ZonesJob{},
 		reporting.WorkerJob{},
 		reporting.RetentionJob{},
 		expenseimport.RetentionJob{},

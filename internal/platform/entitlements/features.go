@@ -54,6 +54,7 @@ const (
 	FeatureRebalancingRules        Feature = "rebalancing_rules"
 	FeatureGoalPlanning            Feature = "goal_planning"
 	FeatureTerminalPositionAI      Feature = "terminal_position_ai"
+	FeatureCadence                 Feature = "cadence"
 )
 
 // Limits is BillingPlanLimits. nil means unlimited.

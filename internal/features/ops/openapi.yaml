@@ -30,6 +30,8 @@ tags:
   - name: Research
   - name: Targets
   - name: MarketData
+  - name: Cadence
+    description: How far a security's price sits from its own long-term trend, as a contribution zone. Gated by `CADENCE_ENABLED`; every route returns 404 when it is off.
   - name: Finnhub
     description: Direct Finnhub reference endpoints used by the backend market-data provider and Bruno collection examples. Backend Finnhub configuration uses `FINNHUB_API_KEY`, `FINNHUB_WEBHOOK_URL`, and `FINNHUB_WEBHOOK_SECRET`.
   - name: FMP
@@ -10730,6 +10732,101 @@ paths:
                 $ref: '#/components/schemas/DigestUnsubscribeResponse'
         '400':
           description: Missing token
+  /v1/cadence/status:
+    get:
+      operationId: getCadenceStatus
+      tags: [Cadence]
+      summary: Whether Cadence is enabled
+      description: Mounted only when the deployment sets `CADENCE_ENABLED=true`; otherwise every `/v1/cadence/*` route answers 404.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+        '401':
+          description: Unauthorized
+  /v1/cadence/zones:
+    get:
+      operationId: listCadenceZones
+      tags: [Cadence]
+      summary: Monthly contribution zone for each held or watched symbol
+      description: >
+        One item per symbol of the caller's holdings or watchlists (de-duplicated, sorted),
+        with the newest confirmed and forming monthly reading. A symbol the zones job has
+        not computed yet is returned with `status` `pending` and null readings. Reads the
+        stored table only. The bull range guard is applied per caller to the newest readings,
+        using the caller's saved valuation. Requires `portfolio:read` for `holdings` and
+        `watchlist:read` for `watchlist`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [holdings, watchlist]
+            default: holdings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CadenceZoneListItem'
+        '400':
+          description: Unknown scope
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the required scope
+  /v1/cadence/zones/{symbol}:
+    get:
+      operationId: getCadenceZoneDetail
+      tags: [Cadence]
+      summary: Contribution zone of one symbol on every timeframe, with chart history
+      description: >
+        Timeframes W, M, Q and Y. Free plans get M only; W, Q and Y are `{"locked": true}`.
+        An unknown or not yet computed symbol answers 200 with `status` `pending`. Requires `market:read`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: years
+          in: query
+          required: false
+          description: Years of history, 1 to 15.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 15
+            default: 5
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CadenceZoneDetail'
+        '400':
+          description: Invalid symbol or years
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the required scope
 components:
   parameters:
     ScenarioResourceID:
@@ -10791,6 +10888,88 @@ components:
       name: Authorization
       description: Shared secret for inbound RevenueCat webhook delivery. Configure the backend with `REVENUECAT_WEBHOOK_SECRET`.
   schemas:
+    CadenceZoneReading:
+      type: object
+      required: [zone, cappedZone, multiplier, guardReason, guardChecked, periodEnd, asOf, close, trend, distance, percentile, sampleCount, touchZone, ruleVersion]
+      properties:
+        zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: "The engine's zone. `insufficient` means there is not enough consecutive history to rank the symbol: the engine needs a minimum number of samples with a trend (weekly 260, monthly, quarterly and yearly 60), which in practice is roughly 6, 8 and 10 years of unbroken monthly history for M, Q and Y. Clients must not hardcode a number of years." }
+        cappedZone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient], description: "The zone after the fundamentals and bull range guards. insufficient is never capped and means not enough consecutive history to rank (see zone)." }
+        multiplier: { type: number, description: Contribution multiplier of cappedZone }
+        guardReason: { type: string, nullable: true, enum: [fundamentals_weakening, above_bull_range, null], description: A fundamentals reason stored on the reading wins over the bull range reason }
+        guardChecked: { type: boolean, description: Whether the fundamentals guard could be evaluated }
+        periodEnd: { type: string, format: date }
+        asOf: { type: string, format: date }
+        close: { type: number }
+        trend: { type: number, nullable: true }
+        distance: { type: number, nullable: true }
+        percentile: { type: number, nullable: true }
+        sampleCount: { type: integer }
+        touchZone: { type: string, nullable: true, enum: [x4, x3, x2, steady, extended, very_extended, insufficient, null] }
+        ruleVersion: { type: integer }
+    CadenceZoneListItem:
+      type: object
+      required: [symbol, status, confirmed, forming]
+      properties:
+        symbol: { type: string }
+        status: { type: string, enum: [ready, pending], description: "pending means no zone rows exist yet. A ready symbol can still have readings whose zone is insufficient (not enough consecutive history to rank; see the zone field)." }
+        confirmed:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CadenceZoneReading'
+        forming:
+          description: Null when the newest reading is confirmed
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CadenceZoneReading'
+    CadenceZoneDetail:
+      type: object
+      required: [symbol, status, timeframes, rules]
+      properties:
+        symbol: { type: string }
+        status: { type: string, enum: [ready, pending] }
+        timeframes:
+          type: object
+          description: Keys W, M, Q and Y
+          additionalProperties:
+            oneOf:
+              - type: object
+                required: [locked]
+                properties:
+                  locked: { type: boolean, enum: [true] }
+              - type: object
+                required: [locked, confirmed, forming, history]
+                properties:
+                  locked: { type: boolean, enum: [false] }
+                  confirmed:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/CadenceZoneReading'
+                  forming:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/CadenceZoneReading'
+                  history:
+                    type: array
+                    description: Ascending by periodEnd
+                    items:
+                      type: object
+                      required: [periodEnd, close, trend, zone, touchZone]
+                      properties:
+                        periodEnd: { type: string, format: date }
+                        close: { type: number }
+                        trend: { type: number, nullable: true }
+                        zone: { type: string, enum: [x4, x3, x2, steady, extended, very_extended, insufficient] }
+                        touchZone: { type: string, nullable: true, enum: [x4, x3, x2, steady, extended, very_extended, insufficient, null] }
+        rules:
+          type: object
+          required: [version, x4, x3, x2, extended, veryExtended]
+          properties:
+            version: { type: integer }
+            x4: { type: number }
+            x3: { type: number }
+            x2: { type: number }
+            extended: { type: number }
+            veryExtended: { type: number }
     TelegramStatusResponse:
       type: object
       required: [available, connected, botUsername]

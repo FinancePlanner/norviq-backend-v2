@@ -624,3 +624,25 @@ func TestPayloadDecodeIsLossy(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratorClaudeWebFirstThenOnline(t *testing.T) {
+	// A Claude draft that fails validation still gets the :online attempt,
+	// labeled with the model that wrote it.
+	claude := &scriptedClient{replies: []any{draftJSON(2)}}
+	web := &scriptedClient{replies: []any{draftJSON(5)}}
+	fallback := &scriptedClient{}
+	g := newGenerator([]yahoochart.Quote{daxQuote}, web, fallback)
+	g.ClaudeWebClient, g.ClaudeWebModel = claude, "claude-haiku-5-5+web_search"
+	brief, err := g.Generate(context.Background(), testDue)
+	if err != nil || brief.Model != DefaultModel || brief.Responses[0].Degraded || len(claude.calls) != 1 || len(fallback.calls) != 0 {
+		t.Fatalf("%+v %v", brief, err)
+	}
+	// Claude succeeding is used directly.
+	claude = &scriptedClient{replies: []any{draftJSON(5)}}
+	web = &scriptedClient{}
+	g = newGenerator([]yahoochart.Quote{daxQuote}, web, fallback)
+	g.ClaudeWebClient, g.ClaudeWebModel = claude, "claude-haiku-5-5+web_search"
+	if brief, err := g.Generate(context.Background(), testDue); err != nil || brief.Model != "claude-haiku-5-5+web_search" || len(web.calls) != 0 {
+		t.Fatalf("%+v %v", brief, err)
+	}
+}

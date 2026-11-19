@@ -191,10 +191,11 @@ func (h *handlers) updateNotificationPreferences(c *echo.Context) error {
 }
 
 // NewLiveGenerator is MarketBriefGenerator.live: Yahoo quotes, the shared
-// news chain, the Finnhub earnings calendar, a web-search client on the
-// configured AI key and base URL (its own model, 6000 tokens, 90 s), and
-// the platform's default chain as the fallback. No key or base URL means
-// no web client, and every run is degraded.
+// news chain, the Finnhub earnings calendar, Claude with Anthropic's web
+// search while the Haiku trial is on, a web-search client on the configured
+// AI key and base URL (its own model, 6000 tokens, 90 s), and the
+// platform's default chain as the fallback. With no web client at all,
+// every run is degraded.
 func NewLiveGenerator(d *server.Deps, s Settings) (*LLMGenerator, error) {
 	p, err := aiplatform.Platform(d)
 	if err != nil {
@@ -226,6 +227,12 @@ func NewLiveGenerator(d *server.Deps, s Settings) (*LLMGenerator, error) {
 			APIKey: p.Config.APIKey, Model: model, BaseURL: p.Config.BaseURL,
 			MaxTokens: 6000, Timeout: 90 * time.Second, HTTP: p.HTTP, Logger: d.Logger,
 		}
+	}
+	if c := ai.ClaudeWebSearchClient(p.Config, ai.WebSearchRequest{
+		MaxTokens: 8000, MaxUses: webSearchMaxUses, Timeout: 90 * time.Second, HTTP: p.HTTP, Logger: d.Logger,
+	}); c != nil {
+		g.ClaudeWebClient = c
+		g.ClaudeWebModel = ai.ClaudeWebSearchLabel(c)
 	}
 	return g, nil
 }

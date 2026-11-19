@@ -165,6 +165,10 @@ type ProviderConfig struct {
 	// unless ANTHROPIC_API_KEY is set and ANTHROPIC_FIRST is true.
 	AnthropicTier  *Tier
 	AnthropicScope string
+	// AnthropicWebSearch (ANTHROPIC_WEB_SEARCH, default true) lets the trial
+	// rung lead the web-search features with Anthropic's own search. False
+	// turns only that off, leaving the rest of the trial running.
+	AnthropicWebSearch bool
 }
 
 // IsConfigured is true when the primary has a key, base URL and model.
@@ -276,6 +280,8 @@ func LoadProviderConfig(env Env) ProviderConfig {
 		RequestTimeout: time.Duration(max(1, env.intOr("AI_REQUEST_TIMEOUT_SECONDS", 60))) * time.Second,
 		AnthropicTier:  LoadAnthropicTier(env),
 		AnthropicScope: scope,
+		// Default on: the switch is for turning search spend off.
+		AnthropicWebSearch: env.providerBool("ANTHROPIC_WEB_SEARCH", true),
 	}
 }
 

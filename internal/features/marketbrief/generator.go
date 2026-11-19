@@ -30,6 +30,8 @@ const (
 	// over.
 	DefaultModel       = "anthropic/claude-haiku-4.5:online"
 	fallbackModelLabel = "fallback-chain"
+	// webSearchMaxUses caps Claude's billed searches per brief.
+	webSearchMaxUses = 5
 )
 
 // EarningsCalendar is the slice of EarningsService the brief reads.
@@ -38,15 +40,20 @@ type EarningsCalendar interface {
 }
 
 // LLMGenerator is MarketBriefGenerator: the numbers are fetched and
-// formatted here, the model only writes text. The first attempt uses a
-// dedicated client on an OpenRouter `:online` model (web search); if that
+// formatted here, the model only writes text. The web attempts come first,
+// each standing alone so a draft that fails validation still gets the next:
+// Claude with Anthropic's own web search while the Haiku trial is on, then a
+// dedicated client on an OpenRouter `:online` model; if those
 // call fails or its draft does not validate, the app's ordinary chain
 // writes the brief from the in-house facts alone and it is marked degraded.
 type LLMGenerator struct {
 	Quotes   yahoochart.QuoteProvider
 	News     newsprovider.Provider // nil without a configured news chain
 	Earnings EarningsCalendar
-	// WebClient is nil without an AI key or base URL: every run degrades.
+	// ClaudeWebClient is nil unless the Haiku trial and its web search are on.
+	ClaudeWebClient ai.ChatClient
+	ClaudeWebModel  string
+	// WebClient is nil without an AI key or base URL.
 	WebClient ai.ChatClient
 	WebModel  string
 	// Fallback is app.openAIChatClient, read lazily.
@@ -65,12 +72,18 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	quotes := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
 
-	if g.WebClient != nil {
-		brief, err := g.attempt(ctx, g.WebClient, true, g.WebModel, false, nil, due, facts, quotes, at)
+	for _, web := range []struct {
+		client ai.ChatClient
+		model  string
+	}{{g.ClaudeWebClient, g.ClaudeWebModel}, {g.WebClient, g.WebModel}} {
+		if web.client == nil {
+			continue
+		}
+		brief, err := g.attempt(ctx, web.client, true, web.model, false, nil, due, facts, quotes, at)
 		if err == nil {
 			return brief, nil
 		}
-		g.Logger.Warn("market_brief_web_attempt_failed", "slot", due.Slot, "error", err.Error())
+		g.Logger.Warn("market_brief_web_attempt_failed", "slot", due.Slot, "model", web.model, "error", err.Error())
 	}
 	allowed := map[string]bool{}
 	for _, h := range facts.Headlines {

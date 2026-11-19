@@ -22,7 +22,31 @@ type AnthropicOptions struct {
 	Effort string
 	// ThinkingEnabled false sends `thinking: {type: "disabled"}` always.
 	ThinkingEnabled bool
+	// WebSearch, when set, adds Anthropic's server-side web search tool. A
+	// reply that ran no successful search is then unusable, so the chain
+	// moves on instead of returning an answer the model made up.
+	WebSearch *WebSearchOptions
 }
+
+// WebSearchOptions configure the server-side web search tool.
+type WebSearchOptions struct {
+	// MaxUses caps searches per request (each is billed); 0 means no cap.
+	MaxUses int
+}
+
+// Web search constants.
+const (
+	// WebSearchToolType is the basic web search tool. Claude Haiku 5.5
+	// supports it; the dynamic-filtering versions run code server-side and
+	// are not ZDR eligible, which buys nothing for a few short lookups.
+	WebSearchToolType = "web_search_20250305"
+	WebSearchToolName = "web_search"
+	// WebSearchCostMicros is the price of one search: $10 per 1,000 on the
+	// Claude API (pricing page, checked 2026-11-19); failed searches are free.
+	WebSearchCostMicros = 10_000
+	// MaxPauseTurns is how many times a paused server-tool turn is resumed.
+	MaxPauseTurns = 3
+)
 
 // Anthropic Messages API constants.
 const (
@@ -51,11 +75,14 @@ type AnthropicTurn struct {
 	Role    string            `json:"role"`
 }
 
-// AnthropicToolDefinition is a Messages API tool.
+// AnthropicToolDefinition is a Messages API tool: a client tool (name,
+// description, input_schema) or a server tool (type, name, max_uses).
 type AnthropicToolDefinition struct {
-	Description string     `json:"description"`
-	InputSchema JSONSchema `json:"input_schema"`
-	Name        string     `json:"name"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	InputSchema *JSONSchema `json:"input_schema,omitempty"`
+	Name        string      `json:"name"`
+	MaxUses     int         `json:"max_uses,omitempty"`
 }
 
 // AnthropicOutputConfig carries effort.
@@ -89,12 +116,46 @@ type AnthropicResponse struct {
 	Content     []json.RawMessage `json:"content"`
 	StopReason  *string           `json:"stop_reason"`
 	StopDetails json.RawMessage   `json:"stop_details"`
-	Usage       *struct {
-		InputTokens              *int `json:"input_tokens"`
-		OutputTokens             *int `json:"output_tokens"`
-		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
-		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
-	} `json:"usage"`
+	Usage       *AnthropicUsage   `json:"usage"`
+}
+
+// AnthropicUsage is the response's token and server-tool usage.
+type AnthropicUsage struct {
+	InputTokens              *int `json:"input_tokens"`
+	OutputTokens             *int `json:"output_tokens"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+	ServerToolUse            *struct {
+		WebSearchRequests *int `json:"web_search_requests"`
+	} `json:"server_tool_use"`
+}
+
+// WebSearchRequests is the number of billed searches, 0 when absent.
+func (u *AnthropicUsage) WebSearchRequests() int {
+	if u == nil || u.ServerToolUse == nil {
+		return 0
+	}
+	return intOr(u.ServerToolUse.WebSearchRequests, 0)
+}
+
+// add sums other into u. Every field of u ends up non-nil.
+func (u *AnthropicUsage) add(other *AnthropicUsage) {
+	sum := func(dst **int, src *int) {
+		v := intOr(*dst, 0) + intOr(src, 0)
+		*dst = &v
+	}
+	var o AnthropicUsage
+	if other != nil {
+		o = *other
+	}
+	sum(&u.InputTokens, o.InputTokens)
+	sum(&u.OutputTokens, o.OutputTokens)
+	sum(&u.CacheCreationInputTokens, o.CacheCreationInputTokens)
+	sum(&u.CacheReadInputTokens, o.CacheReadInputTokens)
+	searches := u.WebSearchRequests() + o.WebSearchRequests()
+	u.ServerToolUse = &struct {
+		WebSearchRequests *int `json:"web_search_requests"`
+	}{WebSearchRequests: &searches}
 }
 
 // AnthropicClient is AnthropicChatClient: Claude through Anthropic's own
@@ -126,7 +187,14 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []Message, tools []
 	msg, err := completeResumingTruncation(ctx, messages, responseFormat, c.Model, c.logger(),
 		func(ctx context.Context, transcript []Message) (Completion, error) {
 			rounds++
-			return c.completion(ctx, transcript, tools, responseFormat)
+			result, searches, err := c.completion(ctx, transcript, tools, responseFormat)
+			// Only the first round has to search: a continuation of a cut-off
+			// answer already stands on the first round's results.
+			if err == nil && rounds == 1 && c.Options.WebSearch != nil && searches == 0 {
+				c.logger().Warn("anthropic_web_search_missing", "model", c.Model)
+				return Completion{}, &UnusableResponseError{Model: c.Model}
+			}
+			return result, err
 		})
 	if err != nil {
 		return Message{}, err
@@ -137,56 +205,48 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []Message, tools []
 	return msg, nil
 }
 
-func (c *AnthropicClient) completion(ctx context.Context, messages []Message, tools []Tool, responseFormat string) (Completion, error) {
+// completion runs one Messages request, resuming it while the server pauses
+// a long server-tool turn. It also returns how many web searches succeeded.
+func (c *AnthropicClient) completion(ctx context.Context, messages []Message, tools []Tool, responseFormat string) (Completion, int, error) {
 	body := BuildAnthropicRequest(messages, tools, responseFormat, c.Model, c.MaxTokens, c.Options)
-	payload, err := marshalNoEscape(body)
-	if err != nil {
-		return Completion{}, err
-	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(payload))
-	if err != nil {
-		return Completion{}, err
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("x-api-key", c.APIKey)
-	req.Header.Set("anthropic-version", AnthropicAPIVersion)
-	httpClient := c.HTTP
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return Completion{}, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxProviderBody))
-	if err != nil {
-		return Completion{}, err
-	}
 
 	logger := c.logger()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		status := AnthropicUpstreamStatus(resp.StatusCode, string(raw))
-		logger.Error(fmt.Sprintf("anthropic_error status=%d classified=%d body=%s",
-			resp.StatusCode, status, redactBody(string(raw), c.APIKey, 500)))
-		return Completion{}, &UpstreamError{Status: status}
+	var decoded *AnthropicResponse
+	var content []json.RawMessage
+	usage := &AnthropicUsage{}
+	for round := 0; ; round++ {
+		next, err := c.post(ctx, body)
+		if err != nil {
+			return Completion{}, 0, err
+		}
+		decoded = next
+		content = append(content, next.Content...)
+		usage.add(next.Usage)
+		if stringOr(next.StopReason) != "pause_turn" {
+			break
+		}
+		if round >= MaxPauseTurns {
+			logger.Warn("anthropic_pause_turn_exhausted", "model", c.Model, "rounds", round+1)
+			return Completion{}, 0, &UnusableResponseError{Model: c.Model}
+		}
+		// Resume: send the paused assistant content back unchanged, with no
+		// extra user turn; the server continues from its trailing block.
+		if n := len(body.Messages); n > 0 && body.Messages[n-1].Role == "assistant" {
+			body.Messages[n-1].Content = append(body.Messages[n-1].Content, next.Content...)
+		} else {
+			body.Messages = append(body.Messages, AnthropicTurn{Role: "assistant", Content: next.Content})
+		}
 	}
+	decoded.Content = content
+	decoded.Usage = usage
 
-	var decoded AnthropicResponse
-	if err := DecodeProviderJSON(raw, &decoded, logger, "AnthropicMessagesResponse"); err != nil {
-		return Completion{}, err
-	}
-	if decoded.Content == nil {
-		logger.Error("ai_provider_undecodable type=AnthropicMessagesResponse error=keyNotFound content")
-		return Completion{}, errUnreadable()
-	}
-	result, err := TranslateAnthropicResponse(&decoded, responseFormat)
+	result, err := TranslateAnthropicResponse(decoded, responseFormat)
 	if err != nil {
 		model := c.Model
 		if decoded.Model != nil {
@@ -197,10 +257,87 @@ func (c *AnthropicClient) completion(ctx context.Context, messages []Message, to
 			details = string(decoded.StopDetails)
 		}
 		logger.Warn("anthropic_refusal", "model", model, "details", details)
-		return Completion{}, err
+		return Completion{}, 0, err
 	}
-	logAnthropicCompletion(logger, &decoded, result, c.Model, body.ThinkingEnabled())
-	return result, nil
+	searches := SuccessfulWebSearches(decoded.Content)
+	logAnthropicCompletion(logger, decoded, result, c.Model, body.ThinkingEnabled(), searches)
+	return result, searches, nil
+}
+
+// post sends one Messages request and decodes the response.
+func (c *AnthropicClient) post(ctx context.Context, body AnthropicRequest) (*AnthropicResponse, error) {
+	payload, err := marshalNoEscape(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("x-api-key", c.APIKey)
+	req.Header.Set("anthropic-version", AnthropicAPIVersion)
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxProviderBody))
+	if err != nil {
+		return nil, err
+	}
+
+	logger := c.logger()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		status := AnthropicUpstreamStatus(resp.StatusCode, string(raw))
+		logger.Error(fmt.Sprintf("anthropic_error status=%d classified=%d body=%s",
+			resp.StatusCode, status, redactBody(string(raw), c.APIKey, 500)))
+		return nil, &UpstreamError{Status: status}
+	}
+
+	var decoded AnthropicResponse
+	if err := DecodeProviderJSON(raw, &decoded, logger, "AnthropicMessagesResponse"); err != nil {
+		return nil, err
+	}
+	if decoded.Content == nil {
+		logger.Error("ai_provider_undecodable type=AnthropicMessagesResponse error=keyNotFound content")
+		return nil, errUnreadable()
+	}
+	return &decoded, nil
+}
+
+// SuccessfulWebSearches counts web_search_tool_result blocks that carry at
+// least one result. A failed search is still HTTP 200, with an error object
+// where the result list would be.
+func SuccessfulWebSearches(content []json.RawMessage) int {
+	n := 0
+	for _, block := range content {
+		if blockType(block) != "web_search_tool_result" {
+			continue
+		}
+		var fields struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(block, &fields) != nil {
+			continue
+		}
+		var results []json.RawMessage
+		if json.Unmarshal(fields.Content, &results) == nil && len(results) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+func stringOr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // BuildAnthropicRequest is AnthropicChatClient.makeRequest: the Messages API
@@ -247,13 +384,21 @@ func BuildAnthropicRequest(
 	}
 	if len(tools) > 0 {
 		for _, t := range tools {
+			schema := t.Function.Parameters
 			req.Tools = append(req.Tools, AnthropicToolDefinition{
 				Name:        t.Function.Name,
 				Description: t.Function.Description,
-				InputSchema: t.Function.Parameters,
+				InputSchema: &schema,
 			})
 		}
 		req.ToolChoice = json.RawMessage(`{"type":"auto"}`)
+	}
+	if ws := options.WebSearch; ws != nil {
+		req.Tools = append(req.Tools, AnthropicToolDefinition{
+			Type:    WebSearchToolType,
+			Name:    WebSearchToolName,
+			MaxUses: max(ws.MaxUses, 0),
+		})
 	}
 	if options.Effort != "" {
 		effort := options.Effort
@@ -476,6 +621,12 @@ func TranslateAnthropicResponse(resp *AnthropicResponse, responseFormat string) 
 			if json.Unmarshal(fields["text"], &s) == nil {
 				text.WriteString(s)
 			}
+		case "web_search_tool_result":
+			// In JSON mode the object comes after the last search; any text
+			// before it is the model narrating its searches.
+			if responseFormat == ResponseFormatJSON {
+				text.Reset()
+			}
 		case "tool_use":
 			var id, name string
 			if json.Unmarshal(fields["id"], &id) != nil || json.Unmarshal(fields["name"], &name) != nil {
@@ -566,7 +717,7 @@ func AnthropicEstimatedCostMicros(inputTokens, outputTokens, cacheReadTokens, ca
 	return int(math.Round(micros * multiplier))
 }
 
-func logAnthropicCompletion(logger *slog.Logger, resp *AnthropicResponse, result Completion, fallbackModel string, thinking bool) {
+func logAnthropicCompletion(logger *slog.Logger, resp *AnthropicResponse, result Completion, fallbackModel string, thinking bool, successfulSearches int) {
 	var input, output, cacheRead, cacheCreation int
 	promptTokens, completionTokens, totalTokens := -1, -1, -1
 	if u := resp.Usage; u != nil {
@@ -603,7 +754,10 @@ func logAnthropicCompletion(logger *slog.Logger, resp *AnthropicResponse, result
 		"tool_calls", len(result.Message.ToolCalls),
 		"cache_read_tokens", cacheRead,
 		"cache_creation_tokens", cacheCreation,
-		"est_cost_usd_micros", AnthropicEstimatedCostMicros(input, output, cacheRead, cacheCreation),
+		"web_search_requests", resp.Usage.WebSearchRequests(),
+		"web_searches_ok", successfulSearches,
+		"est_cost_usd_micros", AnthropicEstimatedCostMicros(input, output, cacheRead, cacheCreation)+
+			resp.Usage.WebSearchRequests()*WebSearchCostMicros,
 		"thinking", thinking,
 	)
 	if result.Message.HasNoUsableOutput() {

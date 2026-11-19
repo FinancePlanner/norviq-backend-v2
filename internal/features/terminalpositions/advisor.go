@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode"
 
 	"norviq-api/internal/features/boards"
@@ -21,9 +22,12 @@ import (
 // reaches the user. It never writes: the user accepts a suggestion in the
 // UI, which then PATCHes.
 //
-// The client is Vapor's DefaultOpenAIChatClient (ai.OpenAIClient) against
-// the configured primary provider, never the Anthropic trial chain. There is
-// no fallback without web search: a guessed share count is worse than none.
+// The client is Claude with Anthropic's server-side web search while the
+// Haiku trial is on (ai.WebSearchClient), then Vapor's DefaultOpenAIChatClient
+// (ai.OpenAIClient) on the configured primary provider's `:online` model;
+// never the general trial chain. There is no fallback without web search: a
+// guessed share count is worse than none, so a Claude reply that ran no
+// successful search is treated as a failure.
 
 // Advisor defaults.
 const (
@@ -31,6 +35,14 @@ const (
 	DefaultAIModel      = "anthropic/claude-haiku-4.5:online"
 	DefaultHorizonYears = 10
 	aiMaxTokens         = 1200
+	// anthropicMaxTokens leaves Claude room to think over search results
+	// before the JSON answer.
+	anthropicMaxTokens = 4096
+	// webSearchMaxUses caps Claude's billed searches per suggestion.
+	webSearchMaxUses = 3
+	// anthropicTimeout is shorter than the `:online` client's 60 s, so a
+	// slow Claude lookup still leaves the fallback time to answer.
+	anthropicTimeout = 40 * time.Second
 )
 
 // UnavailableReason is TerminalAIAdvisor.unavailableReason: why no client can
@@ -53,21 +65,25 @@ func LiveClient(cfg ai.ProviderConfig, configuredModel *string, httpClient *http
 	if UnavailableReason(cfg.Provider, cfg.APIKey, cfg.BaseURL, configuredModel) != "" {
 		return nil
 	}
-	model := DefaultAIModel
-	if configuredModel != nil {
-		if m := portfolios.TrimSwift(*configuredModel); m != "" {
-			model = m
-		}
-	}
 	return &ai.OpenAIClient{
 		APIKey:    cfg.APIKey,
-		Model:     model,
+		Model:     liveModel(configuredModel),
 		BaseURL:   cfg.BaseURL,
 		MaxTokens: aiMaxTokens,
 		Timeout:   ai.DefaultTimeout,
 		HTTP:      httpClient,
 		Logger:    logger,
 	}
+}
+
+// liveModel is TERMINAL_AI_MODEL when set, else DefaultAIModel.
+func liveModel(configuredModel *string) string {
+	if configuredModel != nil {
+		if m := portfolios.TrimSwift(*configuredModel); m != "" {
+			return m
+		}
+	}
+	return DefaultAIModel
 }
 
 const shareFactsPrompt = `You look up public company share data with web search. Reply with only a JSON object:

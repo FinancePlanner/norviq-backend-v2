@@ -99,9 +99,10 @@ func lookupModel() *string {
 }
 
 // AIClient is `app.terminalAIClient`: the web-search chat client for terminal
-// suggestions, built once per process from AI_PROVIDER's key and base URL
-// and TERMINAL_AI_MODEL. ok is false (client nil) when Vapor's would be nil:
-// no key or base URL, or a non-OpenRouter provider without TERMINAL_AI_MODEL.
+// suggestions, built once per process. While the Haiku trial is on, Claude
+// with Anthropic's own web search leads; behind it (or alone, with the trial
+// off) is the client on AI_PROVIDER's key and base URL and
+// TERMINAL_AI_MODEL. ok is false (client nil) when neither can be built.
 func AIClient(d *server.Deps) (ai.ChatClient, bool) {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
@@ -110,9 +111,12 @@ func AIClient(d *server.Deps) (ai.ChatClient, bool) {
 	}
 	var client ai.ChatClient
 	if p, err := aiplatform.Platform(d); err == nil {
-		if c := LiveClient(p.Config, lookupModel(), p.HTTP, d.Logger); c != nil {
-			client = c
-		}
+		configured := lookupModel()
+		online := LiveClient(p.Config, configured, p.HTTP, d.Logger)
+		client = ai.WebSearchClient(p.Config, online, liveModel(configured), ai.WebSearchRequest{
+			MaxTokens: anthropicMaxTokens, MaxUses: webSearchMaxUses, Timeout: anthropicTimeout,
+			HTTP: p.HTTP, Logger: d.Logger,
+		})
 	}
 	clients[d] = clientEntry{client: client}
 	return client, client != nil

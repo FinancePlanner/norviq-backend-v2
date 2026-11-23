@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    # Same major as production (platform/infra apps/norviq/data/postgres.yaml).
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: vapor_username
       POSTGRES_PASSWORD: vapor_password
@@ -8,7 +9,11 @@ services:
     ports:
       - "55499:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # Postgres 18+ images keep data in a major-versioned subdirectory of
+      # /var/lib/postgresql, so the volume mounts there. The volume name carries
+      # the major: a pg17 volume cannot be opened by pg18, and a fresh name
+      # leaves the old one alone instead of crashlooping on it.
+      - postgres-data-18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vapor_username -d vapor_database"]
       interval: 5s
@@ -63,4 +68,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres-data:
+  postgres-data-18:

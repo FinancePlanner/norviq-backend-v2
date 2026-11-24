@@ -31,6 +31,7 @@ type Querier interface {
 	RecapNoteSymbols(ctx context.Context, arg RecapNoteSymbolsParams) ([]string, error)
 	RecapPilotFollowCount(ctx context.Context, arg RecapPilotFollowCountParams) (int64, error)
 	RecapPilotFollowLists(ctx context.Context, userID uuid.UUID) ([]RecapPilotFollowListsRow, error)
+	// Fully priced rows only: a partial row counts unpriced symbols as 0.
 	RecapSnapshots(ctx context.Context, arg RecapSnapshotsParams) ([]RecapSnapshotsRow, error)
 	RecapStockSymbols(ctx context.Context, arg RecapStockSymbolsParams) ([]string, error)
 	RecapTargets(ctx context.Context, arg RecapTargetsParams) ([]RecapTargetsRow, error)

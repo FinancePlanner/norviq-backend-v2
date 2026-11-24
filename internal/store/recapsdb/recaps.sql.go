@@ -517,6 +517,7 @@ func (q *Queries) RecapPilotFollowLists(ctx context.Context, userID uuid.UUID) (
 const recapSnapshots = `-- name: RecapSnapshots :many
 SELECT portfolio_list_id, currency, captured_on, market_value FROM portfolio_value_snapshots
 WHERE user_id = $1 AND captured_on >= $2 AND captured_on < $3
+  AND missing_symbols = 0
   AND (cardinality($4::uuid[]) = 0 OR portfolio_list_id <> ALL($4::uuid[]))
 `
 
@@ -534,6 +535,7 @@ type RecapSnapshotsRow struct {
 	MarketValue     float64
 }
 
+// Fully priced rows only: a partial row counts unpriced symbols as 0.
 func (q *Queries) RecapSnapshots(ctx context.Context, arg RecapSnapshotsParams) ([]RecapSnapshotsRow, error) {
 	rows, err := q.db.Query(ctx, recapSnapshots,
 		arg.UserID,

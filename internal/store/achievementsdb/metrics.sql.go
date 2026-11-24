@@ -496,6 +496,7 @@ func (q *Queries) OpenedMonthlyRecapKeys(ctx context.Context, userID uuid.UUID) 
 const performanceSnapshots = `-- name: PerformanceSnapshots :many
 SELECT portfolio_list_id, captured_on, market_value, cost_basis FROM portfolio_value_snapshots
 WHERE user_id = $1 AND portfolio_list_id = ANY($2::uuid[]) AND captured_on <= $3::timestamptz
+  AND missing_symbols = 0
 `
 
 type PerformanceSnapshotsParams struct {
@@ -511,6 +512,7 @@ type PerformanceSnapshotsRow struct {
 	CostBasis       float64
 }
 
+// Fully priced rows only: a partial row counts unpriced symbols as 0.
 func (q *Queries) PerformanceSnapshots(ctx context.Context, arg PerformanceSnapshotsParams) ([]PerformanceSnapshotsRow, error) {
 	rows, err := q.db.Query(ctx, performanceSnapshots, arg.UserID, arg.ListIds, arg.AsOf)
 	if err != nil {

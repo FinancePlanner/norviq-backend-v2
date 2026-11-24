@@ -163,6 +163,24 @@ func TestPerformanceFromSnapshots(t *testing.T) {
 	}
 }
 
+// A partial snapshot (a symbol unpriced, counted as 0) is not a real
+// drawdown: the index skips it, so the recovery after it is no comeback.
+func TestPerformanceSkipsPartialSnapshots(t *testing.T) {
+	e := newEnv(t)
+	u, _ := e.user("achm-perfpartial")
+	list := e.portfolio(u)
+	for i, row := range []struct {
+		mv      float64
+		missing int
+	}{{100, 0}, {85, 1}, {101, 0}} {
+		e.exec(`INSERT INTO portfolio_value_snapshots (id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at)
+			VALUES ($1, $2, $3, (now() - make_interval(days => $4))::date, 'USD', $5, 100, 0, 2, 'capture', 2 - $6::int, $6, now())`, uuid.New(), u, list, 10-i, row.mv, row.missing)
+	}
+	if got := e.measure(u, "perf.comeback"); got["perf.comeback"] != 0 {
+		t.Fatalf("partial row read as a drawdown: %v", got)
+	}
+}
+
 func TestDiversified(t *testing.T) {
 	e := newEnv(t)
 	u, _ := e.user("achm-div")

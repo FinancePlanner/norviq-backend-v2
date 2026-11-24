@@ -65,6 +65,7 @@ type Querier interface {
 	RequestByPair(ctx context.Context, arg RequestByPairParams) (SocialFriendRequest, error)
 	RequestsForViewer(ctx context.Context, viewer uuid.UUID) ([]SocialFriendRequest, error)
 	RequestsWithViewer(ctx context.Context, arg RequestsWithViewerParams) ([]SocialFriendRequest, error)
+	// Fully priced rows only: a partial row counts unpriced symbols as 0.
 	ReturnSnapshots(ctx context.Context, arg ReturnSnapshotsParams) ([]ReturnSnapshotsRow, error)
 	// Fluent: filter(username LIKE pattern), filter(id != viewer), sort(username), limit(40).
 	SearchUserIDs(ctx context.Context, arg SearchUserIDsParams) ([]uuid.UUID, error)

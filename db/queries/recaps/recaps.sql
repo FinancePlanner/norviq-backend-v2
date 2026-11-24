@@ -69,8 +69,10 @@ WHERE user_id = sqlc.arg(user_id) AND source_provider IS NULL
   AND created_at >= sqlc.arg(start_at) AND created_at < sqlc.arg(end_at);
 
 -- name: RecapSnapshots :many
+-- Fully priced rows only: a partial row counts unpriced symbols as 0.
 SELECT portfolio_list_id, currency, captured_on, market_value FROM portfolio_value_snapshots
 WHERE user_id = sqlc.arg(user_id) AND captured_on >= sqlc.arg(start_day) AND captured_on < sqlc.arg(end_day)
+  AND missing_symbols = 0
   AND (cardinality(sqlc.arg(excluded)::uuid[]) = 0 OR portfolio_list_id <> ALL(sqlc.arg(excluded)::uuid[]));
 
 -- name: RecapDividends :many

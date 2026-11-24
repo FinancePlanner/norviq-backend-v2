@@ -208,3 +208,25 @@ func TestLeaderboardFriendsOnly(t *testing.T) {
 		}
 	}
 }
+
+// A partial snapshot (a symbol unpriced, counted as 0) is not a loss: the
+// return board measures fully priced days only.
+func TestLeaderboardReturnSkipsPartialSnapshots(t *testing.T) {
+	e := setup(t, social.Feature{})
+	a := e.user("gam_lbpartial")
+	e.setPrivacy(a, func(m map[string]any) { m["showReturnPercent"] = true })
+	list := uuid.New()
+	e.exec(`INSERT INTO portfolio_lists (id, user_id, name, mode, created_at) VALUES ($1, $2, 'Main', 'actual', now())`, list, a)
+	for i, row := range []struct {
+		mv      float64
+		missing int
+	}{{100, 0}, {110, 0}, {50, 1}} {
+		e.exec(`INSERT INTO portfolio_value_snapshots (id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at)
+			VALUES ($1, $2, $3, (now() - make_interval(days => $4))::date, 'USD', $5, 100, 0, 2, 'capture', 2 - $6::int, $6, now())`, uuid.New(), a, list, 2-i, row.mv, row.missing)
+	}
+	var lb social.Leaderboard
+	e.get("/v1/social/leaderboards?metric=return_percent&period=month", a, &lb)
+	if len(lb.Entries) != 1 || lb.Entries[0].Value < 9.99 || lb.Entries[0].Value > 10.01 {
+		t.Fatalf("return board = %+v", lb.Entries)
+	}
+}

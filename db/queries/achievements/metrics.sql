@@ -147,8 +147,10 @@ SELECT id FROM portfolio_lists
 WHERE user_id = $1 AND mode = 'actual' AND archived_at IS NULL;
 
 -- name: PerformanceSnapshots :many
+-- Fully priced rows only: a partial row counts unpriced symbols as 0.
 SELECT portfolio_list_id, captured_on, market_value, cost_basis FROM portfolio_value_snapshots
-WHERE user_id = @user_id AND portfolio_list_id = ANY(@list_ids::uuid[]) AND captured_on <= @as_of::timestamptz;
+WHERE user_id = @user_id AND portfolio_list_id = ANY(@list_ids::uuid[]) AND captured_on <= @as_of::timestamptz
+  AND missing_symbols = 0;
 
 -- name: BenchmarkAdjustedCloses :many
 -- MarketPriceBarRepository.adjustedCloses.

@@ -4,7 +4,7 @@ GOOSE_VERSION   := v3.29.0
 
 .PHONY: hooks run build test lint fmt generate sqlc-check migrate-status docker parity
 
-hooks: ## install the gofumpt + lint + check-all pre-commit hook
+hooks: ## install the pre-commit hook (gofumpt + lint + vet/test-race on changed packages)
 	git config core.hooksPath .githooks
 	chmod +x .githooks/pre-commit
 

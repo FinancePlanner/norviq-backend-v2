@@ -10,7 +10,7 @@ routes.
 ## Develop
 
 ```sh
-make hooks                       # gofumpt + lint + check-all pre-commit hook
+make hooks                       # pre-commit: gofumpt + lint + changed-package vet/test -race
 cp .env.example .env             # then: set -a; . ./.env; set +a
 go run ./cmd/api serve           # serves every registered route; anything else is a 404
 go run ./cmd/api migrate         # goose up (adopts a Vapor-migrated DB first)

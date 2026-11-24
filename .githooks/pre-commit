@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pre-commit: format with gofumpt, then lint, before anything lands in git.
+# Pre-commit: format with gofumpt, lint, then vet and race-test the changed
+# packages, before anything lands in git. The full ×10 race loop is `make check-all`.
 # golangci-lint version must stay in lockstep with CI (.github/workflows/ci.yml).
 # Install once per clone with `make hooks`.
 set -euo pipefail
@@ -38,7 +39,22 @@ echo "pre-commit: golangci-lint run"
 # same time would otherwise abort this commit on golangci-lint's global lock.
 golangci-lint run --allow-parallel-runners
 
-echo "pre-commit: make check-all"
-make check-all
+# Vet and race-test only the packages this commit touches, once. CI runs the
+# whole suite with -race on every push. The ×10 race loop (`make check-all`)
+# stays for manual or scheduled runs: as a commit gate it took about an hour
+# and timed out on slow packages the commit never touched.
+pkgs=()
+while IFS= read -r f; do
+  [[ -z "${f}" ]] && continue
+  d="./$(dirname "${f}")"
+  [[ -d "${d}" ]] || continue
+  [[ " ${pkgs[*]-} " == *" ${d} "* ]] || pkgs+=("${d}")
+done <<< "$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)"
+
+if (( ${#pkgs[@]} > 0 )); then
+  echo "pre-commit: go vet + go test -race -count=1 (${#pkgs[@]} changed package(s))"
+  go vet "${pkgs[@]}"
+  go test -race -count=1 -timeout 15m "${pkgs[@]}"
+fi
 
 echo "pre-commit: ok"

@@ -13,10 +13,10 @@ import (
 )
 
 // The export routes are public-safe by construction: the handler holds no
-// user, session or preference dependency.
+// user, session or preference dependency. enabled is the feature flag.
 func TestExportHandlerHasNoUserDependencies(t *testing.T) {
 	typ := reflect.TypeOf(exportHandlers{})
-	want := []string{"repo", "baseURL", "cache"}
+	want := []string{"repo", "baseURL", "cache", "enabled"}
 	if typ.NumField() != len(want) {
 		t.Fatalf("fields: %d, want %d", typ.NumField(), len(want))
 	}

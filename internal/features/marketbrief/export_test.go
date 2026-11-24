@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"norviq-api/internal/features/marketbrief"
@@ -59,13 +60,25 @@ func exportPath(format, extra string) string {
 }
 
 func TestExportIgnoresCaller(t *testing.T) {
-	h := newHarness(t, true)
-	h.saveEdition()
+	var renders atomic.Int32
+	marketbrief.SetRenderForTest(t, func(f export.Format, d export.Doc) ([]byte, string, error) {
+		renders.Add(1)
+		return export.Render(f, d)
+	})
+	// Two apps, so two caches: the second caller cannot be served the
+	// first caller's stored bytes.
+	s := snap(1, "hash-caller", "The same text for everyone.")
+	h, h2 := stubApp(t, snapshotRepo{t: t, snap: s}), stubApp(t, snapshotRepo{t: t, snap: s})
 	// h.pat mints a fresh user per call, so these are two different callers.
 	a := h.Do(http.MethodGet, exportPath("og", ""), h.pat("market:read"), nil)
-	b := h.Do(http.MethodGet, exportPath("og", ""), h.pat("market:read", "expenses:read"), nil)
+	b := h2.Do(http.MethodGet, exportPath("og", ""), h2.pat("market:read", "expenses:read"), nil)
 	if a.Status != http.StatusOK || b.Status != http.StatusOK {
 		t.Fatalf("%d %d", a.Status, b.Status)
+	}
+	// Both requests must reach the renderer, or the comparison proves only
+	// that the cache returns what it stored.
+	if n := renders.Load(); n != 2 {
+		t.Fatalf("%d renders for two callers", n)
 	}
 	if !bytes.Equal(a.Body, b.Body) || a.Header.Get("ETag") != b.Header.Get("ETag") {
 		t.Fatal("export differs by caller")
@@ -236,5 +249,25 @@ func TestExportBadParams(t *testing.T) {
 	r := h.Do(http.MethodGet, exportPath("gif", ""), pat, nil)
 	if !strings.Contains(string(r.Body), "format must be og, social, story or pdf") {
 		t.Fatal(string(r.Body))
+	}
+}
+
+// With the brief switched off the export routes are a 404, as show serves
+// no brief.
+func TestExportDisabledIs404(t *testing.T) {
+	h := newHarness(t, false)
+	h.saveEdition()
+	pat := h.pat("market:read")
+	for _, path := range []string{
+		exportPath("og", ""),
+		exportPath("pdf", "&rev=1"+vq),
+		"/v1/market/brief/exports?date=" + exportDate + "&slot=evening",
+	} {
+		if r := h.Do(http.MethodGet, path, pat, nil); r.Status != http.StatusNotFound || r.Header.Get("Cache-Control") != "" {
+			t.Errorf("%s: %d %v (%d bytes)", path, r.Status, r.Header, len(r.Body))
+		}
+	}
+	if r := h.Do(http.MethodGet, exportPath("og", ""), "", nil); r.Status != http.StatusUnauthorized {
+		t.Fatalf("%d", r.Status)
 	}
 }

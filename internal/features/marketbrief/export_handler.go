@@ -166,6 +166,8 @@ type exportHandlers struct {
 	repo    Repository
 	baseURL string
 	cache   *exportCache
+	// enabled is MARKET_BRIEF_ENABLED: off, there is no brief to export.
+	enabled bool
 }
 
 type exportFormatInfo struct {
@@ -204,6 +206,10 @@ func readExportParams(c *echo.Context) (exportParams, error) {
 	return exportParams{date: *date, slot: *rawSlot, lang: ResolveLanguage(httpx.QueryString(c, "lang"))}, nil
 }
 
+// errNoBrief is the 404 for a slot with no brief, or for every slot while
+// the brief is switched off, as show serves none then.
+func errNoBrief() error { return httpx.NotFound("No market brief for that date and slot.") }
+
 // load reads one snapshot of the brief and builds its Doc from it. A
 // missing slot is a 404.
 func (h *exportHandlers) load(c *echo.Context, p exportParams) (*Snapshot, export.Doc, error) {
@@ -212,13 +218,16 @@ func (h *exportHandlers) load(c *echo.Context, p exportParams) (*Snapshot, expor
 		return nil, export.Doc{}, err
 	}
 	if snap == nil {
-		return nil, export.Doc{}, httpx.NotFound("No market brief for that date and slot.")
+		return nil, export.Doc{}, errNoBrief()
 	}
 	return snap, BuildDoc(snap.Response, snap.Edition, h.baseURL), nil
 }
 
 // GET /v1/market/brief/exports?date=&slot=&lang=
 func (h *exportHandlers) manifest(c *echo.Context) error {
+	if !h.enabled {
+		return errNoBrief()
+	}
 	p, err := readExportParams(c)
 	if err != nil {
 		return err
@@ -270,6 +279,9 @@ func positiveQuery(c *echo.Context, name string) (int, error) {
 // of hiding behind year-long caches. A v that is not current is a 404;
 // without v (or rev) the file is cached for five minutes.
 func (h *exportHandlers) file(c *echo.Context) error {
+	if !h.enabled {
+		return errNoBrief()
+	}
 	p, err := readExportParams(c)
 	if err != nil {
 		return err

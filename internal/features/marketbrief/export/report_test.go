@@ -555,3 +555,65 @@ func TestReportUsesTheLightLogo(t *testing.T) {
 		}
 	}
 }
+
+// The comparative chart's grid is bounded whatever the data: a previous
+// close off by orders of magnitude (or one that overflows to infinity)
+// still gets a handful of round gridlines, not one per hundred percent.
+func TestCompareChartGridIsBounded(t *testing.T) {
+	for name, vals := range map[string][]float64{
+		"5e6%": {0, 2e6, 5e6},
+		"inf":  {0, 3, math.Inf(1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ln := leadLine{times: []float64{0, 1800, 3600}, values: vals, t0: 1795185000, t1: 1795188600, tz: "UTC"}
+			for i := range ln.times {
+				ln.times[i] += float64(ln.t0)
+			}
+			rec := &RecordingSurface{W: testA4W, H: testA4H}
+			st := compareStyle{grid: paperGrid, zero: Light.Muted, label: Light.Muted, labelSize: tickSize, lineW: rChartLine, gridW: rHair, lang: "en", maxTicks: 6}
+			drawCompareChart(rec, []leadLine{ln}, seriesInks, 80, 80, 400, 200, st)
+			grid, labels := 0, 0
+			for _, op := range rec.Ops {
+				if op.Kind == "line" && op.Color == paperGrid {
+					grid++
+				}
+				if op.Kind == "text" && strings.HasSuffix(op.Text, "%") {
+					labels++
+				}
+			}
+			if grid > 12 || labels > 12 || labels == 0 {
+				t.Fatalf("%d gridlines, %d labels; want at most 12", grid, labels)
+			}
+		})
+	}
+}
+
+// Model text has no length limit, but a page does: a story is cut, with an
+// ellipsis, before it can run into the footer.
+func TestReportLongStoryStaysAboveFooter(t *testing.T) {
+	long := strings.TrimSpace(strings.Repeat("Markets moved on the news. ", 112)) // about 3,000 characters
+	if len(long) < 3000 {
+		t.Fatalf("story is %d characters", len(long))
+	}
+	d := fixtureDoc("en")
+	d.Lead.Text = long
+	d.Stories[0].Text = long
+	d.Dek = long
+	rec, _ := recordReport(d)
+	footBase := testA4H - footBaseUp
+	cut := 0
+	for _, op := range textOps(rec) {
+		if op.Y == footBase {
+			continue // the footer's own line
+		}
+		if op.Y > testA4H-reportFootH {
+			t.Fatalf("page %d: %q at baseline %.1f, below the footer's top %.1f", op.Page+1, op.Text, op.Y, testA4H-reportFootH)
+		}
+		if strings.HasSuffix(op.Text, ellipsis) {
+			cut++
+		}
+	}
+	if cut < 3 {
+		t.Fatalf("%d paragraphs end in an ellipsis; want the dek and both stories cut", cut)
+	}
+}

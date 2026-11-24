@@ -35,6 +35,11 @@ const (
 	dekSize   = 13.0
 	dekLead   = 18.5
 	dekLines  = 4
+	// paraLines caps every paragraph of model-written or data text (a
+	// story, the cited sources, a missing instrument): text has no length
+	// limit and a page does. A cut paragraph ends in an ellipsis. The
+	// report's own copy is fixed and never cut.
+	paraLines = 14
 
 	sectionSize = 10.5 // section headings, Brygada caps
 	sectionGap  = 30.0 // space above a section heading
@@ -475,7 +480,7 @@ func (r *report) storyBlock(st *Story, lead, firstInSection bool) reportBlock {
 	if lead {
 		size, ld, x = leadSize, leadLead, r.left
 	}
-	lines := Wrap(r.s, SerifRegular, size, r.right-x, st.Text, 0)
+	lines := Wrap(r.s, SerifRegular, size, r.right-x, st.Text, paraLines)
 	tickers := strings.Join(st.Tickers, " · ")
 	source := ""
 	if st.SourceHost != "" {
@@ -639,13 +644,13 @@ func (r *report) methodBlocks() []reportBlock {
 	}
 	// Credits and figures are data: Geist, muted.
 	credit := func(t string) textRun {
-		return textRun{SansRegular, creditSize, creditLead, Light.Muted, Wrap(r.s, SansRegular, creditSize, textW, t, 0)}
+		return textRun{SansRegular, creditSize, creditLead, Light.Muted, Wrap(r.s, SansRegular, creditSize, textW, t, paraLines)}
 	}
 
 	if len(d.Sources) > 0 {
 		item(str.citedSources, textRun{
 			SansMedium, creditSize + 1, creditLead + 1, Light.Text,
-			Wrap(r.s, SansMedium, creditSize+1, textW, strings.Join(d.Sources, "  ·  "), 0),
+			Wrap(r.s, SansMedium, creditSize+1, textW, strings.Join(d.Sources, "  ·  "), paraLines),
 		})
 	}
 	market := []textRun{body(str.marketDataMethod)}
@@ -667,7 +672,7 @@ func (r *report) methodBlocks() []reportBlock {
 	if len(d.Missing) > 0 {
 		var miss []textRun
 		for _, m := range d.Missing {
-			miss = append(miss, body(m))
+			miss = append(miss, textRun{SerifRegular, bodySize, bodyLead, Light.Text, Wrap(r.s, SerifRegular, bodySize, textW, m, paraLines)})
 		}
 		item(str.notAvailable, miss...)
 	}

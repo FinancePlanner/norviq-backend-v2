@@ -2194,7 +2194,8 @@ paths:
       summary: Shareable renders available for a brief
       description: >-
         Lists the image and PDF renders of one brief with the revision and
-        content hash they are cached under. The same for every caller.
+        content hash they are cached under. The same for every caller. A 404
+        for every slot while the market brief is switched off.
       security:
         - bearerAuth: []
       parameters:
@@ -2208,6 +2209,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MarketBriefExportManifest'
+          headers:
+            Cache-Control: { schema: { type: string, example: 'public, max-age=300' } }
         '400':
           description: Unknown slot or malformed date
         '401':
@@ -2215,14 +2218,16 @@ paths:
         '403':
           description: Token lacks the market:read scope
         '404':
-          description: No brief for that date and slot
+          description: No brief for that date and slot, or the market brief is switched off
   /v1/market/brief/export:
     get:
       operationId: getMarketBriefExport
       tags: [MarketData]
       summary: One render of a brief (PNG or PDF)
       description: >-
-        The bytes are identical for every caller. `ETag` is
+        The bytes are identical for every caller. Byte identity holds within
+        one build (CPU architecture and Go version), not across builds at the
+        same `rendererVersion`. `ETag` is
         `"<contentHash>-<format>-<lang>-v<rendererVersion>"`. The response is
         immutable only when `rev` is the current revision and `v` the current
         renderer version; append the manifest's `query` for that format to get
@@ -2253,6 +2258,9 @@ paths:
               schema: { type: string, format: binary }
         '304':
           description: Not modified
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
         '400':
           description: Unknown slot or format, malformed date, rev or v
         '401':
@@ -2261,9 +2269,9 @@ paths:
           description: Token lacks the market:read scope
         '404':
           description: >-
-            No brief for that date and slot, `rev` is superseded (reason
-            `revision superseded`), or `v` is not the current renderer
-            (reason `renderer superseded`)
+            No brief for that date and slot (or the market brief is switched
+            off), `rev` is superseded (reason `revision superseded`), or `v`
+            is not the current renderer (reason `renderer superseded`)
   /v1/market/brief/notifications:
     get:
       operationId: getMarketBriefNotificationPreferences

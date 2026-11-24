@@ -485,6 +485,9 @@ type compareStyle struct {
 // of the label size.
 const compareTickGap = 0.8
 
+// maxGridLines bounds the comparative chart's gridlines whatever the data.
+const maxGridLines = 12
+
 // drawCompareChart plots every line on one percent axis inside the box:
 // gridlines at round percents, labeled in the gutter left of x, the
 // previous close dashed at 0%, a line per series in its ink, and full-hour
@@ -494,10 +497,14 @@ func drawCompareChart(s Surface, lines []leadLine, inks []color.RGBA, x, y, w, h
 	if len(lines) == 0 || len(inks) == 0 {
 		return
 	}
+	// A value that overflowed (a previous close near zero) sets no range;
+	// it is clamped to the box like any other outlier.
 	lo, hi := 0.0, 0.0
 	for i := range lines {
 		for _, v := range lines[i].values {
-			lo, hi = math.Min(lo, v), math.Max(hi, v)
+			if !math.IsInf(v, 0) && !math.IsNaN(v) {
+				lo, hi = math.Min(lo, v), math.Max(hi, v)
+			}
 		}
 	}
 	if hi-lo < 1e-9 {
@@ -506,7 +513,7 @@ func drawCompareChart(s Surface, lines []leadLine, inks []color.RGBA, x, y, w, h
 	step := niceStep(hi-lo, st.maxTicks)
 	lo, hi = math.Floor(lo/step-chartPad)*step, math.Ceil(hi/step+chartPad)*step
 	yOf := func(v float64) float64 { return math.Max(y, math.Min(y+h, y+h-(v-lo)/(hi-lo)*h)) }
-	for k := math.Round(lo / step); k*step <= hi+1e-9; k++ {
+	for k, n := math.Round(lo/step), 0; k*step <= hi+1e-9 && n < maxGridLines; k, n = k+1, n+1 {
 		v := k * step
 		gy := yOf(v)
 		lab := pctLabel(v, step, st.lang)
@@ -528,13 +535,16 @@ func drawCompareChart(s Surface, lines []leadLine, inks []color.RGBA, x, y, w, h
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		ln := lines[i]
-		pts := make([][2]float64, len(ln.values))
+		pts := make([][2]float64, 0, len(ln.values))
 		for j, v := range ln.values {
+			if math.IsNaN(v) {
+				continue // no position to draw it at
+			}
 			px := x + float64(j)/float64(len(ln.values)-1)*w
 			if span > 0 {
 				px = xOf(ln.times[j])
 			}
-			pts[j] = [2]float64{px, yOf(v)}
+			pts = append(pts, [2]float64{px, yOf(v)})
 		}
 		s.Polyline(pts, st.lineW, inks[i%len(inks)])
 	}
@@ -577,15 +587,29 @@ func drawCompareChart(s Surface, lines []leadLine, inks []color.RGBA, x, y, w, h
 	}
 }
 
+// niceSteps are the round percent steps up to 50; past them the 1-2-2.5-5
+// pattern repeats at every power of ten.
+var niceSteps = []float64{0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50}
+
 // niceStep is the smallest round percent step that splits span into at
-// most maxTicks intervals.
+// most maxTicks intervals, however wide the span.
 func niceStep(span float64, maxTicks int) float64 {
-	for _, m := range []float64{0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50} {
-		if span/m <= float64(maxTicks) {
+	n := float64(max(maxTicks, 1))
+	for _, m := range niceSteps {
+		if span/m <= n {
 			return m
 		}
 	}
-	return 100
+	// Powers of ten are exact in float64 up to 1e22, and every finite span
+	// is met well before the magnitude overflows.
+	for mag := 100.0; !math.IsInf(mag*5, 0); mag *= 10 {
+		for _, b := range []float64{1, 2, 2.5, 5} {
+			if m := b * mag; span/m <= n {
+				return m
+			}
+		}
+	}
+	return math.MaxFloat64
 }
 
 // pctLabel is a gridline's percent with as many decimals as the step needs,

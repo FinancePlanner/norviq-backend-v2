@@ -108,7 +108,7 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// notification scopes rather than market:read.
 	g.GET("/notifications", h.notificationPreferences, auth.RequireScope(auth.ScopeNotificationsRead))
 	g.PUT("/notifications", h.updateNotificationPreferences, auth.RequireScope(auth.ScopeNotificationsWrite))
-	x := &exportHandlers{repo: h.repo, baseURL: s.publicBaseURL(), cache: newExportCache(exportCacheSize, d.Logger)}
+	x := &exportHandlers{repo: h.repo, baseURL: s.publicBaseURL(), cache: newExportCache(exportCacheSize, d.Logger), enabled: h.enabled}
 	g.GET("/exports", x.manifest, auth.RequireScope(auth.ScopeMarketRead))
 	g.GET("/export", x.file, auth.RequireScope(auth.ScopeMarketRead))
 	return nil

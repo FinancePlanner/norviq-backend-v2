@@ -304,41 +304,39 @@ type leadLine struct {
 	name   string
 }
 
-// leadChart picks the one series worth a chart: the first card's. It is
-// absent without a Chart, and absent when the Chart has nothing for that
-// card, so a brief never shows an empty frame.
+// leadChart picks the one line worth a chart: the first card's session
+// against its previous close, or, without a spark, the chart's first series
+// against 0%. The first series is the lead series by construction, so the
+// axis takes its name and the chart's own range; nothing is joined on
+// display names, which differ between a card and its series (The Open's
+// "Nasdaq 100" card plots "Nasdaq 100 futures"). It is absent without a
+// Chart or without anything to plot, so a brief never shows an empty frame.
 func leadChart(d Doc) (leadLine, bool) {
 	if d.Chart == nil || len(d.Cards) == 0 {
 		return leadLine{}, false
 	}
 	c := d.Cards[0]
-	var series *ChartSeries
-	for i := range d.Chart.Series {
-		if d.Chart.Series[i].Name == c.Name && len(d.Chart.Series[i].Points) >= 2 {
-			series = &d.Chart.Series[i]
-			break
-		}
+	ln := leadLine{dir: c.Dir, tz: d.Chart.TZ, t0: d.Chart.T0, t1: d.Chart.T1}
+	var first *ChartSeries
+	if len(d.Chart.Series) > 0 {
+		first = &d.Chart.Series[0]
+		ln.name = first.Name
 	}
-	ln := leadLine{dir: c.Dir, tz: d.Chart.TZ, name: c.Name}
 	switch {
 	case len(c.Spark) >= 2 && c.PrevClose > 0:
 		ln.values, ln.base = c.Spark, c.PrevClose
-	case series != nil:
-		for _, p := range series.Points {
+	case first != nil && len(first.Points) >= 2:
+		for _, p := range first.Points {
 			ln.values = append(ln.values, p[1])
 		}
 	default:
 		return leadLine{}, false
 	}
-	if series != nil {
-		ln.t0, ln.t1 = int64(series.Points[0][0]), int64(series.Points[len(series.Points)-1][0])
-	}
 	return ln, true
 }
 
-// timeLabels are the session's first and last clock times in the series'
-// own zone, the last with the zone's abbreviation. Both are empty when the
-// series carries no timestamps.
+// timeLabels are the chart's first and last clock times in its own zone,
+// the last with the zone's abbreviation. Both are empty without a range.
 func (ln leadLine) timeLabels() (start, end string) {
 	if ln.t0 == 0 || ln.t1 <= ln.t0 {
 		return "", ""

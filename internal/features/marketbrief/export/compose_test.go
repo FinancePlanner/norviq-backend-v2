@@ -257,7 +257,7 @@ func TestEveryFormatRendersAtItsSize(t *testing.T) {
 	docs := []struct {
 		name string
 		doc  Doc
-	}{{"en", fixtureDoc("en")}, {"pt-PT", fixtureDoc("pt-PT")}, {"legacy", legacyDoc()}}
+	}{{"en", fixtureDoc("en")}, {"pt-PT", fixtureDoc("pt-PT")}, {"legacy", legacyDoc()}, {"open-en", openDoc()}}
 	for _, dc := range docs {
 		lang := dc.name
 		for _, tc := range allFormats {
@@ -283,7 +283,11 @@ func TestEveryFormatRendersAtItsSize(t *testing.T) {
 				if err := os.MkdirAll(out, 0o750); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(out, string(tc.f)+"-"+lang+".png"), b, 0o600); err != nil {
+				file := string(tc.f) + "-" + lang + ".png"
+				if rest, ok := strings.CutPrefix(lang, "open-"); ok {
+					file = "open-" + string(tc.f) + "-" + rest + ".png"
+				}
+				if err := os.WriteFile(filepath.Join(out, file), b, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -350,5 +354,95 @@ func TestHeadlineNeverBreaksBeforeAFigure(t *testing.T) {
 	// Too long for the lines it has: cut exactly as Wrap cuts it.
 	if got, want := headlineWrap(rec, SerifSemiBold, size, 60, text, 2), Wrap(rec, SerifSemiBold, size, 60, text, 2); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("truncated headline %q, want Wrap's %q", got, want)
+	}
+}
+
+// openDoc is The Open: the lead card is the Nasdaq 100 futures under the
+// catalog name "Nasdaq 100", while BuildDoc names the series "Nasdaq 100
+// futures". The chart spans the overnight session, 18:00 to 03:00 New York.
+func openDoc() Doc {
+	d := fixtureDoc("en")
+	d.EditionName, d.EditionID = "The Open", "MI-2026-11-21-O"
+	d.DateLong = "21 November 2026"
+	d.Headline = "US futures steady after Nasdaq 100 rout"
+	d.URL = "https://www.norviq.org/brief/2026-11-21/morning"
+	d.Published = "08:15"
+	d.Provenance = "Market data: Yahoo Finance · Published 08:15 Lisbon · MI-2026-11-21-O r1"
+	const t0, t1 = 1795215600, 1795215600 + 9*3600 // 2026-11-20 23:00 UTC, 2026-11-21 08:00 UTC
+	spark := d.Cards[0].Spark
+	pts := make([][2]float64, len(spark))
+	for i, v := range spark {
+		pts[i] = [2]float64{t0 + float64(i)/float64(len(spark)-1)*(t1-t0), (v/26519.65 - 1) * 100}
+	}
+	d.Cards[0].Meta = "NQ=F"
+	d.Chart = &ChartData{
+		Series: []ChartSeries{{Name: "Nasdaq 100 futures", Points: pts, Last: "−5.62%"}},
+		T0:     t0, T1: t1, TZ: "America/New_York",
+	}
+	return d
+}
+
+// axisText returns the time-axis labels and the centered series name drawn
+// on the line of the given start label: the name is tracked, one op per rune.
+func axisText(rec *RecordingSurface, start string) (labels map[string]bool, name string) {
+	labels = map[string]bool{}
+	baseline := math.NaN()
+	for _, op := range textOps(rec) {
+		if op.Text == start {
+			baseline = op.Y
+		}
+	}
+	for _, op := range textOps(rec) {
+		if op.Y != baseline {
+			continue
+		}
+		if op.Font == SansRegular {
+			labels[op.Text] = true
+		} else {
+			name += op.Text
+		}
+	}
+	return labels, name
+}
+
+func TestTimeAxisLabelsTheClose(t *testing.T) {
+	for _, tc := range []struct {
+		f    Format
+		w, h float64
+		draw func(Surface, Doc)
+	}{{FormatSocial, 1080, 1350, DrawSocial}, {FormatStory, 1080, 1920, DrawStory}} {
+		rec := &RecordingSurface{W: tc.w, H: tc.h}
+		tc.draw(rec, fixtureDoc("en"))
+		labels, name := axisText(rec, "09:30")
+		if !labels["09:30"] || !labels["16:00 EST"] {
+			t.Errorf("%s: time labels %v, want 09:30 and 16:00 EST", tc.f, labels)
+		}
+		if name != "NASDAQ100" {
+			t.Errorf("%s: axis name %q, want the series name", tc.f, name)
+		}
+	}
+}
+
+func TestTimeAxisLabelsTheOpen(t *testing.T) {
+	rec := &RecordingSurface{W: 1080, H: 1350}
+	DrawSocial(rec, openDoc())
+	labels, name := axisText(rec, "18:00")
+	if !labels["18:00"] || !labels["03:00 EST"] {
+		t.Errorf("time labels %v, want 18:00 and 03:00 EST", labels)
+	}
+	if name != "NASDAQ100FUTURES" {
+		t.Errorf("axis name %q, want the series name, not the card's", name)
+	}
+}
+
+func TestLegacyHasNoTimeAxis(t *testing.T) {
+	for _, tc := range allFormats {
+		rec := &RecordingSurface{W: float64(tc.w), H: float64(tc.h)}
+		tc.draw(rec, legacyDoc())
+		for _, op := range textOps(rec) {
+			if len(op.Text) == 5 && op.Text[2] == ':' || strings.HasSuffix(op.Text, " EST") {
+				t.Errorf("%s: legacy doc drew time label %q", tc.f, op.Text)
+			}
+		}
 	}
 }

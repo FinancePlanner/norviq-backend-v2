@@ -174,6 +174,9 @@ type exportFormatInfo struct {
 	Height int    `json:"height,omitempty"`
 	Pages  int    `json:"pages,omitempty"`
 	Mime   string `json:"mime"`
+	// Query completes the immutable URL for this render ("rev=1&v=1"):
+	// /v1/market/brief/export?date=&slot=&lang=&format=<id>&<query>.
+	Query string `json:"query"`
 }
 
 // ExportManifest is GET /v1/market/brief/exports.
@@ -234,18 +237,38 @@ func (h *exportHandlers) manifest(c *echo.Context) error {
 		return err
 	}
 	c.Response().Header().Set("Cache-Control", "public, max-age=300")
+	q := "rev=" + strconv.Itoa(snap.Revision) + "&v=" + strconv.Itoa(export.RendererVersion)
 	return httpx.OK(c, ExportManifest{
 		EditionID: doc.EditionID, Revision: snap.Revision, ContentHash: snap.ContentHash, RendererVersion: export.RendererVersion,
 		Formats: []exportFormatInfo{
-			{ID: "og", Width: 1200, Height: 630, Mime: "image/png"},
-			{ID: "social", Width: 1080, Height: 1350, Mime: "image/png"},
-			{ID: "story", Width: 1080, Height: 1920, Mime: "image/png"},
-			{ID: "pdf", Pages: pages.pages, Mime: "application/pdf"},
+			{ID: "og", Width: 1200, Height: 630, Mime: "image/png", Query: q},
+			{ID: "social", Width: 1080, Height: 1350, Mime: "image/png", Query: q},
+			{ID: "story", Width: 1080, Height: 1920, Mime: "image/png", Query: q},
+			{ID: "pdf", Pages: pages.pages, Mime: "application/pdf", Query: q},
 		},
 	})
 }
 
-// GET /v1/market/brief/export?date=&slot=&lang=&format=[&rev=N]
+// positiveQuery reads an optional positive integer query parameter: -1 when
+// absent, a 400 when malformed.
+func positiveQuery(c *echo.Context, name string) (int, error) {
+	raw := httpx.QueryString(c, name)
+	if raw == nil {
+		return -1, nil
+	}
+	n, err := strconv.Atoi(*raw)
+	if err != nil || n < 1 {
+		return 0, httpx.BadRequest(name + " must be a positive integer")
+	}
+	return n, nil
+}
+
+// GET /v1/market/brief/export?date=&slot=&lang=&format=[&rev=N&v=M]
+//
+// The response is immutable only when rev is the current revision and v
+// the current RendererVersion: a renderer change then gets new URLs instead
+// of hiding behind year-long caches. A v that is not current is a 404;
+// without v (or rev) the file is cached for five minutes.
 func (h *exportHandlers) file(c *echo.Context) error {
 	p, err := readExportParams(c)
 	if err != nil {
@@ -260,13 +283,13 @@ func (h *exportHandlers) file(c *echo.Context) error {
 	default:
 		return httpx.BadRequest("format must be og, social, story or pdf")
 	}
-	rev := -1
-	if raw := httpx.QueryString(c, "rev"); raw != nil {
-		n, err := strconv.Atoi(*raw)
-		if err != nil || n < 1 {
-			return httpx.BadRequest("rev must be a positive integer")
-		}
-		rev = n
+	rev, err := positiveQuery(c, "rev")
+	if err != nil {
+		return err
+	}
+	ver, err := positiveQuery(c, "v")
+	if err != nil {
+		return err
 	}
 	snap, doc, err := h.load(c, p)
 	if err != nil {
@@ -275,10 +298,13 @@ func (h *exportHandlers) file(c *echo.Context) error {
 	if rev != -1 && rev != snap.Revision {
 		return httpx.NotFound("revision superseded")
 	}
+	if ver != -1 && ver != export.RendererVersion {
+		return httpx.NotFound("renderer superseded")
+	}
 	etag := `"` + snap.ContentHash + "-" + string(format) + "-" + p.lang + "-v" + strconv.Itoa(export.RendererVersion) + `"`
 	hdr := c.Response().Header()
 	cacheControl := "public, max-age=300"
-	if rev != -1 {
+	if rev != -1 && ver != -1 {
 		cacheControl = "public, max-age=31536000, immutable"
 	}
 	// ETag and Cache-Control go on only a success (200 or 304): an error

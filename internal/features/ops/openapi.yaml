@@ -2223,9 +2223,12 @@ paths:
       summary: One render of a brief (PNG or PDF)
       description: >-
         The bytes are identical for every caller. `ETag` is
-        `"<contentHash>-<format>-<lang>-v<rendererVersion>"`. With `rev` equal
-        to the current revision the response is immutable; without `rev` it
-        is cached for five minutes. A `rev` that is no longer current is a 404.
+        `"<contentHash>-<format>-<lang>-v<rendererVersion>"`. The response is
+        immutable only when `rev` is the current revision and `v` the current
+        renderer version; append the manifest's `query` for that format to get
+        such a URL. Without `rev` or without `v` it is cached for five
+        minutes. A `rev` or `v` that is no longer current is a 404, so a
+        renderer change never hides behind a year-long cache.
       security:
         - bearerAuth: []
       parameters:
@@ -2234,6 +2237,7 @@ paths:
         - { name: lang, in: query, required: false, schema: { type: string, default: en } }
         - { name: format, in: query, required: true, schema: { type: string, enum: [og, social, story, pdf] } }
         - { name: rev, in: query, required: false, schema: { type: integer, minimum: 1 }, description: Revision from the manifest. }
+        - { name: v, in: query, required: false, schema: { type: integer, minimum: 1 }, description: Renderer version from the manifest (`rendererVersion`). }
         - { name: If-None-Match, in: header, required: false, schema: { type: string } }
       responses:
         '200':
@@ -2250,13 +2254,16 @@ paths:
         '304':
           description: Not modified
         '400':
-          description: Unknown slot or format, malformed date or rev
+          description: Unknown slot or format, malformed date, rev or v
         '401':
           description: Unauthorized
         '403':
           description: Token lacks the market:read scope
         '404':
-          description: No brief for that date and slot, or `rev` is superseded (reason `revision superseded`)
+          description: >-
+            No brief for that date and slot, `rev` is superseded (reason
+            `revision superseded`), or `v` is not the current renderer
+            (reason `renderer superseded`)
   /v1/market/brief/notifications:
     get:
       operationId: getMarketBriefNotificationPreferences
@@ -15701,7 +15708,12 @@ components:
               height: { type: integer }
               pages: { type: integer, description: PDF only. }
               mime: { type: string }
-            required: [id, mime]
+              query:
+                type: string
+                description: >-
+                  Appended to `/v1/market/brief/export?date=&slot=&lang=&format=<id>&`,
+                  gives the immutable URL for this render, e.g. `rev=1&v=1`.
+            required: [id, mime, query]
       required: [editionId, revision, contentHash, rendererVersion, formats]
     MarketBriefRef:
       type: object

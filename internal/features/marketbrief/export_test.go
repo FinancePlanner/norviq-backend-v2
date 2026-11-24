@@ -5,10 +5,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
 	"norviq-api/internal/features/marketbrief"
+	"norviq-api/internal/features/marketbrief/export"
 	"norviq-api/internal/testutil"
 )
 
@@ -47,6 +49,11 @@ func (h *harness) doWithHeader(path, token, key, value string) *testutil.Respons
 	return &testutil.Response{Status: resp.StatusCode, Header: resp.Header, Body: body}
 }
 
+// vq is the current renderer's query parameter, as the manifest gives it.
+var vq = "&v=" + strconv.Itoa(export.RendererVersion)
+
+const immutable = "public, max-age=31536000, immutable"
+
 func exportPath(format, extra string) string {
 	return "/v1/market/brief/export?date=" + exportDate + "&slot=evening&lang=en&format=" + format + extra
 }
@@ -82,16 +89,34 @@ func TestExportStaleRevision(t *testing.T) {
 	}
 	h.saveEdition()
 	pat := h.pat("market:read")
-	r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil)
+	r := h.Do(http.MethodGet, exportPath("og", "&rev=1"+vq), pat, nil)
 	if r.Status != http.StatusNotFound || !strings.Contains(string(r.Body), `"reason":"revision superseded"`) {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	r = h.Do(http.MethodGet, exportPath("og", "&rev=2"), pat, nil)
-	if r.Status != http.StatusOK || r.Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
+	// Immutable only when both the revision and the renderer are current.
+	r = h.Do(http.MethodGet, exportPath("og", "&rev=2"+vq), pat, nil)
+	if r.Status != http.StatusOK || r.Header.Get("Cache-Control") != immutable {
 		t.Fatalf("%d %v", r.Status, r.Header)
 	}
-	if r := h.Do(http.MethodGet, exportPath("og", "&rev=x"), pat, nil); r.Status != http.StatusBadRequest {
-		t.Fatalf("%d", r.Status)
+	for _, extra := range []string{"&rev=2", vq, ""} {
+		r = h.Do(http.MethodGet, exportPath("og", extra), pat, nil)
+		if r.Status != http.StatusOK || r.Header.Get("Cache-Control") != "public, max-age=300" {
+			t.Fatalf("%q: %d %v", extra, r.Status, r.Header)
+		}
+	}
+	// A URL minted for another renderer is gone, not quietly redrawn.
+	stale := "&rev=2&v=" + strconv.Itoa(export.RendererVersion+1)
+	r = h.Do(http.MethodGet, exportPath("og", stale), pat, nil)
+	if r.Status != http.StatusNotFound || !strings.Contains(string(r.Body), `"reason":"renderer superseded"`) {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	if r.Header.Get("ETag") != "" || r.Header.Get("Cache-Control") != "" {
+		t.Fatalf("superseded renderer response cached: %v", r.Header)
+	}
+	for _, extra := range []string{"&rev=x", "&rev=2&v=x", "&rev=2&v=0"} {
+		if r := h.Do(http.MethodGet, exportPath("og", extra), pat, nil); r.Status != http.StatusBadRequest {
+			t.Fatalf("%q: %d", extra, r.Status)
+		}
 	}
 }
 
@@ -119,6 +144,18 @@ func TestExportCachingHeaders(t *testing.T) {
 	if cond.Status != http.StatusNotModified || len(cond.Body) != 0 {
 		t.Fatalf("%d %d", cond.Status, len(cond.Body))
 	}
+	if cond.Header.Get("ETag") != etag || cond.Header.Get("Cache-Control") != "public, max-age=300" {
+		t.Fatal(cond.Header)
+	}
+	// The immutable URL: same ETag, cached for a year, 304 included.
+	frozen := h.Do(http.MethodGet, exportPath("pdf", "&rev=1"+vq), pat, nil)
+	if frozen.Status != http.StatusOK || frozen.Header.Get("Cache-Control") != immutable || frozen.Header.Get("ETag") != etag {
+		t.Fatalf("%d %v", frozen.Status, frozen.Header)
+	}
+	cond = h.doWithHeader(exportPath("pdf", "&rev=1"+vq), pat, "If-None-Match", etag)
+	if cond.Status != http.StatusNotModified || cond.Header.Get("Cache-Control") != immutable || cond.Header.Get("ETag") != etag {
+		t.Fatalf("%d %v", cond.Status, cond.Header)
+	}
 }
 
 func TestExportsManifest(t *testing.T) {
@@ -137,6 +174,7 @@ func TestExportsManifest(t *testing.T) {
 			Height int    `json:"height"`
 			Pages  int    `json:"pages"`
 			Mime   string `json:"mime"`
+			Query  string `json:"query"`
 		} `json:"formats"`
 	}
 	r := h.Do(http.MethodGet, path, pat, nil)
@@ -148,6 +186,20 @@ func TestExportsManifest(t *testing.T) {
 		m.Formats[1].Width != 1080 || m.Formats[1].Height != 1350 || m.Formats[2].Height != 1920 ||
 		m.Formats[3].ID != "pdf" || m.Formats[3].Pages < 1 || m.Formats[3].Mime != "application/pdf" {
 		t.Fatalf("%s", r.Body)
+	}
+	if r.Header.Get("Cache-Control") != "public, max-age=300" {
+		t.Fatal(r.Header)
+	}
+	// Each format's query completes the immutable URL; the client need not
+	// know the caching rules.
+	for _, f := range m.Formats {
+		if want := "rev=1" + vq; f.Query != want {
+			t.Fatalf("%s query %q, want %q", f.ID, f.Query, want)
+		}
+		got := h.Do(http.MethodGet, exportPath(f.ID, "&"+f.Query), pat, nil)
+		if got.Status != http.StatusOK || got.Header.Get("Cache-Control") != immutable {
+			t.Fatalf("%s: %d %v", f.ID, got.Status, got.Header)
+		}
 	}
 
 	// A legacy row: no edition, no stored hash. The hash is computed on read.

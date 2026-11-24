@@ -106,7 +106,7 @@ func TestExportRendersOneSnapshot(t *testing.T) {
 
 func TestExportErrorCarriesNoCacheHeaders(t *testing.T) {
 	h := stubApp(t, snapshotRepo{t: t, err: errors.New("db down")})
-	r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), h.pat("market:read"), nil)
+	r := h.Do(http.MethodGet, exportPath("og", "&rev=1"+vq), h.pat("market:read"), nil)
 	if r.Status != http.StatusInternalServerError {
 		t.Fatalf("%d", r.Status)
 	}
@@ -145,7 +145,7 @@ func TestRenderPanicBecomesError(t *testing.T) {
 	h := stubApp(t, snapshotRepo{t: t, snap: snap(1, "hash-panic", "Text.")})
 	pat := h.pat("market:read")
 	for range 3 {
-		r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil)
+		r := h.Do(http.MethodGet, exportPath("og", "&rev=1"+vq), pat, nil)
 		if r.Status != http.StatusInternalServerError {
 			t.Fatalf("%d %s", r.Status, r.Body)
 		}
@@ -154,7 +154,7 @@ func TestRenderPanicBecomesError(t *testing.T) {
 		}
 	}
 	restore()
-	if r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil); r.Status != http.StatusOK || r.Header.Get("Content-Type") != "image/png" {
+	if r := h.Do(http.MethodGet, exportPath("og", "&rev=1"+vq), pat, nil); r.Status != http.StatusOK || r.Header.Get("Content-Type") != "image/png" {
 		t.Fatalf("after the panic: %d %v", r.Status, r.Header)
 	}
 }

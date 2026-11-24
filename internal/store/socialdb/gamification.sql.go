@@ -239,6 +239,7 @@ WHERE user_id = ANY($1::uuid[])
   AND portfolio_list_id = ANY($2::uuid[])
   AND captured_on >= $3::timestamptz
   AND captured_on < $4::timestamptz
+  AND missing_symbols = 0
 `
 
 type ReturnSnapshotsParams struct {
@@ -256,6 +257,7 @@ type ReturnSnapshotsRow struct {
 	CostBasis       float64
 }
 
+// Fully priced rows only: a partial row counts unpriced symbols as 0.
 func (q *Queries) ReturnSnapshots(ctx context.Context, arg ReturnSnapshotsParams) ([]ReturnSnapshotsRow, error) {
 	rows, err := q.db.Query(ctx, returnSnapshots,
 		arg.UserIds,

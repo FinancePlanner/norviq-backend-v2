@@ -75,8 +75,10 @@ SELECT id, user_id FROM portfolio_lists
 WHERE user_id = ANY(@user_ids::uuid[]) AND mode = 'actual' AND archived_at IS NULL;
 
 -- name: ReturnSnapshots :many
+-- Fully priced rows only: a partial row counts unpriced symbols as 0.
 SELECT user_id, portfolio_list_id, captured_on, market_value, cost_basis FROM portfolio_value_snapshots
 WHERE user_id = ANY(@user_ids::uuid[])
   AND portfolio_list_id = ANY(@list_ids::uuid[])
   AND captured_on >= @from_at::timestamptz
-  AND captured_on < @end_at::timestamptz;
+  AND captured_on < @end_at::timestamptz
+  AND missing_symbols = 0;

@@ -96,6 +96,7 @@ type Querier interface {
 	MetricWatchlistReview(ctx context.Context, userID uuid.UUID) (int32, error)
 	MutualFriendRows(ctx context.Context, arg MutualFriendRowsParams) ([]uuid.UUID, error)
 	OpenedMonthlyRecapKeys(ctx context.Context, userID uuid.UUID) ([]string, error)
+	// Fully priced rows only: a partial row counts unpriced symbols as 0.
 	PerformanceSnapshots(ctx context.Context, arg PerformanceSnapshotsParams) ([]PerformanceSnapshotsRow, error)
 	RecentCongratsCount(ctx context.Context, arg RecentCongratsCountParams) (int64, error)
 	// AchievementService.recordLegacyBadge: ON CONFLICT rather than catching the

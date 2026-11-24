@@ -1,8 +1,10 @@
 package portfolio_test
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +52,7 @@ func (h *jobHarness) bar(symbol string, day time.Time, close float64) {
 
 func (h *jobHarness) capture(l portfoliodb.PortfolioList, now time.Time) portfolio.CaptureOutcome {
 	h.T.Helper()
-	out, err := portfolio.CaptureSnapshot(h.ctx, h.Deps.DB, h.logger, l, now)
+	out, err := portfolio.CaptureSnapshot(h.ctx, h.Deps.DB, l, now)
 	if err != nil {
 		h.T.Fatal(err)
 	}
@@ -109,14 +111,7 @@ func TestSnapshotRefusals(t *testing.T) {
 	h := newJobHarness(t)
 	user := h.CreateUser("snap-b@example.com")
 
-	// Incomplete pricing: NVDA has no price at all.
-	l := h.listRow(user, "Partial", "actual")
-	h.stock(user, l.ID, "AAPL", 10, 150)
-	h.stock(user, l.ID, "NVDA", 4, 500)
 	h.bar("AAPL", friday, 200)
-	if out := h.capture(l, friday); out.Kind != portfolio.CaptureIncompletePricing || out.Missing != 1 {
-		t.Fatalf("%+v", out)
-	}
 
 	// Saturday: Friday's close prices it, but nothing traded.
 	closed := h.listRow(user, "Closed", "actual")
@@ -210,5 +205,181 @@ func TestHistoricalSeriesAndPrices(t *testing.T) {
 	hist, err := v.Value(h.ctx, user, l.ID, friday.AddDate(0, 0, -2), portfolio.PricingHistorical)
 	if err != nil || hist.PositionCount != 1 || hist.MarketValue != 1900 {
 		t.Fatalf("%+v %v", hist, err)
+	}
+}
+
+// Tuesday 2024-03-19 (UTC) at 01:00, 10:00 and 22:30.
+var (
+	tuesdayEarly   = time.Date(2024, 3, 19, 1, 0, 0, 0, time.UTC)
+	tuesdayMorning = time.Date(2024, 3, 19, 10, 0, 0, 0, time.UTC)
+	tuesdayLate    = time.Date(2024, 3, 19, 22, 30, 0, 0, time.UTC)
+)
+
+// One unpriced symbol (A6I in the owner's account) no longer stops the
+// whole list from being captured: the row stores what is priced and counts
+// what is not.
+func TestCaptureSnapshot_MissingPriceStillWritesPartialRow(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-partial@example.com")
+	l := h.listRow(user, "Partial", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.stock(user, l.ID, "NVDA", 4, 500) // no quote, no bar
+	h.bar("AAPL", friday, 200)
+
+	out := h.capture(l, friday)
+	if out.Kind != portfolio.CaptureCapturedPartial || out.Kind.String() != "captured_partial" || out.Priced != 1 || out.Missing != 1 {
+		t.Fatalf("%+v", out)
+	}
+	rows := h.snapshots(user)
+	if len(rows) != 1 || rows[0].MarketValue != 2000 || rows[0].CostBasis != 3500 ||
+		rows[0].PricedSymbols != 1 || rows[0].MissingSymbols != 1 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+// Nothing priced still writes a row, valued at cash only, the same as live
+// statistics value it.
+func TestCaptureSnapshot_NothingPricedWritesZeroValueRow(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-none@example.com")
+	l := h.listRow(user, "None", "actual")
+	h.stock(user, l.ID, "NVDA", 4, 500)
+
+	if out := h.capture(l, tuesdayLate); out.Kind != portfolio.CaptureCapturedPartial || out.Priced != 0 || out.Missing != 1 {
+		t.Fatalf("%+v", out)
+	}
+	rows := h.snapshots(user)
+	if len(rows) != 1 || rows[0].MarketValue != 0 || rows[0].PricedSymbols != 0 || rows[0].MissingSymbols != 1 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+// Early on a weekday, no bar or quote for the day yet means the market has
+// not traded: capturing now would date yesterday's close as today.
+func TestMarketTraded_WeekdayBeforeCloseWithoutEvidenceIsNotTraded(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-tue-early@example.com")
+	l := h.listRow(user, "TueEarly", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	if out := h.capture(l, tuesdayEarly); out.Kind != portfolio.CaptureMarketClosed {
+		t.Fatalf("%+v", out)
+	}
+	if len(h.snapshots(user)) != 0 {
+		t.Fatal("wrote a row before the close")
+	}
+}
+
+// From 22:00 UTC a weekday counts as traded without evidence (a symbol the
+// provider never prices); the last close prices what it can.
+func TestMarketTraded_WeekdayAfterCloseWithoutEvidenceIsTraded(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-tue-late@example.com")
+	l := h.listRow(user, "TueLate", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	if out := h.capture(l, tuesdayLate); out.Kind != portfolio.CaptureCaptured {
+		t.Fatalf("%+v", out)
+	}
+	if rows := h.snapshots(user); len(rows) != 1 || rows[0].MarketValue != 2000 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+// A quote dated today is evidence at any hour.
+func TestMarketTraded_WeekdayWithQuoteTodayIsTraded(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-tue-quote@example.com")
+	l := h.listRow(user, "TueQuote", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+	h.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'AAPL', 'usd', 210, $2, now())`, uuid.New(), tuesdayMorning.Add(-time.Hour))
+
+	if out := h.capture(l, tuesdayMorning); out.Kind != portfolio.CaptureCaptured {
+		t.Fatalf("%+v", out)
+	}
+	if rows := h.snapshots(user); len(rows) != 1 || rows[0].MarketValue != 2100 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+func TestMarketTraded_Saturday(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-sat@example.com")
+	l := h.listRow(user, "Sat", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	if out := h.capture(l, friday.Add(24*time.Hour)); out.Kind != portfolio.CaptureMarketClosed || out.Kind.String() != "market_closed" {
+		t.Fatalf("%+v", out)
+	}
+	if len(h.snapshots(user)) != 0 {
+		t.Fatal("Saturday wrote a row")
+	}
+}
+
+// The tick logs every list's outcome, so a skipped day is visible.
+func TestSnapshotTickLogsEachOutcome(t *testing.T) {
+	h := newJobHarness(t)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	user := h.CreateUser("snap-log@example.com")
+	l := h.listRow(user, "Log", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.stock(user, l.ID, "NVDA", 4, 500)
+	h.bar("AAPL", friday, 200)
+
+	portfolio.RunSnapshotTick(h.ctx, h.Deps.DB, logger, friday)
+	line := ""
+	for _, s := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(s, l.ID.String()) || strings.Contains(s, strings.ToUpper(l.ID.String())) {
+			line = s
+		}
+	}
+	for _, want := range []string{"level=INFO", "portfolio_list_id=", "outcome=captured_partial", "priced=1", "missing=1"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("missing %q in %q\nall: %s", want, line, buf.String())
+		}
+	}
+}
+
+// tickLine runs one tick at now and returns the log line for list l.
+func (h *jobHarness) tickLine(l portfoliodb.PortfolioList, now time.Time) string {
+	h.T.Helper()
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	portfolio.RunSnapshotTick(h.ctx, h.Deps.DB, logger, now)
+	for _, s := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(s, strings.ToUpper(l.ID.String())) {
+			return s
+		}
+	}
+	h.T.Fatalf("no line for %s in %s", l.ID, buf.String())
+	return ""
+}
+
+// The hourly tick repeats no-ops all day: those log at Debug, writes at Info.
+func TestSnapshotTickLogsNoOpsAtDebug(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-loglevel@example.com")
+	l := h.listRow(user, "Levels", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	for _, c := range []struct {
+		now   time.Time
+		level string
+		kind  string
+	}{
+		{friday, "level=INFO", "outcome=captured"},
+		{friday, "level=DEBUG", "outcome=already_captured"},
+		{friday.Add(24 * time.Hour), "level=DEBUG", "outcome=market_closed"},
+	} {
+		line := h.tickLine(l, c.now)
+		if !strings.Contains(line, c.level) || !strings.Contains(line, c.kind+" ") || !strings.Contains(line, "portfolio_list_id=") || strings.Contains(line, " list_id=") {
+			t.Fatalf("want %s %s: %q", c.level, c.kind, line)
+		}
 	}
 }

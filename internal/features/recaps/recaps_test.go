@@ -606,3 +606,37 @@ func TestReaderHonoursTheEnabledFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A partial snapshot (a symbol unpriced, counted as 0) is not the month's
+// end value: growth spans fully priced days only.
+func TestCollectorGrowthSkipsPartialSnapshots(t *testing.T) {
+	f := newFixture(t, nil)
+	u := f.user(ts(t, "2026-01-01T00:00:00Z"))
+	for _, d := range []string{"2026-10-01", "2026-10-02", "2026-10-03"} {
+		f.exec(`INSERT INTO gamification_check_ins (id, user_id, local_date, time_zone, created_at) VALUES ($1, $2, $3, 'UTC', now())`, uuid.New(), u, d)
+	}
+	list := uuid.New()
+	f.exec(`INSERT INTO portfolio_lists (id, user_id, name, mode, created_at) VALUES ($1, $2, 'Main', 'actual', now())`, list, u)
+	for _, row := range []struct {
+		day     string
+		mv      float64
+		missing int
+	}{{"2026-10-01", 100, 0}, {"2026-10-15", 120, 0}, {"2026-10-31", 60, 1}} {
+		f.exec(`INSERT INTO portfolio_value_snapshots (id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at)
+			VALUES ($1, $2, $3, $4::date, 'USD', $5, 100, 0, 2, 'capture', 2 - $6::int, $6, now())`, uuid.New(), u, list, row.day, row.mv, row.missing)
+	}
+	r, err := f.service(true, false).Recap(context.Background(), u, month(t, "2026-10"), ts(t, "2026-11-10T12:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(r.Deck)
+	for _, s := range r.Deck.Slides {
+		if p, ok := s.Payload.(*recaps.GrowthSlide); ok {
+			if len(p.Growth) != 1 || p.Growth[0] != (recaps.Growth{Currency: "USD", StartValue: 100, EndValue: 120}) {
+				t.Fatal(string(raw))
+			}
+			return
+		}
+	}
+	t.Fatalf("no growth slide: %s", raw)
+}

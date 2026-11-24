@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"time"
@@ -515,11 +516,27 @@ func (h *handlers) updateStock(c *echo.Context) error {
 	if err := h.syncHoldings(ctx, userID); err != nil {
 		return err
 	}
+	amount := costChange(current, p)
 	h.recordActivity(ctx, h.db, activity.Record{
 		UserID: userID, Type: activity.TypeStockUpdated, Title: stock.Symbol, Subtitle: "Updated holding",
-		Amount: ptr(stock.Shares * stock.BuyPrice), IsGrowth: true, Symbol: "pencil.circle.fill",
+		Amount: amount, IsGrowth: amount != nil && *amount > 0, Symbol: "pencil.circle.fill",
 	})
 	return httpx.OK(c, stockResponse(*stock))
+}
+
+// costChange is an edit's change in cost (shares × buy price), rounded to
+// cents, or nil when the cost did not change. It compares the request with
+// the row before the edit, so a merge into another row still reports this
+// edit's change rather than the merged total.
+func costChange(before *stocksdb.Stock, p StockRequest) *float64 {
+	if before == nil {
+		return nil
+	}
+	delta := math.Round((p.Shares*p.BuyPrice-before.Shares*before.BuyPrice)*100) / 100
+	if delta == 0 {
+		return nil
+	}
+	return &delta
 }
 
 // repoUpdate is DatabaseStocksRepository.update: moving onto a row with the

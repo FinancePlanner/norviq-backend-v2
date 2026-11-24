@@ -113,7 +113,11 @@ func (p *PDFSurface) Polyline(pts [][2]float64, width float64, c color.RGBA) {
 	}
 }
 
+// Text and Measure drop runes above U+FFFF: fpdf's width table stops at
+// U+FFFF and Output panics on anything past it. Both drop the same runes,
+// so what is measured is what is drawn.
 func (p *PDFSurface) Text(x, baseline float64, f Font, size float64, c color.RGBA, s string, a Align) {
+	s = bmpOnly(s)
 	p.useFont(f, size)
 	p.pdf.SetTextColor(int(c.R), int(c.G), int(c.B))
 	// fpdf's Text takes the baseline, the same convention as Surface.
@@ -122,7 +126,7 @@ func (p *PDFSurface) Text(x, baseline float64, f Font, size float64, c color.RGB
 
 func (p *PDFSurface) Measure(f Font, size float64, s string) float64 {
 	p.useFont(f, size)
-	return p.pdf.GetStringWidth(s)
+	return p.pdf.GetStringWidth(bmpOnly(s))
 }
 
 // Image draws img once per distinct content: later draws reuse the registered

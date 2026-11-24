@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"norviq-api/internal/features/marketbrief"
+	"norviq-api/internal/features/marketbrief/export"
 	"norviq-api/internal/server"
 	"norviq-api/internal/testutil"
 )
@@ -110,5 +111,49 @@ func TestExportErrorCarriesNoCacheHeaders(t *testing.T) {
 	}
 	if r.Header.Get("ETag") != "" || strings.Contains(r.Header.Get("Cache-Control"), "immutable") {
 		t.Fatalf("error response cached: %v", r.Header)
+	}
+}
+
+// An emoji in model-written text must not take the API down: fpdf panics on
+// any rune above U+FFFF, and the render runs on a goroutine no recover sees.
+func TestExportPDFSurvivesEmoji(t *testing.T) {
+	s := snap(1, "hash-emoji", "Bitcoin jumped \U0001F4C8 on the day.")
+	s.Response.Greeting = ptr("Markets \U0001F1FA\U0001F1F8 rallied on the day as Bitcoin rose sharply.")
+	h := stubApp(t, snapshotRepo{t: t, snap: s})
+	pat := h.pat("market:read")
+	for _, format := range []string{"pdf", "og", "social", "story"} {
+		r := h.Do(http.MethodGet, exportPath(format, ""), pat, nil)
+		if r.Status != http.StatusOK {
+			t.Fatalf("%s: %d %s", format, r.Status, r.Body)
+		}
+		if format == "pdf" && !bytes.HasPrefix(r.Body, []byte("%PDF")) {
+			t.Fatalf("pdf body %q", r.Body[:min(len(r.Body), 16)])
+		}
+	}
+	if r := h.Do(http.MethodGet, "/v1/market/brief/exports?date="+exportDate+"&slot=evening", pat, nil); r.Status != http.StatusOK {
+		t.Fatalf("manifest: %d %s", r.Status, r.Body)
+	}
+}
+
+// A renderer panic is a 500 with no cache headers, and the next request
+// renders afresh: the failure is not cached and holds no render slot.
+func TestRenderPanicBecomesError(t *testing.T) {
+	restore := marketbrief.SetRenderForTest(t, func(export.Format, export.Doc) ([]byte, string, error) {
+		panic("renderer exploded")
+	})
+	h := stubApp(t, snapshotRepo{t: t, snap: snap(1, "hash-panic", "Text.")})
+	pat := h.pat("market:read")
+	for range 3 {
+		r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil)
+		if r.Status != http.StatusInternalServerError {
+			t.Fatalf("%d %s", r.Status, r.Body)
+		}
+		if r.Header.Get("ETag") != "" || r.Header.Get("Cache-Control") != "" {
+			t.Fatalf("panic response carries cache headers: %v", r.Header)
+		}
+	}
+	restore()
+	if r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil); r.Status != http.StatusOK || r.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("after the panic: %d %v", r.Status, r.Header)
 	}
 }

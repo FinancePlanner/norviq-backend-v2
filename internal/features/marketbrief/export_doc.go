@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"norviq-api/internal/features/marketbrief/export"
@@ -18,6 +19,10 @@ import (
 // (norviq-web-v2, brief/edition/map.ts) so the exports and the web page say
 // the same thing. Change one, change the other. e may be nil (a legacy
 // brief): the blocks that need numbers are then left out, never invented.
+//
+// Every text field passes through drawable: model-written text can carry
+// emoji, which fpdf cannot embed and no export face draws. The web page
+// still shows them.
 func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 	lang := r.Language
 	if lang != LanguagePtPT {
@@ -55,13 +60,15 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 		published = lisbonClock(*r.GeneratedAt)
 	}
 
-	headline := Headline(r, e)
+	headline := drawable(Headline(r, e))
 	if headline == "" {
 		headline = editionName
 	}
+	// The dek is chosen on the stored greeting, as the web page chooses it,
+	// and only then made drawable.
 	dek := ""
 	if g := derefString(r.Greeting); utf8.RuneCountInString(g) >= 40 && strings.ContainsAny(g[len(g)-1:], ".!?") {
-		dek = g
+		dek = drawable(g)
 	}
 
 	narrative := narrativeStories(r.Items, open)
@@ -77,7 +84,7 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 		DataAsOf:    dataAsOf,
 		Cards:       docCards(r, e, lang),
 		Sources:     docSources(r.Items),
-		Provenance:  provenance(str, published, id, revision),
+		Provenance:  drawable(provenance(str, published, id, revision)),
 		URL:         docURL(baseURL, date, slot, lang),
 		Degraded:    r.Degraded,
 	}
@@ -151,6 +158,30 @@ func (s docStrings) name(symbol, fallback string) string {
 		return n
 	}
 	return fallback
+}
+
+// drawable is s with only the runes every export face draws (see
+// export.HasGlyph): anything above U+FFFF, such as emoji and flags, and
+// anything Brygada or Geist lacks is dropped, and whitespace no face has
+// becomes a space. Runs of spaces this leaves collapse to one, and the ends
+// are trimmed.
+func drawable(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false // a space is owed before the next drawn rune
+	for _, r := range s {
+		switch {
+		case r == ' ' || (unicode.IsSpace(r) && !export.HasGlyph(r)):
+			space = true
+		case export.HasGlyph(r):
+			if space && b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			space = false
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func derefString(p *string) string {
@@ -308,14 +339,14 @@ func docCards(r Response, e *Edition, lang string) []export.Card {
 					changePct = formatSignedPercent(pct, lang)
 				}
 				cards = append(cards, export.Card{
-					Name: row.Name, Meta: shortSymbol(row.Symbol),
+					Name: drawable(row.Name), Meta: drawable(shortSymbol(row.Symbol)),
 					Level: row.Level, ChangePct: changePct, Dir: row.Direction,
 				})
 				continue
 			}
 			card := export.Card{
-				Name:      firstNonEmpty(row.Name, in.Name),
-				Meta:      strings.Join(nonEmpty(shortSymbol(in.Symbol), in.Region), " · "),
+				Name:      drawable(firstNonEmpty(row.Name, in.Name)),
+				Meta:      drawable(strings.Join(nonEmpty(shortSymbol(in.Symbol), in.Region), " · ")),
 				Level:     formatPrecise(in.Last, in.Precision, lang),
 				Change:    formatSigned(in.Change, min(in.Precision, 2), lang),
 				ChangePct: formatSignedPercent(in.ChangePct, lang),
@@ -382,7 +413,7 @@ func docChart(e *Edition, open bool, lang string, str docStrings) *export.ChartD
 			seen = true
 		}
 		out = append(out, export.ChartSeries{
-			Name:   str.name(s.Symbol, in.Name),
+			Name:   drawable(str.name(s.Symbol, in.Name)),
 			Points: pts,
 			Last:   formatSignedPercent(pts[len(pts)-1][1], lang),
 		})
@@ -417,7 +448,7 @@ func docCrossAsset(e *Edition, lang string, str docStrings) []export.Row {
 			if sections[i].class != in.AssetClass {
 				continue
 			}
-			row := export.Row{Section: sections[i].title, Name: str.name(in.Symbol, in.Name)}
+			row := export.Row{Section: sections[i].title, Name: drawable(str.name(in.Symbol, in.Name))}
 			switch {
 			case in.AssetClass == AssetRate && in.ChangeBps != nil:
 				row.Level = formatPrecise(in.Last, in.Precision, lang) + "%"
@@ -452,9 +483,9 @@ func docMissing(e *Edition, str docStrings) []string {
 		kind, symbol, _ := strings.Cut(m, ":")
 		name := str.name(symbol, symbol)
 		if kind == "series" {
-			out = append(out, name+" — "+str.intradayChart)
+			out = append(out, drawable(name+" — "+str.intradayChart))
 		} else {
-			out = append(out, name+" — "+str.quote)
+			out = append(out, drawable(name+" — "+str.quote))
 		}
 	}
 	return out
@@ -472,12 +503,15 @@ func narrativeStories(items []Item, open bool) []export.Story {
 		if it.Kind != want {
 			continue
 		}
-		tickers := it.Tickers
-		if tickers == nil {
-			tickers = []string{}
+		// A ticker with nothing drawable left is dropped, not shown blank.
+		tickers := []string{}
+		for _, tk := range it.Tickers {
+			if tk = drawable(tk); tk != "" {
+				tickers = append(tickers, tk)
+			}
 		}
 		out = append(out, export.Story{
-			Rank: len(out) + 1, Text: it.Text, Tickers: tickers,
+			Rank: len(out) + 1, Text: drawable(it.Text), Tickers: tickers,
 			SourceHost: sourceHost(it.SourceURL),
 		})
 	}
@@ -487,6 +521,8 @@ func narrativeStories(items []Item, open bool) []export.Story {
 var wwwPrefix = regexp.MustCompile(`^(?i)www\.`)
 
 // sourceHost is a cited URL's host without "www.", or "" when there is none.
+// A host with a rune the exports cannot draw is "" too: cut down, it would
+// name a different site.
 func sourceHost(raw *string) string {
 	if raw == nil || *raw == "" {
 		return ""
@@ -495,7 +531,11 @@ func sourceHost(raw *string) string {
 	if err != nil {
 		return ""
 	}
-	return wwwPrefix.ReplaceAllString(u.Hostname(), "")
+	host := wwwPrefix.ReplaceAllString(u.Hostname(), "")
+	if drawable(host) != host {
+		return ""
+	}
+	return host
 }
 
 // docSources are the cited hosts, de-duplicated, in item order.

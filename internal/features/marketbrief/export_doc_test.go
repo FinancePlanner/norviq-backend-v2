@@ -264,3 +264,57 @@ func TestDocYieldWithoutBpsShowsLevelOnly(t *testing.T) {
 		}
 	}
 }
+
+// LLM text can carry emoji. Nothing above U+FFFF, and nothing a face lacks,
+// reaches a renderer: those runes are dropped, the spaces they leave are
+// collapsed, and a ticker or source left empty is dropped with them.
+func TestBuildDocStripsNonBMP(t *testing.T) {
+	const chart, us, smile = "\U0001F4C8", "\U0001F1FA\U0001F1F8", "\U0001F600"
+	r := docBrief("en")
+	r.Greeting = strPtr("Markets " + us + " sold off hard today, led by technology​ stocks.")
+	r.Items[0].Text = chart + " Bitcoin jumped " + chart + " on the day. " + us
+	r.Items[0].Tickers = []string{"NVDA" + smile, smile}
+	r.Items[1].Text = "Yields eased further."
+	r.Items[1].SourceURL = strPtr("https://" + smile + ".example/x")
+	r.Groups[0].Rows[0].Name = "DAX " + chart
+	e := docEdition()
+	e.Instruments[3].Name = "Brent " + chart + " crude"
+	e.Instruments[3].Symbol = "BZ" + smile
+	e.Quality.Missing = []string{"quote:X" + smile}
+	d := BuildDoc(r, e, "https://www.norviq.org")
+
+	if d.Dek != "Markets sold off hard today, led by technology stocks." {
+		t.Errorf("dek %q", d.Dek)
+	}
+	if d.Lead.Text != "Bitcoin jumped on the day." || !reflect.DeepEqual(d.Lead.Tickers, []string{"NVDA"}) {
+		t.Errorf("lead %+v", *d.Lead)
+	}
+	if d.Stories[0].Text != "Yields eased further." || d.Stories[0].SourceHost != "" {
+		t.Errorf("story %+v", d.Stories[0])
+	}
+	if !reflect.DeepEqual(d.Sources, []string{"cnbc.com"}) {
+		t.Errorf("sources %q", d.Sources)
+	}
+	if d.Cards[2].Name != "DAX" {
+		t.Errorf("card %q", d.Cards[2].Name)
+	}
+	if len(d.Missing) != 1 || d.Missing[0] != "X — quote" {
+		t.Errorf("missing %q", d.Missing)
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s string
+	for _, r := range string(b) {
+		if r > 0xFFFF || r == '​' || r == ' ' || r == ' ' {
+			s += string(r)
+		}
+	}
+	if s != "" {
+		t.Errorf("undrawable runes reached the Doc: %q in %s", s, b)
+	}
+	if strings.Contains(string(b), "  ") {
+		t.Errorf("double space left in %s", b)
+	}
+}

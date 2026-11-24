@@ -3,6 +3,8 @@ package marketbrief
 import (
 	"reflect"
 	"testing"
+
+	"norviq-api/internal/features/marketbrief/export"
 )
 
 // The export routes are public-safe by construction: the handler holds no
@@ -18,4 +20,14 @@ func TestExportHandlerHasNoUserDependencies(t *testing.T) {
 			t.Fatalf("field %d is %s, want %s", i, typ.Field(i).Name, name)
 		}
 	}
+}
+
+// SetRenderForTest swaps the renderer behind the export route and returns a
+// restore; the test's cleanup restores it too.
+func SetRenderForTest(t testing.TB, f func(export.Format, export.Doc) ([]byte, string, error)) (restore func()) {
+	prev := renderExport
+	renderExport = f
+	restore = func() { renderExport = prev }
+	t.Cleanup(restore)
+	return restore
 }

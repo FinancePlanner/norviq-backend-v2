@@ -3,7 +3,10 @@ package marketbrief
 import (
 	"container/list"
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +26,9 @@ const exportCacheSize = 64
 // exportFillTimeout bounds one shared render.
 const exportFillTimeout = 20 * time.Second
 
+// renderExport draws one export. A variable so tests can make it fail.
+var renderExport = export.Render
+
 type exportFile struct {
 	data []byte
 	mime string
@@ -36,6 +42,7 @@ type exportCache struct {
 	order  *list.List // front = most recent; values are *exportEntry
 	items  map[string]*list.Element
 	flight singleflight.Group
+	logger *slog.Logger // where a render panic's stack goes
 }
 
 type exportEntry struct {
@@ -43,8 +50,11 @@ type exportEntry struct {
 	file exportFile
 }
 
-func newExportCache(max int) *exportCache {
-	return &exportCache{max: max, order: list.New(), items: map[string]*list.Element{}}
+func newExportCache(max int, logger *slog.Logger) *exportCache {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &exportCache{max: max, order: list.New(), items: map[string]*list.Element{}, logger: logger}
 }
 
 func (c *exportCache) get(key string) (exportFile, bool) {
@@ -90,7 +100,7 @@ func (c *exportCache) fill(ctx context.Context, key string, render func() (expor
 		if f, ok := c.get(key); ok {
 			return f, nil
 		}
-		f, err := render()
+		f, err := c.recovered(key, render)
 		if err != nil {
 			return nil, err
 		}
@@ -106,6 +116,20 @@ func (c *exportCache) fill(ctx context.Context, key string, render func() (expor
 	case <-ctx.Done():
 		return exportFile{}, ctx.Err()
 	}
+}
+
+// recovered runs render and turns a panic into an error, logging its stack.
+// It must run inside the flight: DoChan re-raises a panic on a fresh
+// goroutine, where no recover (Echo's included) can catch it, and the
+// process exits.
+func (c *exportCache) recovered(key string, render func() (exportFile, error)) (f exportFile, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			c.logger.Error("export render panicked", "key", key, "panic", p, "stack", string(debug.Stack()))
+			f, err = exportFile{}, fmt.Errorf("export render panicked: %v", p)
+		}
+	}()
+	return render()
 }
 
 // exportHandlers serves the brief's shareable renders. It holds no user,
@@ -230,7 +254,7 @@ func (h *exportHandlers) file(c *echo.Context) error {
 		return c.NoContent(http.StatusNotModified)
 	}
 	out, err := h.cache.fill(c.Request().Context(), etag, func() (exportFile, error) {
-		data, mime, err := export.Render(format, doc)
+		data, mime, err := renderExport(format, doc)
 		return exportFile{data: data, mime: mime}, err
 	})
 	if err != nil {

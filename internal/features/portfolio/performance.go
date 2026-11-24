@@ -197,13 +197,20 @@ func PerformanceDays(snapshots []portfoliodb.PortfolioValueSnapshot, listIDs []u
 	return out
 }
 
+// staleAfterDays is how many calendar days the latest snapshot may lag asOf
+// before its day and week changes stop meaning "recent". Four covers a long
+// weekend; past it, "previous trading day" would describe an old move.
+const staleAfterDays = 4
+
 // PerformanceChanges is PortfolioPerformanceBuilder.changes(from:asOf:).
-// days must be the full stored history.
+// days must be the full stored history. Day and Week are omitted when the
+// latest day is more than staleAfterDays calendar days before asOf (UTC).
 func PerformanceChanges(days []PerformanceDay, asOf time.Time) *PortfolioChanges {
 	if len(days) < 2 {
 		return nil
 	}
 	latest := days[len(days)-1]
+	stale := StartOfDay(asOf).Sub(StartOfDay(latest.Date)) > staleAfterDays*24*time.Hour
 	prev := days[len(days)-2]
 	yearStart := startOfYear(asOf)
 	ytdFrom := baseline(days, yearStart)
@@ -221,6 +228,9 @@ func PerformanceChanges(days []PerformanceDay, asOf time.Time) *PortfolioChanges
 		Month:          change(latest, baseline(days, AddDays(latest.Date, -30)), BasisMonth),
 		YTD:            change(latest, ytdFrom, BasisYTD),
 		SinceInception: change(latest, &days[0], BasisInception),
+	}
+	if stale {
+		c.Day, c.Week = nil, nil
 	}
 	if c.Day == nil && c.Week == nil && c.Month == nil && c.YTD == nil && c.SinceInception == nil {
 		return nil

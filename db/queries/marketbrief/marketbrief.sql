@@ -8,8 +8,28 @@ SELECT count(*) FROM market_briefs
 WHERE trading_date = $1 AND slot = $2;
 
 -- name: InsertMarketBrief :exec
-INSERT INTO market_briefs (id, trading_date, slot, language, payload, model, degraded, generated_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+INSERT INTO market_briefs (id, trading_date, slot, language, payload, model, degraded, generated_at, created_at, revision, content_hash, edition)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
+
+-- name: ArchiveMarketBriefSlot :exec
+-- Copies a slot's rows into the revision history before a regeneration
+-- deletes them.
+INSERT INTO market_brief_revisions (id, trading_date, slot, language, revision, payload, edition, model, degraded, content_hash, generated_at, archived_at)
+SELECT b.id, b.trading_date, b.slot, b.language, b.revision, b.payload, b.edition, b.model, b.degraded, b.content_hash, b.generated_at, sqlc.arg(archived_at)::timestamptz
+FROM market_briefs b
+WHERE b.trading_date = sqlc.arg(trading_date) AND b.slot = sqlc.arg(slot);
+
+-- name: NextMarketBriefRevision :one
+-- 1 for a slot never regenerated, else one past the newest archived revision.
+SELECT (COALESCE(MAX(revision), 0) + 1)::integer AS next_revision FROM market_brief_revisions
+WHERE trading_date = $1 AND slot = $2;
+
+-- name: MarketBriefEdition :one
+-- The edition is language-neutral; every language row of a slot holds the same one.
+SELECT revision, edition FROM market_briefs
+WHERE trading_date = $1 AND slot = $2
+ORDER BY language ASC
+LIMIT 1;
 
 -- name: DeleteMarketBriefSlot :exec
 DELETE FROM market_briefs

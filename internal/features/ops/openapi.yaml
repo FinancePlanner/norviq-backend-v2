@@ -2162,6 +2162,16 @@ paths:
           schema:
             type: string
             format: date
+        - name: include
+          in: query
+          required: false
+          description: >-
+            Comma-separated extras. `edition` adds the brief's structured,
+            language-neutral market data (`edition`). Briefs written before
+            editions existed never carry one.
+          schema:
+            type: string
+            example: edition
       responses:
         '200':
           description: OK
@@ -15526,7 +15536,78 @@ components:
             The brief stored before this one in the same language (the
             morning brief behind an evening recap, otherwise the latest
             earlier day). Fetch it with `slot` and `date`.
+        edition:
+          allOf:
+            - $ref: '#/components/schemas/MarketBriefEdition'
+          description: Only with `include=edition`, and only for briefs that have one.
       required: [enabled, language, groups, items, degraded]
+    MarketBriefEdition:
+      type: object
+      description: >-
+        The structured market data a brief was written from, shared by every
+        language and every surface (web, app, exports). Numbers are computed
+        from the provider's raw values and rounded once.
+      properties:
+        schemaVersion: { type: integer, example: 2 }
+        id: { type: string, example: MI-2026-11-20-C, description: 'MI-<trading date>-<O for the open, C for the close>' }
+        kind: { type: string, enum: [open, close] }
+        revision: { type: integer, minimum: 1, description: '1, plus one per regeneration of the slot' }
+        status: { type: string, enum: [published] }
+        publishedAt: { type: string, format: date-time }
+        marketDataAsOf: { type: string, format: date-time, description: Newest exchange time among the displayed rows }
+        timezone: { type: string, example: Europe/Lisbon }
+        instruments:
+          type: array
+          items: { $ref: '#/components/schemas/MarketBriefEditionInstrument' }
+        series:
+          type: array
+          items: { $ref: '#/components/schemas/MarketBriefEditionSeries' }
+        quality:
+          type: object
+          properties:
+            degraded: { type: boolean }
+            model: { type: string }
+            missing:
+              type: array
+              items: { type: string, example: 'series:^DJI' }
+          required: [degraded, model, missing]
+      required: [schemaVersion, id, kind, revision, status, publishedAt, timezone, instruments, series, quality]
+    MarketBriefEditionInstrument:
+      type: object
+      properties:
+        symbol: { type: string, example: ^NDX }
+        name: { type: string }
+        assetClass: { type: string, enum: [index, future, rate, commodity] }
+        region: { type: string, description: 'ISO 3166 code, EU for euro-area aggregates, empty when global' }
+        group: { type: string, nullable: true, description: 'Brief group shown in (eu_open, us_futures, eu_close, us_close); absent for context instruments' }
+        unit: { type: string, enum: [points, percent, usd_bbl] }
+        currency: { type: string, nullable: true }
+        precision: { type: integer, description: 'Decimals of last, previousClose and change' }
+        last: { type: number }
+        previousClose: { type: number }
+        change: { type: number }
+        changePct: { type: number, description: 'Relative move, two decimals. For a yield this is NOT its move; use changeBps.' }
+        changeBps: { type: number, nullable: true, description: 'Yields only: the move in basis points, one decimal' }
+        asOf: { type: string, format: date-time }
+        source: { type: string, example: yahoo }
+      required: [symbol, name, assetClass, region, unit, precision, last, previousClose, change, changePct, asOf, source]
+    MarketBriefEditionSeries:
+      type: object
+      properties:
+        symbol: { type: string }
+        interval: { type: string, example: 5m }
+        timezone: { type: string, example: America/New_York }
+        points:
+          type: array
+          description: '[unix seconds, value] pairs, oldest first'
+          items:
+            type: array
+            items: { type: number }
+            minItems: 2
+            maxItems: 2
+        asOf: { type: string, format: date-time }
+        source: { type: string }
+      required: [symbol, interval, points, asOf, source]
     MarketBriefRef:
       type: object
       properties:

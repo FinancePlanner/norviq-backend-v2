@@ -21,6 +21,9 @@ type GeneratedBrief struct {
 	// Responses holds one brief per language, in languages order.
 	Responses []Response
 	Model     string
+	// Edition is the language-neutral market data behind Responses; nil
+	// from generators that predate it (test fakes).
+	Edition *Edition
 }
 
 // Model labels (MarketBriefGenerator).
@@ -47,7 +50,9 @@ type EarningsCalendar interface {
 // call fails or its draft does not validate, the app's ordinary chain
 // writes the brief from the in-house facts alone and it is marked degraded.
 type LLMGenerator struct {
-	Quotes   yahoochart.QuoteProvider
+	Quotes yahoochart.QuoteProvider
+	// Intraday is nil when series are not wanted; the edition then says so.
+	Intraday yahoochart.IntradayProvider
 	News     newsprovider.Provider // nil without a configured news chain
 	Earnings EarningsCalendar
 	// ClaudeWebClient is nil unless the Haiku trial and its web search are on.
@@ -71,6 +76,15 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	}
 	quotes := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
+	series := g.series(ctx, due, at)
+	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
+		if err != nil {
+			return b, err
+		}
+		e := buildEdition(due, quotes, series, b.Model, b.Responses[0].Degraded, at)
+		b.Edition = &e
+		return b, nil
+	}
 
 	for _, web := range []struct {
 		client ai.ChatClient
@@ -79,7 +93,7 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 		if web.client == nil {
 			continue
 		}
-		brief, err := g.attempt(ctx, web.client, true, web.model, false, nil, due, facts, quotes, at)
+		brief, err := withEdition(g.attempt(ctx, web.client, true, web.model, false, nil, due, facts, quotes, at))
 		if err == nil {
 			return brief, nil
 		}
@@ -91,7 +105,25 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 			allowed[*h.URL] = true
 		}
 	}
-	return g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at)
+	return withEdition(g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at))
+}
+
+// series fetches the intraday bars charted for the slot. Bars from another
+// Lisbon day than the brief's are dropped: a holiday's stale session must
+// not be charted as today's.
+func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time) map[string]*yahoochart.Intraday {
+	out := map[string]*yahoochart.Intraday{}
+	if g.Intraday == nil {
+		return out
+	}
+	for _, symbol := range seriesSymbols(due.Slot) {
+		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, at)
+		if d == nil || LocalDate(d.Last().Time) != due.TradingDate {
+			continue
+		}
+		out[symbol] = d
+	}
+	return out
 }
 
 // currentQuotes is MarketBriefGenerator.currentQuotes: rows a reader sees

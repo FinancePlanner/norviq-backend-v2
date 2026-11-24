@@ -11,6 +11,9 @@ import (
 )
 
 type Querier interface {
+	// Copies a slot's rows into the revision history before a regeneration
+	// deletes them.
+	ArchiveMarketBriefSlot(ctx context.Context, arg ArchiveMarketBriefSlotParams) error
 	// Market brief storage (DatabaseMarketBriefRepository) and push opt-ins
 	// (DatabaseMarketBriefNotificationPreferenceService, MarketBriefNotifier).
 	// Orderings are Fluent's, column for column; text columns sort under the
@@ -24,7 +27,11 @@ type Querier interface {
 	InsertMarketBriefNotificationPreference(ctx context.Context, arg InsertMarketBriefNotificationPreferenceParams) error
 	LatestMarketBrief(ctx context.Context, language string) (MarketBrief, error)
 	MarketBriefBeforeDay(ctx context.Context, arg MarketBriefBeforeDayParams) (MarketBriefBeforeDayRow, error)
+	// The edition is language-neutral; every language row of a slot holds the same one.
+	MarketBriefEdition(ctx context.Context, arg MarketBriefEditionParams) (MarketBriefEditionRow, error)
 	MarketBriefOnDay(ctx context.Context, arg MarketBriefOnDayParams) (MarketBriefOnDayRow, error)
+	// 1 for a slot never regenerated, else one past the newest archived revision.
+	NextMarketBriefRevision(ctx context.Context, arg NextMarketBriefRevisionParams) (int32, error)
 	UpdateMarketBriefNotificationPreference(ctx context.Context, arg UpdateMarketBriefNotificationPreferenceParams) error
 }
 

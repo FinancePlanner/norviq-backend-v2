@@ -89,7 +89,9 @@ var (
 type reportBlock struct {
 	h, gap   float64 // height, and space above it that a page top drops
 	keepNext bool    // never the last block on a page
-	newPage  bool    // starts a page
+	// leaveCover starts page 2 when the flow is still on the cover; once a
+	// spilled block has left it, the section simply follows.
+	leaveCover bool
 	// together is the height of the group this block opens, which starts a
 	// page unless it fits whole in what is left of the current one.
 	together float64
@@ -178,11 +180,11 @@ func paginate(blocks []reportBlock, bottom func(page int) float64) ([]placedBloc
 	var out []placedBlock
 	page, y, empty := 0, top(0), true
 	for i, b := range blocks {
-		if b.newPage && !empty {
+		if b.leaveCover && page == 0 && !empty {
 			page, y, empty = page+1, top(page+1), true
 		}
 		need := b.h
-		if b.keepNext && i+1 < len(blocks) && !blocks[i+1].newPage {
+		if b.keepNext && i+1 < len(blocks) && !(blocks[i+1].leaveCover && page == 0) {
 			need += blocks[i+1].gap + blocks[i+1].h
 		}
 		need = math.Max(need, b.together)
@@ -201,8 +203,8 @@ func paginate(blocks []reportBlock, bottom func(page int) float64) ([]placedBloc
 }
 
 // blocks is the whole report in reading order: the cover, then market
-// performance and developments flowing together, then sources and
-// methodology on a page of their own.
+// performance and developments flowing together from page 2, then sources
+// and methodology, kept whole.
 func (r *report) blocks() []reportBlock {
 	d, str := r.d, r.str
 	var bs []reportBlock
@@ -238,7 +240,7 @@ func (r *report) blocks() []reportBlock {
 	}
 	if d.Lead != nil {
 		add(r.heading(str.leadStory, "", false))
-		add(r.storyBlock(d.Lead, true))
+		add(r.storyBlock(d.Lead, true, true))
 	}
 
 	// Market performance, then the developments, flowing on from page 2.
@@ -269,7 +271,7 @@ func (r *report) blocks() []reportBlock {
 		}
 		listed(title, r.heading(title, "", open()))
 		for i := range d.Stories {
-			add(r.storyBlock(&d.Stories[i], false))
+			add(r.storyBlock(&d.Stories[i], false, i == 0))
 		}
 	}
 
@@ -339,7 +341,7 @@ func (r *report) paraBlock(f Font, size, lead float64, c color.RGBA, text string
 
 // heading is a section's tracked Brygada caps over a warm rule, with an
 // optional note set right on the same line, or under it when they collide.
-func (r *report) heading(label, note string, newPage bool) reportBlock {
+func (r *report) heading(label, note string, leaveCover bool) reportBlock {
 	label = strings.ToUpper(label)
 	lw := trackedWidth(r.s, SerifSemiBold, sectionSize, sectionSize*labelTrack, label)
 	nw := r.s.Measure(SansRegular, noteSize, note)
@@ -349,7 +351,7 @@ func (r *report) heading(label, note string, newPage bool) reportBlock {
 		h += noteSize + 6
 	}
 	return reportBlock{
-		h: h, gap: sectionGap, keepNext: true, newPage: newPage,
+		h: h, gap: sectionGap, keepNext: true, leaveCover: leaveCover,
 		draw: func(s Surface, top float64, _ bool) {
 			base := top + sectionSize*capHeight
 			trackedText(s, r.left, base, SerifSemiBold, sectionSize, Light.Text, label, AlignLeft)
@@ -420,9 +422,9 @@ func (r *report) cardRow(c *Card, last bool) reportBlock {
 				drawSpark(s, c.Spark, c.PrevClose, r.right-colSpark-sparkW, mid-sparkH/2, sparkW, sparkH, col)
 			}
 			base := mid + figureSize*capHeight/2
-			s.Text(r.right-colLevel, base, SansRegular, figureSize, Light.Text, c.Level, AlignRight)
+			tabularText(s, r.right-colLevel, base, SansRegular, figureSize, Light.Text, c.Level, AlignRight)
 			if c.Change != "" {
-				s.Text(r.right-colChange, base, SansRegular, figureSize, col, c.Change, AlignRight)
+				tabularText(s, r.right-colChange, base, SansRegular, figureSize, col, c.Change, AlignRight)
 			}
 			drawMoveRight(s, r.right-colPct, base, SansSemiBold, figureSize, col, c.Dir, c.ChangePct)
 			if !last {
@@ -434,12 +436,44 @@ func (r *report) cardRow(c *Card, last bool) reportBlock {
 
 // drawMoveRight sets a move's figure right-aligned at x, its arrow before it.
 func drawMoveRight(s Surface, x, base float64, f Font, size float64, col color.RGBA, dir, figure string) {
-	s.Text(x, base, f, size, col, figure, AlignRight)
+	w := tabularText(s, x, base, f, size, col, figure, AlignRight)
 	if a := dirArrow(dir); a != "" {
 		as := math.Round(size*arrowScale*10) / 10
-		ax := x - s.Measure(f, size, figure) - size*arrowGap
-		s.Text(ax, base-size*0.06, SansRegular, as, col, a, AlignRight)
+		s.Text(x-w-size*arrowGap, base-size*0.06, SansRegular, as, col, a, AlignRight)
 	}
+}
+
+// tabularText sets a figure as tabular figures: Geist's default digits are
+// proportional (a 1 is far narrower than a 0), and the surfaces cannot
+// switch on its tnum feature, so each digit is centered in a cell as wide
+// as the face's widest digit, and a column of figures stacks digit over
+// digit. Other characters keep their own width. It returns the width.
+func tabularText(s Surface, x, base float64, f Font, size float64, c color.RGBA, txt string, a Align) float64 {
+	cell := 0.0
+	for _, d := range "0123456789" {
+		cell = math.Max(cell, s.Measure(f, size, string(d)))
+	}
+	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+	w := 0.0
+	for _, r := range txt {
+		if isDigit(r) {
+			w += cell
+		} else {
+			w += s.Measure(f, size, string(r))
+		}
+	}
+	cx := alignedX(x, w, a)
+	for _, r := range txt {
+		ch := string(r)
+		if isDigit(r) {
+			s.Text(cx+cell/2, base, f, size, c, ch, AlignCenter)
+			cx += cell
+			continue
+		}
+		s.Text(cx, base, f, size, c, ch, AlignLeft)
+		cx += s.Measure(f, size, ch)
+	}
+	return w
 }
 
 // drawSpark draws a session's values in a small box, the previous close
@@ -469,7 +503,7 @@ func drawSpark(s Surface, vals []float64, prev, x, y, w, h float64, col color.RG
 // storyBlock is a ranked story: its rank in gold in the gutter, the text in
 // Brygada, then its tickers and source. The lead story is larger and has no
 // rank: its heading names it.
-func (r *report) storyBlock(st *Story, lead bool) reportBlock {
+func (r *report) storyBlock(st *Story, lead, firstInSection bool) reportBlock {
 	size, ld, x := storySize, storyLead, r.left+rankW
 	if lead {
 		size, ld, x = leadSize, leadLead, r.left
@@ -493,7 +527,9 @@ func (r *report) storyBlock(st *Story, lead bool) reportBlock {
 	return reportBlock{
 		h: h + 2*pad,
 		draw: func(s Surface, top float64, first bool) {
-			if !lead && !first {
+			// A hairline parts stories; the heading's rule or the page top
+			// already marks the first one.
+			if !lead && !first && !firstInSection {
 				s.Line(r.left, top, r.right, top, rHair, paperRule, 0)
 			}
 			ty := top + pad
@@ -587,9 +623,9 @@ func (r *report) crossBlocks() []reportBlock {
 				s.Line(r.left, top, r.right, top, rHair, paperRule, 0)
 				base := top + crossRowH/2 + crossSize*capHeight/2
 				s.Text(r.left, base, SansRegular, crossSize, Light.Text, name, AlignLeft)
-				s.Text(r.right-colChange, base, SansRegular, crossSize, Light.Text, row.Level, AlignRight)
+				tabularText(s, r.right-colChange, base, SansRegular, crossSize, Light.Text, row.Level, AlignRight)
 				if row.Change != "" {
-					s.Text(r.right, base, SansSemiBold, crossSize, Light.move(row.Dir), row.Change, AlignRight)
+					tabularText(s, r.right, base, SansSemiBold, crossSize, Light.move(row.Dir), row.Change, AlignRight)
 				}
 			},
 		})

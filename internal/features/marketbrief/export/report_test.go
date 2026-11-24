@@ -113,7 +113,7 @@ func TestReportPDFBytes(t *testing.T) {
 	for name, d := range map[string]Doc{
 		"en": fixtureDoc("en"), "pt-PT": fixtureDoc("pt-PT"), "legacy": legacyDoc(),
 		"open-en": openDoc(), "many": manyStoriesDoc(), "rich-en": richReportDoc("en"), "rich-pt-PT": richReportDoc("pt-PT"),
-		"worst": worstCaseDoc(),
+		"worst": worstCaseDoc(), "full": fullCoverDoc(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			b, mime, err := Render(FormatPDF, d)
@@ -318,9 +318,8 @@ func TestReportUsesTheLightPalette(t *testing.T) {
 			if dark[[3]uint8{op.Color.R, op.Color.G, op.Color.B}] {
 				t.Errorf("%s: %s op in a dark-palette color %v: %+v", d.Lang, op.Kind, op.Color, op)
 			}
-			if op.Kind != "text" {
-				continue
-			}
+		}
+		for _, op := range textRuns(rec) {
 			dir, isMove := moves[op.Text]
 			if op.Text == "▲" || op.Text == "▼" {
 				if op.Color != Light.Gain && op.Color != Light.Loss {
@@ -380,3 +379,100 @@ func TestReportCreationDateIsFixed(t *testing.T) {
 		}
 	}
 }
+
+// fullCoverDoc is a Close at production size: six cards (both groups, each
+// with a spark), a three-line headline, a four-line dek and a long lead.
+func fullCoverDoc() Doc {
+	d := richReportDoc("en")
+	d.Headline = "Wall Street closes lower as the Nasdaq 100 falls 5.62% and the S&P 500 drops 3.70% on AI doubts"
+	d.Dek = strings.Repeat("US equities fell broadly as renewed AI valuation concerns and higher yields pressured technology stocks. ", 3)
+	d.Lead.Text = strings.Repeat("Nvidia fell 13.65%, its steepest one-day drop in two years, as investors questioned near-term AI spending. ", 4)
+	d.Cards = append(d.Cards,
+		Card{Name: "CAC 40", Meta: "FCHI · FR", Level: "7,912.44", Change: "−141.02", ChangePct: "−1.75%", Dir: "down", Spark: d.Cards[2].Spark, PrevClose: d.Cards[2].PrevClose},
+		Card{Name: "Euro Stoxx 50", Meta: "STOXX50E · EU", Level: "5,402.17", Change: "−98.65", ChangePct: "−1.79%", Dir: "down", Spark: d.Cards[1].Spark, PrevClose: d.Cards[1].PrevClose},
+	)
+	d.Cards[3].Spark, d.Cards[3].PrevClose = d.Cards[2].Spark, d.Cards[2].PrevClose
+	return d
+}
+
+// A lead story that spills off the cover shares its page with the chart:
+// the break before market performance is only ever a way off the cover.
+func TestReportSpilledLeadSharesItsPage(t *testing.T) {
+	d := fullCoverDoc()
+	rec, _ := recordReport(d)
+	leadPage, chartPage := -1, -1
+	for _, op := range rec.Ops {
+		if op.Kind == "text" && strings.HasPrefix(op.Text, "Nvidia fell") {
+			leadPage = op.Page
+		}
+		if op.Kind == "polyline" && op.Page > 0 && chartPage < 0 {
+			chartPage = op.Page
+		}
+	}
+	if leadPage < 1 {
+		t.Fatalf("premise: the lead is on page %d; this doc should push it off the cover", leadPage+1)
+	}
+	if chartPage != leadPage {
+		t.Errorf("the spilled lead is alone on page %d; the chart starts on page %d", leadPage+1, chartPage+1)
+	}
+}
+
+// textRuns joins consecutive text ops that share a line, face, size, color
+// and page: tabular figures and tracked labels are drawn a glyph at a time.
+func textRuns(rec *RecordingSurface) []Op {
+	var out []Op
+	for _, op := range textOps(rec) {
+		if n := len(out); n > 0 {
+			last := &out[n-1]
+			if last.Y == op.Y && last.Font == op.Font && last.Size == op.Size && last.Color == op.Color && last.Page == op.Page {
+				last.Text += op.Text
+				continue
+			}
+		}
+		out = append(out, op)
+	}
+	return out
+}
+
+// Table figures are tabular: every digit sits in a cell as wide as the
+// face's widest digit, so "1" takes as much room as "0" and decimals stack.
+func TestReportFiguresAreTabular(t *testing.T) {
+	d := fixtureDoc("en")
+	rec, _ := recordReport(d)
+	// The tables set their figures a glyph at a time, through tabularText.
+	// (A cross-asset level shares its line, face and color with the name
+	// before it, so its run ends with the figure. The chart legend repeats
+	// the lead's move as text, so the cover's change % is not listed.)
+	for _, fig := range []string{d.Cards[0].Level, d.Cards[0].Change, d.Cards[1].Level, d.CrossAsset[1].Level, d.CrossAsset[1].Change} {
+		found := false
+		for _, run := range textRuns(rec) {
+			found = found || strings.HasSuffix(run.Text, fig)
+		}
+		if !found {
+			t.Errorf("figure %q not drawn", fig)
+		}
+		for _, op := range textOps(rec) {
+			if op.Text == fig {
+				t.Errorf("figure %q drawn as one proportional run", fig)
+			}
+		}
+	}
+	// In the real face the 1 is narrower than the 0, and tabularText still
+	// gives both the same width.
+	p := NewPDFSurface()
+	for _, f := range []Font{SansRegular, SansSemiBold} {
+		if p.Measure(f, 10, "1") >= p.Measure(f, 10, "0") {
+			t.Errorf("premise: font %d's 1 is not narrower than its 0", f)
+		}
+		ones := tabularText(measureOnly{p}, 0, 0, f, 10, Light.Text, "11.11", AlignLeft)
+		zeros := tabularText(measureOnly{p}, 0, 0, f, 10, Light.Text, "00.00", AlignLeft)
+		if math.Abs(ones-zeros) > 1e-9 {
+			t.Errorf("font %d: 11.11 is %.3f wide and 00.00 %.3f", f, ones, zeros)
+		}
+	}
+}
+
+// measureOnly measures with a real surface and draws nothing.
+type measureOnly struct{ *PDFSurface }
+
+func (measureOnly) Text(float64, float64, Font, float64, color.RGBA, string, Align) {}

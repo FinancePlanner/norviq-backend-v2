@@ -91,13 +91,21 @@ func RunSnapshotTick(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logg
 			logger.Warn("portfolio_snapshot capture failed", "portfolio_list_id", apijson.FormatUUID(l.ID), "error", err)
 			continue
 		}
-		logger.Info("portfolio_snapshot outcome", "list_id", apijson.FormatUUID(l.ID),
+		// The tick runs hourly, so no-ops (already captured, market closed,
+		// nothing held) repeat all day and log at Debug; writes log at Info.
+		// priced and missing count positions (stock rows), not symbols.
+		level := slog.LevelDebug
+		if out.Kind == CaptureCaptured || out.Kind == CaptureCapturedPartial {
+			level = slog.LevelInfo
+		}
+		logger.Log(ctx, level, "portfolio_snapshot outcome", "portfolio_list_id", apijson.FormatUUID(l.ID),
 			"outcome", out.Kind.String(), "priced", out.Priced, "missing", out.Missing)
 	}
 }
 
-// CaptureOutcome is what one capture did, with the symbol counts it
-// priced and could not price (zero unless a row was valued).
+// CaptureOutcome is what one capture did, with how many positions (stock
+// rows, not distinct symbols) it priced and could not price; both are zero
+// unless a row was valued.
 type CaptureOutcome struct {
 	Kind    CaptureKind
 	Priced  int

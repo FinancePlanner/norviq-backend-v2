@@ -338,9 +338,48 @@ func TestSnapshotTickLogsEachOutcome(t *testing.T) {
 			line = s
 		}
 	}
-	for _, want := range []string{"level=INFO", "outcome=captured_partial", "priced=1", "missing=1"} {
+	for _, want := range []string{"level=INFO", "portfolio_list_id=", "outcome=captured_partial", "priced=1", "missing=1"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("missing %q in %q\nall: %s", want, line, buf.String())
+		}
+	}
+}
+
+// tickLine runs one tick at now and returns the log line for list l.
+func (h *jobHarness) tickLine(l portfoliodb.PortfolioList, now time.Time) string {
+	h.T.Helper()
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	portfolio.RunSnapshotTick(h.ctx, h.Deps.DB, logger, now)
+	for _, s := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(s, strings.ToUpper(l.ID.String())) {
+			return s
+		}
+	}
+	h.T.Fatalf("no line for %s in %s", l.ID, buf.String())
+	return ""
+}
+
+// The hourly tick repeats no-ops all day: those log at Debug, writes at Info.
+func TestSnapshotTickLogsNoOpsAtDebug(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-loglevel@example.com")
+	l := h.listRow(user, "Levels", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	for _, c := range []struct {
+		now   time.Time
+		level string
+		kind  string
+	}{
+		{friday, "level=INFO", "outcome=captured"},
+		{friday, "level=DEBUG", "outcome=already_captured"},
+		{friday.Add(24 * time.Hour), "level=DEBUG", "outcome=market_closed"},
+	} {
+		line := h.tickLine(l, c.now)
+		if !strings.Contains(line, c.level) || !strings.Contains(line, c.kind+" ") || !strings.Contains(line, "portfolio_list_id=") || strings.Contains(line, " list_id=") {
+			t.Fatalf("want %s %s: %q", c.level, c.kind, line)
 		}
 	}
 }

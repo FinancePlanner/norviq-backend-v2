@@ -205,13 +205,17 @@ const staleAfterDays = 4
 // PerformanceChanges is PortfolioPerformanceBuilder.changes(from:asOf:).
 // days must be the full stored history. Day and Week are omitted when the
 // latest day is more than staleAfterDays calendar days before asOf (UTC).
+// Day is also omitted when the previous day is more than staleAfterDays
+// before the latest, and Week when its baseline is more than
+// 7+staleAfterDays before it: a gap in capture is not a day's or a week's move.
 func PerformanceChanges(days []PerformanceDay, asOf time.Time) *PortfolioChanges {
 	if len(days) < 2 {
 		return nil
 	}
 	latest := days[len(days)-1]
-	stale := StartOfDay(asOf).Sub(StartOfDay(latest.Date)) > staleAfterDays*24*time.Hour
+	stale := daysBetween(latest.Date, asOf) > staleAfterDays
 	prev := days[len(days)-2]
+	weekFrom := baseline(days, AddDays(latest.Date, -7))
 	yearStart := startOfYear(asOf)
 	ytdFrom := baseline(days, yearStart)
 	if ytdFrom == nil {
@@ -224,18 +228,26 @@ func PerformanceChanges(days []PerformanceDay, asOf time.Time) *PortfolioChanges
 	}
 	c := PortfolioChanges{
 		Day:            change(latest, &prev, BasisPreviousTradingDay),
-		Week:           change(latest, baseline(days, AddDays(latest.Date, -7)), BasisWeek),
+		Week:           change(latest, weekFrom, BasisWeek),
 		Month:          change(latest, baseline(days, AddDays(latest.Date, -30)), BasisMonth),
 		YTD:            change(latest, ytdFrom, BasisYTD),
 		SinceInception: change(latest, &days[0], BasisInception),
 	}
-	if stale {
-		c.Day, c.Week = nil, nil
+	if stale || daysBetween(prev.Date, latest.Date) > staleAfterDays {
+		c.Day = nil
+	}
+	if stale || (weekFrom != nil && daysBetween(weekFrom.Date, latest.Date) > 7+staleAfterDays) {
+		c.Week = nil
 	}
 	if c.Day == nil && c.Week == nil && c.Month == nil && c.YTD == nil && c.SinceInception == nil {
 		return nil
 	}
 	return &c
+}
+
+// daysBetween is the whole calendar days (UTC) from a to b.
+func daysBetween(a, b time.Time) int {
+	return int(StartOfDay(b).Sub(StartOfDay(a)) / (24 * time.Hour))
 }
 
 // baseline is the most recent day at or before target.

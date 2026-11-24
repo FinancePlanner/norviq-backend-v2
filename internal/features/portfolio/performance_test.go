@@ -61,3 +61,57 @@ func TestPerformanceChanges_StaleBoundaryIsFourCalendarDays(t *testing.T) {
 		t.Fatalf("5 days old kept: %+v", stale)
 	}
 }
+
+// Capture resumed after a gap: the latest day is fresh, but "vs previous
+// trading day" would be 11 Nov → 25 Nov.
+func TestPerformanceChanges_GapBeforeLatestDropsDay(t *testing.T) {
+	days := []PerformanceDay{
+		{Date: utcDay("2026-11-11"), TotalValue: 900},
+		{Date: utcDay("2026-11-25"), TotalValue: 1000},
+	}
+	c := PerformanceChanges(days, time.Date(2026, 11, 25, 15, 0, 0, 0, time.UTC))
+	if c == nil || c.SinceInception == nil {
+		t.Fatalf("changes %+v", c)
+	}
+	if c.Day != nil || c.Week != nil {
+		t.Fatalf("gap kept: day %+v week %+v", c.Day, c.Week)
+	}
+}
+
+// A gap of four calendar days is still a previous trading day; five is not.
+func TestPerformanceChanges_GapBoundaryIsFourCalendarDays(t *testing.T) {
+	asOf := time.Date(2026, 11, 25, 15, 0, 0, 0, time.UTC)
+	kept := PerformanceChanges([]PerformanceDay{
+		{Date: utcDay("2026-11-21"), TotalValue: 900},
+		{Date: utcDay("2026-11-25"), TotalValue: 1000},
+	}, asOf)
+	if kept == nil || kept.Day == nil {
+		t.Fatalf("4-day gap dropped: %+v", kept)
+	}
+	dropped := PerformanceChanges([]PerformanceDay{
+		{Date: utcDay("2026-11-20"), TotalValue: 900},
+		{Date: utcDay("2026-11-25"), TotalValue: 1000},
+	}, asOf)
+	if dropped == nil || dropped.Day != nil {
+		t.Fatalf("5-day gap kept: %+v", dropped)
+	}
+}
+
+// The week baseline may be up to 7+4 days before the latest day; older is
+// not a week's change. Day is unaffected.
+func TestPerformanceChanges_OldWeekBaselineDropsWeek(t *testing.T) {
+	asOf := time.Date(2026, 11, 25, 15, 0, 0, 0, time.UTC)
+	week := func(baseline string) *PortfolioChanges {
+		return PerformanceChanges([]PerformanceDay{
+			{Date: utcDay(baseline), TotalValue: 800},
+			{Date: utcDay("2026-11-24"), TotalValue: 990},
+			{Date: utcDay("2026-11-25"), TotalValue: 1000},
+		}, asOf)
+	}
+	if c := week("2026-11-14"); c == nil || c.Week == nil || c.Day == nil {
+		t.Fatalf("11-day week baseline dropped: %+v", c)
+	}
+	if c := week("2026-11-13"); c == nil || c.Week != nil || c.Day == nil {
+		t.Fatalf("12-day week baseline kept, or day lost: %+v", c)
+	}
+}

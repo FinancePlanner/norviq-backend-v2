@@ -32,3 +32,15 @@ func TestLogoDarkDecoded(t *testing.T) {
 		t.Fatalf("logo has empty bounds %v", b)
 	}
 }
+
+// The light mark replaces the dark one on paper, so it must share its
+// shape: the layouts size both by one aspect ratio.
+func TestLogoLightDecoded(t *testing.T) {
+	b, dark := LogoLight.Bounds(), LogoDark.Bounds()
+	if b.Dx() != 313 || b.Dy() != 367 || b.Dx() != dark.Dx() || b.Dy() != dark.Dy() {
+		t.Fatalf("light logo is %v, want 313x367 like the dark one (%v)", b, dark)
+	}
+	if LogoLight.At(b.Dx()/2, b.Dy()/2) == LogoDark.At(b.Dx()/2, b.Dy()/2) && LogoLight.At(b.Dx()/3, b.Dy()/2) == LogoDark.At(b.Dx()/3, b.Dy()/2) {
+		t.Error("light logo looks identical to the dark one")
+	}
+}

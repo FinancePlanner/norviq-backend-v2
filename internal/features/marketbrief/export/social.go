@@ -173,7 +173,7 @@ func drawFooter(s Surface, d Doc, left, right float64, l portraitLayout) float64
 // drawHeader draws the symbol, the brand line and, when given, the edition
 // name right-aligned in gold over a gold rule. It returns the header's bottom.
 func drawHeader(s Surface, left, right, top, logoH, brandSize float64, edition string, editionSize float64) float64 {
-	lw := drawLogo(s, left, top, logoH)
+	lw := drawLogo(s, LogoDark, left, top, logoH)
 	mid := top + logoH/2
 	brandBase := math.Round(mid + brandSize*capHeight/2)
 	x := left + lw + math.Round(logoH*0.3)

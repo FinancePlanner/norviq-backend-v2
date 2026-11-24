@@ -422,9 +422,9 @@ func (r *report) cardRow(c *Card, last bool) reportBlock {
 				drawSpark(s, c.Spark, c.PrevClose, r.right-colSpark-sparkW, mid-sparkH/2, sparkW, sparkH, col)
 			}
 			base := mid + figureSize*capHeight/2
-			tabularText(s, r.right-colLevel, base, SansRegular, figureSize, Light.Text, c.Level, AlignRight)
+			s.Text(r.right-colLevel, base, SansRegular, figureSize, Light.Text, c.Level, AlignRight)
 			if c.Change != "" {
-				tabularText(s, r.right-colChange, base, SansRegular, figureSize, col, c.Change, AlignRight)
+				s.Text(r.right-colChange, base, SansRegular, figureSize, col, c.Change, AlignRight)
 			}
 			drawMoveRight(s, r.right-colPct, base, SansSemiBold, figureSize, col, c.Dir, c.ChangePct)
 			if !last {
@@ -436,44 +436,11 @@ func (r *report) cardRow(c *Card, last bool) reportBlock {
 
 // drawMoveRight sets a move's figure right-aligned at x, its arrow before it.
 func drawMoveRight(s Surface, x, base float64, f Font, size float64, col color.RGBA, dir, figure string) {
-	w := tabularText(s, x, base, f, size, col, figure, AlignRight)
+	s.Text(x, base, f, size, col, figure, AlignRight)
 	if a := dirArrow(dir); a != "" {
 		as := math.Round(size*arrowScale*10) / 10
-		s.Text(x-w-size*arrowGap, base-size*0.06, SansRegular, as, col, a, AlignRight)
+		s.Text(x-s.Measure(f, size, figure)-size*arrowGap, base-size*0.06, SansRegular, as, col, a, AlignRight)
 	}
-}
-
-// tabularText sets a figure as tabular figures: Geist's default digits are
-// proportional (a 1 is far narrower than a 0), and the surfaces cannot
-// switch on its tnum feature, so each digit is centered in a cell as wide
-// as the face's widest digit, and a column of figures stacks digit over
-// digit. Other characters keep their own width. It returns the width.
-func tabularText(s Surface, x, base float64, f Font, size float64, c color.RGBA, txt string, a Align) float64 {
-	cell := 0.0
-	for _, d := range "0123456789" {
-		cell = math.Max(cell, s.Measure(f, size, string(d)))
-	}
-	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
-	w := 0.0
-	for _, r := range txt {
-		if isDigit(r) {
-			w += cell
-		} else {
-			w += s.Measure(f, size, string(r))
-		}
-	}
-	cx := alignedX(x, w, a)
-	for _, r := range txt {
-		ch := string(r)
-		if isDigit(r) {
-			s.Text(cx+cell/2, base, f, size, c, ch, AlignCenter)
-			cx += cell
-			continue
-		}
-		s.Text(cx, base, f, size, c, ch, AlignLeft)
-		cx += s.Measure(f, size, ch)
-	}
-	return w
 }
 
 // drawSpark draws a session's values in a small box, the previous close
@@ -623,9 +590,9 @@ func (r *report) crossBlocks() []reportBlock {
 				s.Line(r.left, top, r.right, top, rHair, paperRule, 0)
 				base := top + crossRowH/2 + crossSize*capHeight/2
 				s.Text(r.left, base, SansRegular, crossSize, Light.Text, name, AlignLeft)
-				tabularText(s, r.right-colChange, base, SansRegular, crossSize, Light.Text, row.Level, AlignRight)
+				s.Text(r.right-colChange, base, SansRegular, crossSize, Light.Text, row.Level, AlignRight)
 				if row.Change != "" {
-					tabularText(s, r.right, base, SansSemiBold, crossSize, Light.move(row.Dir), row.Change, AlignRight)
+					s.Text(r.right, base, SansSemiBold, crossSize, Light.move(row.Dir), row.Change, AlignRight)
 				}
 			},
 		})
@@ -837,7 +804,7 @@ func wrapTracked(s Surface, f Font, size, width float64, txt string) []string {
 // and its date set right, the gold rule, then the edition's credits.
 func (r *report) drawMasthead(edition, date string) {
 	s, d, str := r.s, r.d, r.str
-	lw := drawLogo(s, r.left, coverTop, rLogoH)
+	lw := drawLogo(s, LogoLight, r.left, coverTop, rLogoH)
 	mid := coverTop + rLogoH/2
 	const brand, sub = 12.5, 8.0
 	x := r.left + lw + 12

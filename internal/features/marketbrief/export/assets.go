@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"embed"
 	"image"
-	_ "image/png" // registers the PNG decoder for LogoDark
+	_ "image/png" // registers the PNG decoder for the logos
 )
 
-//go:embed assets/fonts/*.ttf assets/logo-symbol-dark.png
+//go:embed assets/fonts/*.ttf assets/logo-symbol-dark.png assets/logo-symbol-light.png
 var assetFS embed.FS
 
 // Font names one of the embedded typefaces. Serif is Brygada 1918 (headlines), sans is Geist (body and data).
@@ -44,12 +44,16 @@ func FontBytes(f Font) []byte {
 	return b
 }
 
-// LogoDark is the brand symbol for dark backgrounds. It decodes once at init and panics on failure
-// because the asset is embedded and a bad build should not reach production.
-var LogoDark = mustLogo()
+// LogoDark is the brand symbol for dark backgrounds, LogoLight the approved mark for light ones
+// (the paper report). Each decodes once at init and panics on failure because the asset is
+// embedded and a bad build should not reach production.
+var (
+	LogoDark  = mustLogo("assets/logo-symbol-dark.png")
+	LogoLight = mustLogo("assets/logo-symbol-light.png")
+)
 
-func mustLogo() image.Image {
-	b, err := assetFS.ReadFile("assets/logo-symbol-dark.png")
+func mustLogo(name string) image.Image {
+	b, err := assetFS.ReadFile(name)
 	if err != nil {
 		panic("export: embedded logo missing: " + err.Error())
 	}

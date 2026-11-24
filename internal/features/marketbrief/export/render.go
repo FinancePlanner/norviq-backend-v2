@@ -2,6 +2,7 @@ package export
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"math"
 	"strconv"
@@ -304,10 +305,10 @@ func drawMove(s Surface, x, baseline float64, f Font, size float64, c *Card) flo
 }
 
 // drawLogo draws the symbol h tall with its top-left corner at x, y and
-// returns its width.
-func drawLogo(s Surface, x, y, h float64) float64 {
+// returns its width: LogoDark on the dark formats, LogoLight on paper.
+func drawLogo(s Surface, logo image.Image, x, y, h float64) float64 {
 	w := math.Round(h * logoAspect)
-	s.Image(LogoDark, x, y, w, h)
+	s.Image(logo, x, y, w, h)
 	return w
 }
 

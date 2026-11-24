@@ -2,14 +2,18 @@ package export
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
+	"image"
 	"image/color"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // A4 in points.
@@ -418,7 +422,7 @@ func TestReportSpilledLeadSharesItsPage(t *testing.T) {
 }
 
 // textRuns joins consecutive text ops that share a line, face, size, color
-// and page: tabular figures and tracked labels are drawn a glyph at a time.
+// and page: tracked labels are drawn a glyph at a time.
 func textRuns(rec *RecordingSurface) []Op {
 	var out []Op
 	for _, op := range textOps(rec) {
@@ -434,45 +438,120 @@ func textRuns(rec *RecordingSurface) []Op {
 	return out
 }
 
-// Table figures are tabular: every digit sits in a cell as wide as the
-// face's widest digit, so "1" takes as much room as "0" and decimals stack.
-func TestReportFiguresAreTabular(t *testing.T) {
-	d := fixtureDoc("en")
-	rec, _ := recordReport(d)
-	// The tables set their figures a glyph at a time, through tabularText.
-	// (A cross-asset level shares its line, face and color with the name
-	// before it, so its run ends with the figure. The chart legend repeats
-	// the lead's move as text, so the cover's change % is not listed.)
-	for _, fig := range []string{d.Cards[0].Level, d.Cards[0].Change, d.Cards[1].Level, d.CrossAsset[1].Level, d.CrossAsset[1].Change} {
-		found := false
-		for _, run := range textRuns(rec) {
-			found = found || strings.HasSuffix(run.Text, fig)
+// pdfShownText is every string a PDF's content streams show with Tj,
+// decoded: fpdf writes UTF-8 fonts' text as escaped UTF-16BE inside
+// FlateDecode streams.
+func pdfShownText(t *testing.T, pdf []byte) []string {
+	t.Helper()
+	streams := regexp.MustCompile(`(?s)stream\r?\n(.*?)\r?\nendstream`)
+	shown := regexp.MustCompile(`\(((?:[^()\\]|\\.)*)\)\s*Tj`)
+	var out []string
+	for _, m := range streams.FindAllSubmatch(pdf, -1) {
+		zr, err := zlib.NewReader(bytes.NewReader(m[1]))
+		if err != nil {
+			continue // not a Flate stream (fonts and images carry their own)
 		}
-		if !found {
-			t.Errorf("figure %q not drawn", fig)
+		body, err := io.ReadAll(zr)
+		if err != nil {
+			continue
 		}
-		for _, op := range textOps(rec) {
-			if op.Text == fig {
-				t.Errorf("figure %q drawn as one proportional run", fig)
+		for _, s := range shown.FindAllSubmatch(body, -1) {
+			raw := unescapePDF(s[1])
+			u := make([]uint16, 0, len(raw)/2)
+			for i := 0; i+1 < len(raw); i += 2 {
+				u = append(u, uint16(raw[i])<<8|uint16(raw[i+1]))
 			}
+			out = append(out, string(utf16.Decode(u)))
 		}
 	}
-	// In the real face the 1 is narrower than the 0, and tabularText still
-	// gives both the same width.
-	p := NewPDFSurface()
-	for _, f := range []Font{SansRegular, SansSemiBold} {
-		if p.Measure(f, 10, "1") >= p.Measure(f, 10, "0") {
-			t.Errorf("premise: font %d's 1 is not narrower than its 0", f)
+	return out
+}
+
+// unescapePDF undoes a literal string's backslash escapes.
+func unescapePDF(b []byte) []byte {
+	var out []byte
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' || i+1 == len(b) {
+			out = append(out, b[i])
+			continue
 		}
-		ones := tabularText(measureOnly{p}, 0, 0, f, 10, Light.Text, "11.11", AlignLeft)
-		zeros := tabularText(measureOnly{p}, 0, 0, f, 10, Light.Text, "00.00", AlignLeft)
-		if math.Abs(ones-zeros) > 1e-9 {
-			t.Errorf("font %d: 11.11 is %.3f wide and 00.00 %.3f", f, ones, zeros)
+		i++
+		switch c := b[i]; c {
+		case 'n':
+			out = append(out, '\n')
+		case 'r':
+			out = append(out, '\r')
+		case 't':
+			out = append(out, '\t')
+		case 'b':
+			out = append(out, '\b')
+		case 'f':
+			out = append(out, '\f')
+		default:
+			if c >= '0' && c <= '7' {
+				v, n := 0, 0
+				for ; n < 3 && i+n < len(b) && b[i+n] >= '0' && b[i+n] <= '7'; n++ {
+					v = v*8 + int(b[i+n]-'0')
+				}
+				out = append(out, byte(v))
+				i += n - 1
+				continue
+			}
+			out = append(out, c) // \\, \( and \)
+		}
+	}
+	return out
+}
+
+// A figure is one run of text in the PDF, so it copies, searches and reads
+// aloud whole: never a digit at a time.
+func TestReportFiguresExtractAsText(t *testing.T) {
+	d := richReportDoc("en")
+	b, _, err := Render(FormatPDF, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := pdfShownText(t, b)
+	if len(shown) == 0 {
+		t.Fatal("premise: no text found in the PDF's content streams")
+	}
+	whole := map[string]bool{}
+	for _, s := range shown {
+		whole[s] = true
+	}
+	figures := []string{d.Cards[1].Level, d.Cards[0].Change, d.Cards[2].Level, d.Cards[0].ChangePct, d.CrossAsset[2].Level, d.CrossAsset[0].Change}
+	if want := []string{"6,910.12", "−1,490.32", "48,147.33"}; figures[0] != want[0] || figures[1] != want[1] || figures[2] != want[2] {
+		t.Fatalf("premise: fixture figures %q, want %q first", figures[:3], want)
+	}
+	for _, fig := range figures {
+		if !whole[fig] {
+			t.Errorf("figure %q is not one text run in the PDF", fig)
 		}
 	}
 }
 
-// measureOnly measures with a real surface and draws nothing.
-type measureOnly struct{ *PDFSurface }
+// imageSurface records which images are drawn.
+type imageSurface struct {
+	*RecordingSurface
+	images []image.Image
+}
 
-func (measureOnly) Text(float64, float64, Font, float64, color.RGBA, string, Align) {}
+func (s *imageSurface) Image(img image.Image, x, y, w, h float64) {
+	s.images = append(s.images, img)
+	s.RecordingSurface.Image(img, x, y, w, h)
+}
+
+// The paper report's mark is the light-background logo; the dark one's
+// silver N washes out on paper.
+func TestReportUsesTheLightLogo(t *testing.T) {
+	s := &imageSurface{RecordingSurface: &RecordingSurface{W: testA4W, H: testA4H}}
+	DrawReport(s, fixtureDoc("en"))
+	if len(s.images) == 0 {
+		t.Fatal("no logo drawn")
+	}
+	for _, img := range s.images {
+		if img != LogoLight {
+			t.Errorf("report drew an image other than LogoLight")
+		}
+	}
+}

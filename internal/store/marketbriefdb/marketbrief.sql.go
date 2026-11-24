@@ -270,7 +270,7 @@ func (q *Queries) MarketBriefBeforeDay(ctx context.Context, arg MarketBriefBefor
 }
 
 const marketBriefEdition = `-- name: MarketBriefEdition :one
-SELECT revision, edition FROM market_briefs
+SELECT revision, edition, content_hash, payload FROM market_briefs
 WHERE trading_date = $1 AND slot = $2
 ORDER BY language ASC
 LIMIT 1
@@ -282,15 +282,23 @@ type MarketBriefEditionParams struct {
 }
 
 type MarketBriefEditionRow struct {
-	Revision int32
-	Edition  json.RawMessage
+	Revision    int32
+	Edition     json.RawMessage
+	ContentHash *string
+	Payload     string
 }
 
 // The edition is language-neutral; every language row of a slot holds the same one.
+// content_hash is NULL on a legacy row; payload lets the caller derive one.
 func (q *Queries) MarketBriefEdition(ctx context.Context, arg MarketBriefEditionParams) (MarketBriefEditionRow, error) {
 	row := q.db.QueryRow(ctx, marketBriefEdition, arg.TradingDate, arg.Slot)
 	var i MarketBriefEditionRow
-	err := row.Scan(&i.Revision, &i.Edition)
+	err := row.Scan(
+		&i.Revision,
+		&i.Edition,
+		&i.ContentHash,
+		&i.Payload,
+	)
 	return i, err
 }
 

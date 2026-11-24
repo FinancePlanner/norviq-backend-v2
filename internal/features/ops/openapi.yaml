@@ -2187,6 +2187,76 @@ paths:
           description: Token lacks the market:read scope
         '404':
           description: No brief for that date and slot
+  /v1/market/brief/exports:
+    get:
+      operationId: getMarketBriefExports
+      tags: [MarketData]
+      summary: Shareable renders available for a brief
+      description: >-
+        Lists the image and PDF renders of one brief with the revision and
+        content hash they are cached under. The same for every caller.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date }, description: 'Lisbon trading date, `yyyy-MM-dd`.' }
+        - { name: slot, in: query, required: true, schema: { type: string, enum: [morning, evening] } }
+        - { name: lang, in: query, required: false, schema: { type: string, default: en }, description: '`en` or `pt-PT`; anything starting with `pt` is `pt-PT`.' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketBriefExportManifest'
+        '400':
+          description: Unknown slot or malformed date
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the market:read scope
+        '404':
+          description: No brief for that date and slot
+  /v1/market/brief/export:
+    get:
+      operationId: getMarketBriefExport
+      tags: [MarketData]
+      summary: One render of a brief (PNG or PDF)
+      description: >-
+        The bytes are identical for every caller. `ETag` is
+        `"<contentHash>-<format>-<lang>-v<rendererVersion>"`. With `rev` equal
+        to the current revision the response is immutable; without `rev` it
+        is cached for five minutes. A `rev` that is no longer current is a 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: slot, in: query, required: true, schema: { type: string, enum: [morning, evening] } }
+        - { name: lang, in: query, required: false, schema: { type: string, default: en } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [og, social, story, pdf] } }
+        - { name: rev, in: query, required: false, schema: { type: integer, minimum: 1 }, description: Revision from the manifest. }
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The file
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+            Content-Disposition: { schema: { type: string } }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '304':
+          description: Not modified
+        '400':
+          description: Unknown slot or format, malformed date or rev
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the market:read scope
+        '404':
+          description: No brief for that date and slot, or `rev` is superseded (reason `revision superseded`)
   /v1/market/brief/notifications:
     get:
       operationId: getMarketBriefNotificationPreferences
@@ -15614,6 +15684,25 @@ components:
         asOf: { type: string, format: date-time }
         source: { type: string }
       required: [symbol, interval, points, asOf, source]
+    MarketBriefExportManifest:
+      type: object
+      properties:
+        editionId: { type: string, description: 'Empty for a brief written before editions existed.' }
+        revision: { type: integer, minimum: 1 }
+        contentHash: { type: string }
+        rendererVersion: { type: integer }
+        formats:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, enum: [og, social, story, pdf] }
+              width: { type: integer }
+              height: { type: integer }
+              pages: { type: integer, description: PDF only. }
+              mime: { type: string }
+            required: [id, mime]
+      required: [editionId, revision, contentHash, rendererVersion, formats]
     MarketBriefRef:
       type: object
       properties:

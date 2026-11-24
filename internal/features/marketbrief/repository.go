@@ -2,6 +2,8 @@ package marketbrief
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -26,6 +28,10 @@ type Repository interface {
 	// Edition is the slot's structured market data, nil for a legacy brief
 	// or a slot that does not exist.
 	Edition(ctx context.Context, tradingDate, slot string) (*Edition, error)
+	// ContentHash fingerprints what a slot publishes, with its revision. A
+	// legacy row has no stored hash, so one is computed from its payload.
+	// A slot with no row returns ErrBriefNotFound.
+	ContentHash(ctx context.Context, tradingDate, slot string) (hash string, revision int, err error)
 	Latest(ctx context.Context, language string) (*Response, error)
 	Find(ctx context.Context, tradingDate, slot, language string) (*Response, error)
 	// Previous is the brief stored just before (tradingDate, slot) in this
@@ -121,6 +127,25 @@ func (r DBRepository) Edition(ctx context.Context, tradingDate, slot string) (*E
 		return nil, err
 	}
 	return decodeEdition(row.Edition), nil
+}
+
+// ErrBriefNotFound is what ContentHash returns for a slot with no row.
+var ErrBriefNotFound = errors.New("marketbrief: no brief for that slot")
+
+// ContentHash implements Repository.
+func (r DBRepository) ContentHash(ctx context.Context, tradingDate, slot string) (string, int, error) {
+	row, err := r.q().MarketBriefEdition(ctx, marketbriefdb.MarketBriefEditionParams{TradingDate: tradingDate, Slot: slot})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", 0, ErrBriefNotFound
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	if row.ContentHash != nil && *row.ContentHash != "" {
+		return *row.ContentHash, int(row.Revision), nil
+	}
+	sum := sha256.Sum256([]byte(row.Payload))
+	return hex.EncodeToString(sum[:])[:16], int(row.Revision), nil
 }
 
 // Latest implements Repository: by trading day, not by write time, so a

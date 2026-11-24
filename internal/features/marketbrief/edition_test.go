@@ -55,6 +55,11 @@ func TestYieldMovesInBasisPoints(t *testing.T) {
 			t.Errorf("%v not grounded in %v", want, grounded)
 		}
 	}
+	for _, g := range grounded {
+		if g == 2.77 || g == -2.77 {
+			t.Fatalf("a yield's relative change must not ground a line: %v", grounded)
+		}
+	}
 	raw, _ := json.Marshal(f.Quotes)
 	if !strings.Contains(string(raw), `"changeBps":-14`) || strings.Count(string(raw), "changeBps") != 1 {
 		t.Fatal(string(raw))

@@ -130,9 +130,13 @@ func buildFacts(slot, tradingDate string, quotes []yahoochart.Quote, news []news
 func (f Facts) GroundedNumbers() []float64 {
 	var out []float64
 	for _, q := range f.Quotes {
-		out = append(out, q.Price, q.PreviousClose, q.ChangePercent, math.Abs(q.ChangePercent))
+		out = append(out, q.Price, q.PreviousClose)
+		// A yield's changePercent is relative: "the 10-year fell 2.77%" is
+		// wrong, so an unsourced line may only carry its basis points.
 		if q.ChangeBps != nil {
 			out = append(out, *q.ChangeBps, math.Abs(*q.ChangeBps), math.Round(math.Abs(*q.ChangeBps)))
+		} else {
+			out = append(out, q.ChangePercent, math.Abs(q.ChangePercent))
 		}
 	}
 	for _, e := range f.Earnings {

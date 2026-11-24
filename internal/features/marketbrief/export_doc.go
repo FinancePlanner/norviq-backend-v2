@@ -170,6 +170,11 @@ func drawable(s string) string {
 	b.Grow(len(s))
 	space := false // a space is owed before the next drawn rune
 	for _, r := range s {
+		// Hyphen variants map to '-' first: dropping them can lose a minus sign.
+		switch r {
+		case '‐', '‑', '‒':
+			r = '-'
+		}
 		switch {
 		case r == ' ' || (unicode.IsSpace(r) && !export.HasGlyph(r)):
 			space = true

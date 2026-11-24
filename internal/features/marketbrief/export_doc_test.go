@@ -318,3 +318,18 @@ func TestBuildDocStripsNonBMP(t *testing.T) {
 		t.Errorf("double space left in %s", b)
 	}
 }
+
+func TestDrawableMapsHyphenVariants(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"‐1.2%", "-1.2%"},                   // U+2010 HYPHEN
+		{"year‑over‑year", "year-over-year"}, // U+2011 NON-BREAKING HYPHEN
+		{"S&P‑500", "S&P-500"},
+		{"re‐rated", "re-rated"},
+		{"a‒b", "a-b"}, // U+2012 FIGURE DASH
+	}
+	for _, c := range cases {
+		if got := drawable(c.in); got != c.want {
+			t.Errorf("drawable(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

@@ -107,7 +107,7 @@ func drawCardStack(s Surface, cards []Card, x, w float64) {
 		s.Text(x, levelBase, SansSemiBold, levelSize, Dark.Text, c.Level, AlignLeft)
 		end := drawMove(s, x, moveBase, SansSemiBold, ogMoveSize, c)
 		if c.Change != "" && end+ogMoveSize*0.5+s.Measure(SansRegular, ogChangeSize, c.Change) <= x+w {
-			s.Text(x+w, moveBase, SansRegular, ogChangeSize, Dark.Muted, c.Change, AlignRight)
+			s.Text(x+w, moveBase, SansRegular, ogChangeSize, dirColor(c.Dir), c.Change, AlignRight)
 		}
 	}
 }

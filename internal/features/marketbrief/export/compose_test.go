@@ -229,7 +229,8 @@ func TestSocialDrawsTheLeadChart(t *testing.T) {
 				t.Errorf("chart line color %v, want the lead card's loss color", op.Color)
 			}
 		}
-		if op.Kind == "line" && op.Y == op.H && op.X == 72 && op.W == 1008 {
+		// The card and footer rules are full width too; the baseline is the Muted one.
+		if op.Kind == "line" && op.Y == op.H && op.X == 72 && op.W == 1008 && op.Color == Dark.Muted {
 			dashed++
 		}
 	}
@@ -299,11 +300,15 @@ func TestRenderRefusesWhatItCannotDraw(t *testing.T) {
 	}
 }
 
+// Every move, relative or absolute, and its arrow is drawn in its direction's color.
 func TestGoldNeverMarksAMove(t *testing.T) {
 	for _, d := range []Doc{fixtureDoc("en"), fixtureDoc("pt-PT"), legacyDoc()} {
 		moves := map[string]string{}
 		for _, c := range d.Cards {
 			moves[c.ChangePct] = c.Dir
+			if c.Change != "" {
+				moves[c.Change] = c.Dir
+			}
 		}
 		for _, tc := range allFormats {
 			rec := &RecordingSurface{W: float64(tc.w), H: float64(tc.h)}

@@ -11,6 +11,24 @@ const (
 	socialH = 1350
 )
 
+// Type metrics, as shares of the size: how far capitals and figures rise
+// above the baseline, and how far descenders fall below it.
+const (
+	capHeight = 0.71
+	xAscent   = 0.74 // Brygada's capitals and ascenders
+	descent   = 0.28
+)
+
+// opticalCenter places a block in its free space slightly above the middle,
+// where the eye reads it as centered.
+const opticalCenter = 0.45
+
+// cardInset is the space between a column rule and the card's text.
+const cardInset = 26.0
+
+// goldHair is the warm rule between blocks: gold, but quiet.
+var goldHair = mix(Dark.Gold, Dark.Page, 0.42)
+
 var socialLayout = portraitLayout{
 	top: 72, bottom: socialH - 64,
 	logoH: 60, brandSize: 21, editionSize: 22,
@@ -26,14 +44,6 @@ var socialLayout = portraitLayout{
 // DrawSocial draws the social snapshot: the brief as a designed post, not a
 // screenshot of the page.
 func DrawSocial(s Surface, d Doc) { drawPortrait(s, d, socialLayout) }
-
-// Type metrics, as shares of the size: how far capitals and figures rise
-// above the baseline, and how far descenders fall below it.
-const (
-	capHeight = 0.71
-	xAscent   = 0.74 // Brygada's capitals and ascenders
-	descent   = 0.28
-)
 
 // portraitLayout parameterizes the social and story compositions, which
 // share one order: header, date, headline, dek, cards, chart, footer.
@@ -52,9 +62,6 @@ type portraitLayout struct {
 	chartMin, chartMax, chartLabel       float64
 	footGap, provSize, provLead, urlSize float64
 }
-
-// goldHair is the warm rule between blocks: gold, but quiet.
-var goldHair = mix(Dark.Gold, Dark.Page, 0.42)
 
 func drawPortrait(s Surface, d Doc, l portraitLayout) {
 	w, h := s.Size()
@@ -146,10 +153,6 @@ func drawPortrait(s Surface, d Doc, l portraitLayout) {
 	}
 }
 
-// opticalCenter places a block in its free space slightly above the middle,
-// where the eye reads it as centered.
-const opticalCenter = 0.45
-
 // drawFooter draws the gold rule, the provenance and the canonical link,
 // stacked up from the bottom bound, and returns the rule's y.
 func drawFooter(s Surface, d Doc, left, right float64, l portraitLayout) float64 {
@@ -197,7 +200,7 @@ func drawCardRow(s Surface, cards []Card, left, right, top float64, l portraitLa
 	cards = cards[:min(len(cards), 3)]
 	n := float64(len(cards))
 	colW := (right - left) / n
-	inset := math.Round(l.cardPad * 0.9)
+	inset := cardInset
 	textW := colW - inset
 	levels := make([]string, len(cards))
 	for i := range cards {
@@ -224,7 +227,7 @@ func drawCardRow(s Surface, cards []Card, left, right, top float64, l portraitLa
 		cs := math.Round(l.moveSize * 0.72)
 		gap := l.moveSize * 0.5
 		if c.Change != "" && end+gap+s.Measure(SansRegular, cs, c.Change) <= tx+textW {
-			s.Text(end+gap, moveBase, SansRegular, cs, Dark.Muted, c.Change, AlignLeft)
+			s.Text(end+gap, moveBase, SansRegular, cs, dirColor(c.Dir), c.Change, AlignLeft)
 		}
 	}
 }

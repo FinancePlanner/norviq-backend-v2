@@ -27,23 +27,26 @@ const RendererVersion = 1
 // Shared composition values. Every layout uses the same side margin, rule
 // weights and tracking, so the formats read as one publication.
 const (
-	margin      = 72.0
-	brandLabel  = "NORVIQ · MARKET INTELLIGENCE"
-	goldRuleW   = 2.0
-	hairline    = 1.0
-	dashLen     = 6.0
-	chartLineW  = 3.0
-	areaNear    = 0.24 // share of the move color in the area fill at the session extreme
-	areaFar     = 0.03 // and at the previous close, graded in between
-	areaBand    = 4.0  // height of one step of that grade
-	chartPad    = 0.08 // headroom above and below the plotted range
-	labelTrack  = 0.14 // tracking for uppercase labels, as a share of the size
-	arrowScale  = 0.62 // ▲▼ size relative to the change figure
-	arrowGap    = 0.35 // space after the arrow, as a share of the figure size
-	logoAspect  = 313.0 / 367.0
-	pngMIME     = "image/png"
-	urlScheme   = "https://"
-	urlSchemeHT = "http://"
+	margin     = 72.0
+	brandLabel = "NORVIQ · MARKET INTELLIGENCE"
+	goldRuleW  = 2.0
+	hairline   = 1.0
+	dashLen    = 6.0
+	chartLineW = 3.0
+	areaNear   = 0.24 // share of the move color in the area fill at the session extreme
+	areaFar    = 0.03 // and at the previous close, graded in between
+	areaBand   = 4.0  // height of one step of that grade
+	chartPad   = 0.08 // headroom above and below the plotted range
+	labelTrack = 0.14 // tracking for uppercase labels, as a share of the size
+	arrowScale = 0.62 // ▲▼ size relative to the change figure
+	arrowGap   = 0.35 // space after the arrow, as a share of the figure size
+	logoAspect = 313.0 / 367.0
+	pngMIME    = "image/png"
+
+	headlineMinScale = 0.9 // smallest share of its size a headline steps down to
+	headlineBadBreak = 1e6 // a bad line break outweighs any width
+	urlScheme        = "https://"
+	urlSchemeHT      = "http://"
 )
 
 // Render draws d in format f and returns the file bytes and their MIME type.
@@ -181,11 +184,6 @@ func headlineFit(s Surface, f Font, size, width float64, text string, maxLines i
 	}
 	return lines, size
 }
-
-const (
-	headlineMinScale = 0.9
-	headlineBadBreak = 1e6 // outweighs any width
-)
 
 // balancedLines returns the chosen lines and whether they still break badly.
 // A single line or a cut headline has nothing to choose and is returned as is.

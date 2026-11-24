@@ -156,7 +156,7 @@ func TestExportsManifest(t *testing.T) {
 	r = h.Do(http.MethodGet, "/v1/market/brief/exports?date=2026-10-08&slot=morning", pat, nil)
 	m.Formats = nil
 	r.JSON(t, &m)
-	if r.Status != http.StatusOK || m.Revision != 1 || len(m.ContentHash) != 16 || len(m.Formats) != 4 {
+	if r.Status != http.StatusOK || m.Revision != 1 || len(m.ContentHash) != 16 || len(m.Formats) != 4 || m.EditionID != "MI-2026-10-08-O" {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	if r := h.Do(http.MethodGet, "/v1/market/brief/export?date=2026-10-08&slot=morning&format=og", pat, nil); r.Status != http.StatusOK {

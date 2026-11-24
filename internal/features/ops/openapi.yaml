@@ -15687,7 +15687,7 @@ components:
     MarketBriefExportManifest:
       type: object
       properties:
-        editionId: { type: string, description: 'Empty for a brief written before editions existed.' }
+        editionId: { type: string, description: 'MI-<date>-<O|C>; derived from the date and slot for a brief written before editions existed.' }
         revision: { type: integer, minimum: 1 }
         contentHash: { type: string }
         rendererVersion: { type: integer }

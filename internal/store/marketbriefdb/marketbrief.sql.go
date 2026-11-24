@@ -270,7 +270,7 @@ func (q *Queries) MarketBriefBeforeDay(ctx context.Context, arg MarketBriefBefor
 }
 
 const marketBriefEdition = `-- name: MarketBriefEdition :one
-SELECT revision, edition, content_hash, payload FROM market_briefs
+SELECT revision, edition FROM market_briefs
 WHERE trading_date = $1 AND slot = $2
 ORDER BY language ASC
 LIMIT 1
@@ -282,23 +282,15 @@ type MarketBriefEditionParams struct {
 }
 
 type MarketBriefEditionRow struct {
-	Revision    int32
-	Edition     json.RawMessage
-	ContentHash *string
-	Payload     string
+	Revision int32
+	Edition  json.RawMessage
 }
 
 // The edition is language-neutral; every language row of a slot holds the same one.
-// content_hash is NULL on a legacy row; payload lets the caller derive one.
 func (q *Queries) MarketBriefEdition(ctx context.Context, arg MarketBriefEditionParams) (MarketBriefEditionRow, error) {
 	row := q.db.QueryRow(ctx, marketBriefEdition, arg.TradingDate, arg.Slot)
 	var i MarketBriefEditionRow
-	err := row.Scan(
-		&i.Revision,
-		&i.Edition,
-		&i.ContentHash,
-		&i.Payload,
-	)
+	err := row.Scan(&i.Revision, &i.Edition)
 	return i, err
 }
 
@@ -323,6 +315,39 @@ func (q *Queries) MarketBriefOnDay(ctx context.Context, arg MarketBriefOnDayPara
 	row := q.db.QueryRow(ctx, marketBriefOnDay, arg.Language, arg.TradingDate, arg.Slot)
 	var i MarketBriefOnDayRow
 	err := row.Scan(&i.Slot, &i.TradingDate)
+	return i, err
+}
+
+const marketBriefSnapshot = `-- name: MarketBriefSnapshot :one
+SELECT payload, edition, revision, content_hash FROM market_briefs
+WHERE trading_date = $1 AND slot = $2 AND language = $3
+LIMIT 1
+`
+
+type MarketBriefSnapshotParams struct {
+	TradingDate string
+	Slot        string
+	Language    string
+}
+
+type MarketBriefSnapshotRow struct {
+	Payload     string
+	Edition     json.RawMessage
+	Revision    int32
+	ContentHash *string
+}
+
+// One statement, so payload, edition, revision and hash always belong to the
+// same revision of the slot. content_hash is NULL on a legacy row.
+func (q *Queries) MarketBriefSnapshot(ctx context.Context, arg MarketBriefSnapshotParams) (MarketBriefSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, marketBriefSnapshot, arg.TradingDate, arg.Slot, arg.Language)
+	var i MarketBriefSnapshotRow
+	err := row.Scan(
+		&i.Payload,
+		&i.Edition,
+		&i.Revision,
+		&i.ContentHash,
+	)
 	return i, err
 }
 

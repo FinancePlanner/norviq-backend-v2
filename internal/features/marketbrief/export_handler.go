@@ -2,11 +2,12 @@ package marketbrief
 
 import (
 	"container/list"
-	"errors"
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"norviq-api/internal/features/marketbrief/export"
 	"norviq-api/internal/httpx"
@@ -19,10 +20,12 @@ import (
 // keyed on the ETag, so a regenerated brief never reads a stale file.
 const exportCacheSize = 64
 
+// exportFillTimeout bounds one shared render.
+const exportFillTimeout = 20 * time.Second
+
 type exportFile struct {
-	data      []byte
-	mime      string
-	editionID string // for the download's file name
+	data []byte
+	mime string
 }
 
 // exportCache is an LRU of rendered exports with a single-flight fill: ten
@@ -73,11 +76,17 @@ func (c *exportCache) put(key string, f exportFile) {
 
 // fill returns the cached file for key, or runs render once however many
 // callers ask at the same time. A failed render is not cached.
-func (c *exportCache) fill(key string, render func() (exportFile, error)) (exportFile, error) {
+//
+// The render is shared, so it must not depend on the first caller: the wait
+// runs on a context detached from the request (a client that hangs up does
+// not fail the waiters) and bounded by exportFillTimeout.
+func (c *exportCache) fill(ctx context.Context, key string, render func() (exportFile, error)) (exportFile, error) {
 	if f, ok := c.get(key); ok {
 		return f, nil
 	}
-	v, err, _ := c.flight.Do(key, func() (any, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), exportFillTimeout)
+	defer cancel()
+	ch := c.flight.DoChan(key, func() (any, error) {
 		if f, ok := c.get(key); ok {
 			return f, nil
 		}
@@ -88,10 +97,15 @@ func (c *exportCache) fill(key string, render func() (exportFile, error)) (expor
 		c.put(key, f)
 		return f, nil
 	})
-	if err != nil {
-		return exportFile{}, err
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return exportFile{}, res.Err
+		}
+		return res.Val.(exportFile), nil
+	case <-ctx.Done():
+		return exportFile{}, ctx.Err()
 	}
-	return v.(exportFile), nil
 }
 
 // exportHandlers serves the brief's shareable renders. It holds no user,
@@ -137,36 +151,17 @@ func readExportParams(c *echo.Context) (exportParams, error) {
 	return exportParams{date: *date, slot: *rawSlot, lang: ResolveLanguage(httpx.QueryString(c, "lang"))}, nil
 }
 
-// load reads the brief, its hash and revision. A missing slot is a 404.
-func (h *exportHandlers) load(c *echo.Context, p exportParams) (*Response, string, int, error) {
-	ctx := c.Request().Context()
-	brief, err := h.repo.Find(ctx, p.date, p.slot, p.lang)
+// load reads one snapshot of the brief and builds its Doc from it. A
+// missing slot is a 404.
+func (h *exportHandlers) load(c *echo.Context, p exportParams) (*Snapshot, export.Doc, error) {
+	snap, err := h.repo.Snapshot(c.Request().Context(), p.date, p.slot, p.lang)
 	if err != nil {
-		return nil, "", 0, err
+		return nil, export.Doc{}, err
 	}
-	if brief == nil {
-		return nil, "", 0, httpx.NotFound("No market brief for that date and slot.")
+	if snap == nil {
+		return nil, export.Doc{}, httpx.NotFound("No market brief for that date and slot.")
 	}
-	hash, revision, err := h.repo.ContentHash(ctx, p.date, p.slot)
-	if errors.Is(err, ErrBriefNotFound) {
-		return nil, "", 0, httpx.NotFound("No market brief for that date and slot.")
-	}
-	if err != nil {
-		return nil, "", 0, err
-	}
-	return brief, hash, revision, nil
-}
-
-func (h *exportHandlers) doc(c *echo.Context, p exportParams, brief *Response) (export.Doc, string, error) {
-	edition, err := h.repo.Edition(c.Request().Context(), p.date, p.slot)
-	if err != nil {
-		return export.Doc{}, "", err
-	}
-	id := ""
-	if edition != nil {
-		id = edition.ID
-	}
-	return BuildDoc(*brief, edition, h.baseURL), id, nil
+	return snap, BuildDoc(snap.Response, snap.Edition, h.baseURL), nil
 }
 
 // GET /v1/market/brief/exports?date=&slot=&lang=
@@ -175,17 +170,13 @@ func (h *exportHandlers) manifest(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	brief, hash, revision, err := h.load(c, p)
-	if err != nil {
-		return err
-	}
-	doc, editionID, err := h.doc(c, p, brief)
+	snap, doc, err := h.load(c, p)
 	if err != nil {
 		return err
 	}
 	c.Response().Header().Set("Cache-Control", "public, max-age=300")
 	return httpx.OK(c, ExportManifest{
-		EditionID: editionID, Revision: revision, ContentHash: hash, RendererVersion: export.RendererVersion,
+		EditionID: doc.EditionID, Revision: snap.Revision, ContentHash: snap.ContentHash, RendererVersion: export.RendererVersion,
 		Formats: []exportFormatInfo{
 			{ID: "og", Width: 1200, Height: 630, Mime: "image/png"},
 			{ID: "social", Width: 1080, Height: 1350, Mime: "image/png"},
@@ -218,36 +209,36 @@ func (h *exportHandlers) file(c *echo.Context) error {
 		}
 		rev = n
 	}
-	brief, hash, revision, err := h.load(c, p)
+	snap, doc, err := h.load(c, p)
 	if err != nil {
 		return err
 	}
-	if rev != -1 && rev != revision {
+	if rev != -1 && rev != snap.Revision {
 		return httpx.NotFound("revision superseded")
 	}
-	etag := `"` + hash + "-" + string(format) + "-" + p.lang + "-v" + strconv.Itoa(export.RendererVersion) + `"`
+	etag := `"` + snap.ContentHash + "-" + string(format) + "-" + p.lang + "-v" + strconv.Itoa(export.RendererVersion) + `"`
 	hdr := c.Response().Header()
-	hdr.Set("ETag", etag)
-	if rev == -1 {
-		hdr.Set("Cache-Control", "public, max-age=300")
-	} else {
-		hdr.Set("Cache-Control", "public, max-age=31536000, immutable")
+	cacheControl := "public, max-age=300"
+	if rev != -1 {
+		cacheControl = "public, max-age=31536000, immutable"
 	}
+	// ETag and Cache-Control go on only a success (200 or 304): an error
+	// response must never be cached, least of all as immutable.
 	if etagMatches(c.Request().Header.Get("If-None-Match"), etag) {
+		hdr.Set("ETag", etag)
+		hdr.Set("Cache-Control", cacheControl)
 		return c.NoContent(http.StatusNotModified)
 	}
-	out, err := h.cache.fill(etag, func() (exportFile, error) {
-		doc, id, err := h.doc(c, p, brief)
-		if err != nil {
-			return exportFile{}, err
-		}
+	out, err := h.cache.fill(c.Request().Context(), etag, func() (exportFile, error) {
 		data, mime, err := export.Render(format, doc)
-		return exportFile{data: data, mime: mime, editionID: id}, err
+		return exportFile{data: data, mime: mime}, err
 	})
 	if err != nil {
 		return err
 	}
-	name := "norviq-" + fileStem(out.editionID, p) + "-"
+	hdr.Set("ETag", etag)
+	hdr.Set("Cache-Control", cacheControl)
+	name := "norviq-" + doc.EditionID + "-"
 	if format == export.FormatPDF {
 		name += p.lang + ".pdf"
 	} else {
@@ -255,15 +246,6 @@ func (h *exportHandlers) file(c *echo.Context) error {
 	}
 	hdr.Set("Content-Disposition", `inline; filename="`+name+`"`)
 	return c.Blob(http.StatusOK, out.mime, out.data)
-}
-
-// fileStem names a download after its edition, or after the slot for a
-// legacy brief that has none.
-func fileStem(editionID string, p exportParams) string {
-	if editionID != "" {
-		return editionID
-	}
-	return p.date + "-" + p.slot
 }
 
 // etagMatches reports whether an If-None-Match header names etag, weak or

@@ -26,10 +26,16 @@ WHERE trading_date = $1 AND slot = $2;
 
 -- name: MarketBriefEdition :one
 -- The edition is language-neutral; every language row of a slot holds the same one.
--- content_hash is NULL on a legacy row; payload lets the caller derive one.
-SELECT revision, edition, content_hash, payload FROM market_briefs
+SELECT revision, edition FROM market_briefs
 WHERE trading_date = $1 AND slot = $2
 ORDER BY language ASC
+LIMIT 1;
+
+-- name: MarketBriefSnapshot :one
+-- One statement, so payload, edition, revision and hash always belong to the
+-- same revision of the slot. content_hash is NULL on a legacy row.
+SELECT payload, edition, revision, content_hash FROM market_briefs
+WHERE trading_date = $1 AND slot = $2 AND language = $3
 LIMIT 1;
 
 -- name: DeleteMarketBriefSlot :exec

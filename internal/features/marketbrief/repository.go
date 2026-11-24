@@ -28,10 +28,11 @@ type Repository interface {
 	// Edition is the slot's structured market data, nil for a legacy brief
 	// or a slot that does not exist.
 	Edition(ctx context.Context, tradingDate, slot string) (*Edition, error)
-	// ContentHash fingerprints what a slot publishes, with its revision. A
-	// legacy row has no stored hash, so one is computed from its payload.
-	// A slot with no row returns ErrBriefNotFound.
-	ContentHash(ctx context.Context, tradingDate, slot string) (hash string, revision int, err error)
+	// Snapshot reads a brief, its edition, revision and content hash in one
+	// statement, so they always belong to the same revision. nil when the
+	// slot has no row in that language. A legacy row has no stored hash, so
+	// one is computed from its payload.
+	Snapshot(ctx context.Context, tradingDate, slot, language string) (*Snapshot, error)
 	Latest(ctx context.Context, language string) (*Response, error)
 	Find(ctx context.Context, tradingDate, slot, language string) (*Response, error)
 	// Previous is the brief stored just before (tradingDate, slot) in this
@@ -129,23 +130,36 @@ func (r DBRepository) Edition(ctx context.Context, tradingDate, slot string) (*E
 	return decodeEdition(row.Edition), nil
 }
 
-// ErrBriefNotFound is what ContentHash returns for a slot with no row.
-var ErrBriefNotFound = errors.New("marketbrief: no brief for that slot")
+// Snapshot is one revision of a brief as stored.
+type Snapshot struct {
+	Response
+	Edition     *Edition
+	Revision    int
+	ContentHash string
+}
 
-// ContentHash implements Repository.
-func (r DBRepository) ContentHash(ctx context.Context, tradingDate, slot string) (string, int, error) {
-	row, err := r.q().MarketBriefEdition(ctx, marketbriefdb.MarketBriefEditionParams{TradingDate: tradingDate, Slot: slot})
+// Snapshot implements Repository.
+func (r DBRepository) Snapshot(ctx context.Context, tradingDate, slot, language string) (*Snapshot, error) {
+	row, err := r.q().MarketBriefSnapshot(ctx, marketbriefdb.MarketBriefSnapshotParams{TradingDate: tradingDate, Slot: slot, Language: language})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", 0, ErrBriefNotFound
+		return nil, nil
 	}
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
-	if row.ContentHash != nil && *row.ContentHash != "" {
-		return *row.ContentHash, int(row.Revision), nil
+	resp, err := decodePayload(row.Payload)
+	if err != nil {
+		return nil, err
 	}
-	sum := sha256.Sum256([]byte(row.Payload))
-	return hex.EncodeToString(sum[:])[:16], int(row.Revision), nil
+	hash := ""
+	if row.ContentHash != nil {
+		hash = *row.ContentHash
+	}
+	if hash == "" {
+		sum := sha256.Sum256([]byte(row.Payload))
+		hash = hex.EncodeToString(sum[:])[:16]
+	}
+	return &Snapshot{Response: resp, Edition: decodeEdition(row.Edition), Revision: int(row.Revision), ContentHash: hash}, nil
 }
 
 // Latest implements Repository: by trading day, not by write time, so a

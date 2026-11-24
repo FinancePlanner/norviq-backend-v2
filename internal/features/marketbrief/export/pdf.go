@@ -2,9 +2,11 @@ package export
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"time"
 
@@ -20,11 +22,18 @@ var pdfFamilies = map[Font]string{
 	SansSemiBold:  "sans-semibold",
 }
 
+type pdfImage struct {
+	name          string
+	srcW, paddedW int
+}
+
 // PDFSurface draws onto A4 portrait pages in points.
 type PDFSurface struct {
 	pdf    *fpdf.Fpdf
-	images int
 	loaded map[Font]bool
+
+	registered map[string]pdfImage // content hash -> registered image
+	widths     map[int]bool        // pixel widths already taken by registered images
 }
 
 // NewPDFSurface returns a surface with its first page open and every font embedded.
@@ -36,7 +45,7 @@ func NewPDFSurface() *PDFSurface {
 	// Without this fpdf writes resource dictionaries in map order, so bytes vary between runs.
 	pdf.SetCatalogSort(true)
 	pdf.AddPage()
-	return &PDFSurface{pdf: pdf, loaded: map[Font]bool{}}
+	return &PDFSurface{pdf: pdf, loaded: map[Font]bool{}, registered: map[string]pdfImage{}, widths: map[int]bool{}}
 }
 
 // SetCreationTime pins the document dates so identical input gives identical bytes.
@@ -109,14 +118,43 @@ func (p *PDFSurface) Measure(f Font, size float64, s string) float64 {
 	return p.pdf.GetStringWidth(s)
 }
 
+// Image draws img once per distinct content: later draws reuse the registered
+// image, so a logo on every page is embedded a single time.
+//
+// fpdf orders image objects by pixel width alone, and equal widths keep map
+// order, which would make output bytes vary. So each distinct image gets a
+// unique pixel width: narrower-than-needed images are padded on the right with
+// transparent columns, and the drawn width is scaled to keep the visible part
+// exactly in the requested box.
 func (p *PDFSurface) Image(img image.Image, x, y, w, h float64) {
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		p.pdf.SetError(fmt.Errorf("encode image: %w", err))
+	b := img.Bounds()
+	if b.Empty() {
 		return
 	}
-	p.images++
-	name := fmt.Sprintf("img%d", p.images)
-	p.pdf.RegisterImageOptionsReader(name, fpdf.ImageOptions{ImageType: "PNG"}, &buf)
-	p.pdf.ImageOptions(name, x, y, w, h, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+	src := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(src, src.Bounds(), img, b.Min, draw.Src)
+	sum := sha256.New()
+	fmt.Fprintf(sum, "%dx%d", b.Dx(), b.Dy())
+	sum.Write(src.Pix)
+	key := string(sum.Sum(nil))
+
+	reg, ok := p.registered[key]
+	if !ok {
+		padded := b.Dx()
+		for p.widths[padded] {
+			padded++
+		}
+		p.widths[padded] = true
+		canvas := image.NewNRGBA(image.Rect(0, 0, padded, b.Dy()))
+		draw.Draw(canvas, src.Bounds(), src, image.Point{}, draw.Src)
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, canvas); err != nil {
+			p.pdf.SetError(fmt.Errorf("encode image: %w", err))
+			return
+		}
+		reg = pdfImage{name: fmt.Sprintf("img-%d", len(p.registered)+1), srcW: b.Dx(), paddedW: padded}
+		p.pdf.RegisterImageOptionsReader(reg.name, fpdf.ImageOptions{ImageType: "PNG"}, &buf)
+		p.registered[key] = reg
+	}
+	p.pdf.ImageOptions(reg.name, x, y, w*float64(reg.paddedW)/float64(reg.srcW), h, false, fpdf.ImageOptions{ImageType: "PNG"}, 0, "")
 }

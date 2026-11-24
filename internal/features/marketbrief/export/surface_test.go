@@ -199,3 +199,43 @@ func TestPDFBytesAreDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestPDFBytesDeterministicWithManyImages(t *testing.T) {
+	pinned := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	// Same width, different content: fpdf sorts image objects by width only.
+	synth := func(c color.RGBA) image.Image {
+		im := image.NewNRGBA(image.Rect(0, 0, LogoDark.Bounds().Dx(), 10))
+		for i := 0; i < len(im.Pix); i += 4 {
+			im.Pix[i], im.Pix[i+1], im.Pix[i+2], im.Pix[i+3] = c.R, c.G, c.B, 255
+		}
+		return im
+	}
+	a, b := synth(color.RGBA{R: 200}), synth(color.RGBA{B: 200})
+	build := func(pages int) []byte {
+		p := NewPDFSurface()
+		p.SetCreationTime(pinned)
+		for page := 0; page < pages; page++ {
+			if page > 0 {
+				p.NewPage()
+			}
+			p.Image(LogoDark, 40, 40, 50, 50)
+			p.Image(a, 40, 100, 50, 10)
+			p.Image(b, 40, 120, 50, 10)
+		}
+		out, err := p.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	first := build(3)
+	// Repeat draws must reuse the registered image, so more pages add no image objects.
+	if n1, n3 := bytes.Count(build(1), []byte("/Subtype /Image")), bytes.Count(first, []byte("/Subtype /Image")); n1 != n3 {
+		t.Errorf("image objects: %d with 1 page, %d with 3 pages", n1, n3)
+	}
+	for i := 0; i < 20; i++ {
+		if !bytes.Equal(first, build(3)) {
+			t.Fatalf("PDF bytes differ on run %d", i)
+		}
+	}
+}

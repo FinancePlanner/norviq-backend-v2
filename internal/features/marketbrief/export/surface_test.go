@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"image/png"
 	"testing"
+	"time"
 )
 
 func decode(t *testing.T, s *PNGSurface) image.Image {
@@ -171,5 +172,30 @@ func TestPDFSurfaceIsA4WithEmbeddedFonts(t *testing.T) {
 	}
 	if m := p.Measure(SansRegular, 10, "abc"); m <= 0 {
 		t.Errorf("measure=%v", m)
+	}
+}
+
+func TestPDFBytesAreDeterministic(t *testing.T) {
+	pinned := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	build := func() []byte {
+		p := NewPDFSurface()
+		p.SetCreationTime(pinned)
+		for i, f := range []Font{SerifRegular, SerifSemiBold, SansRegular, SansMedium, SansSemiBold} {
+			p.Text(40, 60+float64(i)*20, f, 12, Light.Text, "Deterministic 25,029.33", AlignLeft)
+		}
+		p.Image(LogoDark, 40, 200, 50, 50)
+		p.NewPage()
+		p.Text(40, 60, SansRegular, 12, Light.Text, "Page two", AlignLeft)
+		b, err := p.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	first := build()
+	for i := 0; i < 20; i++ {
+		if !bytes.Equal(first, build()) {
+			t.Fatalf("PDF bytes differ on run %d", i)
+		}
 	}
 }

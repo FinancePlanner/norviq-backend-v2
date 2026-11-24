@@ -78,7 +78,7 @@ func both(date, slot string) []marketbrief.Response {
 
 func (h *harness) save(date, slot string, at time.Time) {
 	h.T.Helper()
-	if err := h.repo.Save(context.Background(), both(date, slot), "m", at); err != nil {
+	if err := h.repo.Save(context.Background(), both(date, slot), "m", at, nil); err != nil {
 		h.T.Fatal(err)
 	}
 }
@@ -267,7 +267,7 @@ func TestRepositoryDuplicateAndDelete(t *testing.T) {
 	h := newHarness(t, false)
 	ctx := context.Background()
 	h.save("2026-10-08", "morning", time.Now())
-	if err := h.repo.Save(ctx, both("2026-10-08", "morning"), "m", time.Now()); err == nil {
+	if err := h.repo.Save(ctx, both("2026-10-08", "morning"), "m", time.Now(), nil); err == nil {
 		t.Fatal("want unique violation")
 	}
 	if err := h.repo.Delete(ctx, "2026-10-08", "morning"); err != nil {
@@ -278,7 +278,7 @@ func TestRepositoryDuplicateAndDelete(t *testing.T) {
 	}
 	// A brief without a date or slot is refused before touching the database.
 	empty := marketbrief.Response{Enabled: true, Language: "en"}
-	if err := h.repo.Save(ctx, []marketbrief.Response{empty}, "m", time.Now()); err == nil || err.Error() != "incompleteBrief" {
+	if err := h.repo.Save(ctx, []marketbrief.Response{empty}, "m", time.Now(), nil); err == nil || err.Error() != "incompleteBrief" {
 		t.Fatal(err)
 	}
 }
@@ -325,7 +325,11 @@ func (g *stubGenerator) Generate(_ context.Context, due marketbrief.Due) (market
 	if g.err != nil {
 		return marketbrief.GeneratedBrief{}, g.err
 	}
-	return marketbrief.GeneratedBrief{Responses: both(due.TradingDate, due.Slot), Model: "stub"}, nil
+	e := marketbrief.Edition{
+		SchemaVersion: marketbrief.EditionSchemaVersion, ID: marketbrief.EditionID(due.TradingDate, due.Slot),
+		Kind: "open", Status: "published", Instruments: []marketbrief.EditionInstrument{}, Series: []marketbrief.EditionSeries{},
+	}
+	return marketbrief.GeneratedBrief{Responses: both(due.TradingDate, due.Slot), Model: "stub", Edition: &e}, nil
 }
 
 func (g *stubGenerator) count() int {
@@ -352,6 +356,59 @@ func TestRunnerSkipsExistingAndReplaces(t *testing.T) {
 	replaced, _ := runner.Run(ctx, due, true)
 	if !replaced.Generated || g.count() != 2 {
 		t.Fatalf("%+v", replaced)
+	}
+	// The first brief is kept as revision 1; the regenerated one is 2.
+	e, err := h.repo.Edition(ctx, due.TradingDate, due.Slot)
+	if err != nil || e == nil || e.Revision != 2 || e.ID != "MI-2026-10-08-O" {
+		t.Fatalf("edition %+v %v", e, err)
+	}
+	var archived, revision int
+	if err := h.Deps.DB.QueryRow(ctx, `SELECT count(*), max(revision) FROM market_brief_revisions WHERE trading_date = $1 AND slot = $2`,
+		due.TradingDate, due.Slot).Scan(&archived, &revision); err != nil || archived != 2 || revision != 1 {
+		t.Fatalf("archive %d rows, revision %d, %v", archived, revision, err)
+	}
+	var hashes int
+	if err := h.Deps.DB.QueryRow(ctx, `SELECT count(DISTINCT content_hash) FROM market_briefs WHERE trading_date = $1 AND content_hash IS NOT NULL`,
+		due.TradingDate).Scan(&hashes); err != nil || hashes != 1 {
+		t.Fatalf("both languages share one content hash: %d %v", hashes, err)
+	}
+}
+
+func TestRouteEditionIsOptIn(t *testing.T) {
+	h := newHarness(t, true)
+	h.seed() // legacy rows: no edition
+	ctx := context.Background()
+	tnx := 4.91
+	bps := -13.9
+	e := marketbrief.Edition{
+		SchemaVersion: 2, ID: "MI-2026-10-09-C", Kind: "close", Status: "published",
+		Instruments: []marketbrief.EditionInstrument{{Symbol: "^TNX", Unit: "percent", Last: tnx, ChangeBps: &bps}},
+		Series:      []marketbrief.EditionSeries{},
+	}
+	if err := h.repo.Save(ctx, both("2026-10-09", marketbrief.SlotEvening), "m", base.Add(38*time.Hour), &e); err != nil {
+		t.Fatal(err)
+	}
+	pat := h.pat("market:read")
+	plain := h.Do(http.MethodGet, "/v1/market/brief?slot=evening&date=2026-10-09", pat, nil)
+	if plain.Status != http.StatusOK || strings.Contains(string(plain.Body), `"edition"`) {
+		t.Fatalf("edition without include: %s", plain.Body)
+	}
+	r := h.Do(http.MethodGet, "/v1/market/brief?slot=evening&date=2026-10-09&include=edition", pat, nil)
+	var got struct {
+		marketbrief.Response
+		Edition *marketbrief.Edition `json:"edition"`
+	}
+	r.JSON(t, &got)
+	if r.Status != http.StatusOK || got.Slot == nil || *got.Slot != "evening" || got.Previous == nil {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	if got.Edition == nil || got.Edition.Revision != 1 || got.Edition.ID != "MI-2026-10-09-C" ||
+		len(got.Edition.Instruments) != 1 || *got.Edition.Instruments[0].ChangeBps != -13.9 {
+		t.Fatalf("edition %+v", got.Edition)
+	}
+	legacy := h.Do(http.MethodGet, "/v1/market/brief?slot=morning&date=2026-10-08&include=edition", pat, nil)
+	if legacy.Status != http.StatusOK || strings.Contains(string(legacy.Body), `"edition"`) {
+		t.Fatalf("legacy brief grew an edition: %s", legacy.Body)
 	}
 }
 
@@ -635,6 +692,12 @@ func TestLiveGeneratorAgainstStubs(t *testing.T) {
 	}
 	if brief.Model != "fallback-chain" || !brief.Responses[0].Degraded || len(brief.Responses[1].Items) != 3 {
 		t.Fatalf("%+v", brief)
+	}
+	// Yahoo refused everything: the edition still names the brief and says
+	// what is missing, rather than inventing rows.
+	if e := brief.Edition; e == nil || e.ID != "MI-2026-10-08-O" || !e.Quality.Degraded || e.Quality.Model != "fallback-chain" ||
+		len(e.Instruments) != 0 || len(e.Series) != 0 || len(e.Quality.Missing) == 0 {
+		t.Fatalf("edition %+v", brief.Edition)
 	}
 	mu.Lock()
 	defer mu.Unlock()

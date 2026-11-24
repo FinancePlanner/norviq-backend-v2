@@ -7,10 +7,31 @@ package marketbriefdb
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+const archiveMarketBriefSlot = `-- name: ArchiveMarketBriefSlot :exec
+INSERT INTO market_brief_revisions (id, trading_date, slot, language, revision, payload, edition, model, degraded, content_hash, generated_at, archived_at)
+SELECT b.id, b.trading_date, b.slot, b.language, b.revision, b.payload, b.edition, b.model, b.degraded, b.content_hash, b.generated_at, $1::timestamptz
+FROM market_briefs b
+WHERE b.trading_date = $2 AND b.slot = $3
+`
+
+type ArchiveMarketBriefSlotParams struct {
+	ArchivedAt  time.Time
+	TradingDate string
+	Slot        string
+}
+
+// Copies a slot's rows into the revision history before a regeneration
+// deletes them.
+func (q *Queries) ArchiveMarketBriefSlot(ctx context.Context, arg ArchiveMarketBriefSlotParams) error {
+	_, err := q.db.Exec(ctx, archiveMarketBriefSlot, arg.ArchivedAt, arg.TradingDate, arg.Slot)
+	return err
+}
 
 const countMarketBriefSlot = `-- name: CountMarketBriefSlot :one
 
@@ -82,7 +103,7 @@ func (q *Queries) EnabledMarketBriefNotificationPreferences(ctx context.Context)
 }
 
 const findMarketBrief = `-- name: FindMarketBrief :one
-SELECT id, trading_date, slot, language, payload, model, degraded, generated_at, created_at FROM market_briefs
+SELECT id, trading_date, slot, language, payload, model, degraded, generated_at, created_at, revision, content_hash, edition FROM market_briefs
 WHERE trading_date = $1 AND slot = $2 AND language = $3
 LIMIT 1
 `
@@ -106,6 +127,9 @@ func (q *Queries) FindMarketBrief(ctx context.Context, arg FindMarketBriefParams
 		&i.Degraded,
 		&i.GeneratedAt,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ContentHash,
+		&i.Edition,
 	)
 	return i, err
 }
@@ -131,8 +155,8 @@ func (q *Queries) GetMarketBriefNotificationPreference(ctx context.Context, user
 }
 
 const insertMarketBrief = `-- name: InsertMarketBrief :exec
-INSERT INTO market_briefs (id, trading_date, slot, language, payload, model, degraded, generated_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO market_briefs (id, trading_date, slot, language, payload, model, degraded, generated_at, created_at, revision, content_hash, edition)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertMarketBriefParams struct {
@@ -145,6 +169,9 @@ type InsertMarketBriefParams struct {
 	Degraded    bool
 	GeneratedAt time.Time
 	CreatedAt   time.Time
+	Revision    int32
+	ContentHash *string
+	Edition     json.RawMessage
 }
 
 func (q *Queries) InsertMarketBrief(ctx context.Context, arg InsertMarketBriefParams) error {
@@ -158,6 +185,9 @@ func (q *Queries) InsertMarketBrief(ctx context.Context, arg InsertMarketBriefPa
 		arg.Degraded,
 		arg.GeneratedAt,
 		arg.CreatedAt,
+		arg.Revision,
+		arg.ContentHash,
+		arg.Edition,
 	)
 	return err
 }
@@ -189,7 +219,7 @@ func (q *Queries) InsertMarketBriefNotificationPreference(ctx context.Context, a
 }
 
 const latestMarketBrief = `-- name: LatestMarketBrief :one
-SELECT id, trading_date, slot, language, payload, model, degraded, generated_at, created_at FROM market_briefs
+SELECT id, trading_date, slot, language, payload, model, degraded, generated_at, created_at, revision, content_hash, edition FROM market_briefs
 WHERE language = $1
 ORDER BY trading_date DESC, slot ASC, generated_at DESC
 LIMIT 1
@@ -208,6 +238,9 @@ func (q *Queries) LatestMarketBrief(ctx context.Context, language string) (Marke
 		&i.Degraded,
 		&i.GeneratedAt,
 		&i.CreatedAt,
+		&i.Revision,
+		&i.ContentHash,
+		&i.Edition,
 	)
 	return i, err
 }
@@ -236,6 +269,31 @@ func (q *Queries) MarketBriefBeforeDay(ctx context.Context, arg MarketBriefBefor
 	return i, err
 }
 
+const marketBriefEdition = `-- name: MarketBriefEdition :one
+SELECT revision, edition FROM market_briefs
+WHERE trading_date = $1 AND slot = $2
+ORDER BY language ASC
+LIMIT 1
+`
+
+type MarketBriefEditionParams struct {
+	TradingDate string
+	Slot        string
+}
+
+type MarketBriefEditionRow struct {
+	Revision int32
+	Edition  json.RawMessage
+}
+
+// The edition is language-neutral; every language row of a slot holds the same one.
+func (q *Queries) MarketBriefEdition(ctx context.Context, arg MarketBriefEditionParams) (MarketBriefEditionRow, error) {
+	row := q.db.QueryRow(ctx, marketBriefEdition, arg.TradingDate, arg.Slot)
+	var i MarketBriefEditionRow
+	err := row.Scan(&i.Revision, &i.Edition)
+	return i, err
+}
+
 const marketBriefOnDay = `-- name: MarketBriefOnDay :one
 SELECT slot, trading_date FROM market_briefs
 WHERE language = $1 AND trading_date = $2 AND slot = $3
@@ -258,6 +316,24 @@ func (q *Queries) MarketBriefOnDay(ctx context.Context, arg MarketBriefOnDayPara
 	var i MarketBriefOnDayRow
 	err := row.Scan(&i.Slot, &i.TradingDate)
 	return i, err
+}
+
+const nextMarketBriefRevision = `-- name: NextMarketBriefRevision :one
+SELECT (COALESCE(MAX(revision), 0) + 1)::integer AS next_revision FROM market_brief_revisions
+WHERE trading_date = $1 AND slot = $2
+`
+
+type NextMarketBriefRevisionParams struct {
+	TradingDate string
+	Slot        string
+}
+
+// 1 for a slot never regenerated, else one past the newest archived revision.
+func (q *Queries) NextMarketBriefRevision(ctx context.Context, arg NextMarketBriefRevisionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, nextMarketBriefRevision, arg.TradingDate, arg.Slot)
+	var next_revision int32
+	err := row.Scan(&next_revision)
+	return next_revision, err
 }
 
 const updateMarketBriefNotificationPreference = `-- name: UpdateMarketBriefNotificationPreference :exec

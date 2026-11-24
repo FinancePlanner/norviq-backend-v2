@@ -17,9 +17,15 @@ import (
 type Repository interface {
 	Exists(ctx context.Context, tradingDate, slot string) (bool, error)
 	// Save writes all languages of one slot in one transaction: a reader
-	// never sees en without pt-PT.
-	Save(ctx context.Context, briefs []Response, model string, generatedAt time.Time) error
+	// never sees en without pt-PT. edition may be nil; when set, Save
+	// stamps its Revision.
+	Save(ctx context.Context, briefs []Response, model string, generatedAt time.Time, edition *Edition) error
+	// Delete moves a slot's rows into the revision history, so the next
+	// Save writes the following revision.
 	Delete(ctx context.Context, tradingDate, slot string) error
+	// Edition is the slot's structured market data, nil for a legacy brief
+	// or a slot that does not exist.
+	Edition(ctx context.Context, tradingDate, slot string) (*Edition, error)
 	Latest(ctx context.Context, language string) (*Response, error)
 	Find(ctx context.Context, tradingDate, slot, language string) (*Response, error)
 	// Previous is the brief stored just before (tradingDate, slot) in this
@@ -40,8 +46,9 @@ func (r DBRepository) Exists(ctx context.Context, tradingDate, slot string) (boo
 }
 
 // Save implements Repository.
-func (r DBRepository) Save(ctx context.Context, briefs []Response, model string, generatedAt time.Time) error {
+func (r DBRepository) Save(ctx context.Context, briefs []Response, model string, generatedAt time.Time, edition *Edition) error {
 	rows := make([]marketbriefdb.InsertMarketBriefParams, 0, len(briefs))
+	payloads := make([]string, 0, len(briefs))
 	for _, b := range briefs {
 		if b.TradingDate == nil || b.Slot == nil {
 			return errIncompleteBrief
@@ -50,15 +57,39 @@ func (r DBRepository) Save(ctx context.Context, briefs []Response, model string,
 		if err != nil {
 			return err
 		}
+		payloads = append(payloads, payload)
 		rows = append(rows, marketbriefdb.InsertMarketBriefParams{
 			ID: uuid.New(), TradingDate: *b.TradingDate, Slot: *b.Slot, Language: b.Language,
 			Payload: payload, Model: model, Degraded: b.Degraded, GeneratedAt: generatedAt,
 		})
 	}
+	if len(rows) == 0 {
+		return nil
+	}
 	return pgx.BeginFunc(ctx, r.DB, func(tx pgx.Tx) error {
 		q := marketbriefdb.New(tx)
+		revision, err := q.NextMarketBriefRevision(ctx, marketbriefdb.NextMarketBriefRevisionParams{
+			TradingDate: rows[0].TradingDate, Slot: rows[0].Slot,
+		})
+		if err != nil {
+			return err
+		}
+		var stored *Edition
+		if edition != nil {
+			e := *edition
+			e.Revision = int(revision)
+			stored = &e
+		}
+		raw, err := editionJSON(stored)
+		if err != nil {
+			return err
+		}
+		hash := contentHash(payloads, raw)
 		for i := range rows {
 			rows[i].CreatedAt = time.Now()
+			rows[i].Revision = revision
+			rows[i].ContentHash = &hash
+			rows[i].Edition = raw
 			if err := q.InsertMarketBrief(ctx, rows[i]); err != nil {
 				return err
 			}
@@ -69,7 +100,27 @@ func (r DBRepository) Save(ctx context.Context, briefs []Response, model string,
 
 // Delete implements Repository.
 func (r DBRepository) Delete(ctx context.Context, tradingDate, slot string) error {
-	return r.q().DeleteMarketBriefSlot(ctx, marketbriefdb.DeleteMarketBriefSlotParams{TradingDate: tradingDate, Slot: slot})
+	return pgx.BeginFunc(ctx, r.DB, func(tx pgx.Tx) error {
+		q := marketbriefdb.New(tx)
+		if err := q.ArchiveMarketBriefSlot(ctx, marketbriefdb.ArchiveMarketBriefSlotParams{
+			ArchivedAt: time.Now(), TradingDate: tradingDate, Slot: slot,
+		}); err != nil {
+			return err
+		}
+		return q.DeleteMarketBriefSlot(ctx, marketbriefdb.DeleteMarketBriefSlotParams{TradingDate: tradingDate, Slot: slot})
+	})
+}
+
+// Edition implements Repository.
+func (r DBRepository) Edition(ctx context.Context, tradingDate, slot string) (*Edition, error) {
+	row, err := r.q().MarketBriefEdition(ctx, marketbriefdb.MarketBriefEditionParams{TradingDate: tradingDate, Slot: slot})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeEdition(row.Edition), nil
 }
 
 // Latest implements Repository: by trading day, not by write time, so a

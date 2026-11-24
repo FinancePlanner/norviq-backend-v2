@@ -58,6 +58,9 @@ type Quote struct {
 	PreviousClose float64
 	// MarketTime is when the price was last updated at its exchange.
 	MarketTime time.Time
+	// Currency is the quote currency Yahoo reports ("USD", "EUR"), nil when
+	// absent. Index levels are points, but the field still names the market.
+	Currency *string
 }
 
 // ChangePercent is IndexQuote.changePercent.
@@ -186,6 +189,7 @@ type quoteMeta struct {
 	RegularMarketPrice *float64 `json:"regularMarketPrice"`
 	ChartPreviousClose *float64 `json:"chartPreviousClose"`
 	RegularMarketTime  *float64 `json:"regularMarketTime"`
+	Currency           *string  `json:"currency"`
 }
 
 // decodeResults decodes the chart envelope into one T per result, failing
@@ -238,7 +242,15 @@ func ParseQuote(data []byte) (*Quote, error) {
 		Price:         *m.RegularMarketPrice,
 		PreviousClose: *m.ChartPreviousClose,
 		MarketTime:    unixSeconds(*m.RegularMarketTime),
+		Currency:      nonEmpty(m.Currency),
 	}, nil
+}
+
+func nonEmpty(s *string) *string {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return nil
+	}
+	return s
 }
 
 func finitePositive(v float64) bool { return !math.IsInf(v, 0) && !math.IsNaN(v) && v > 0 }

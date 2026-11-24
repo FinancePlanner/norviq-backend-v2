@@ -150,8 +150,37 @@ func (h *handlers) show(c *echo.Context) error {
 		}
 		brief.Previous = prev
 	}
+	out := showResponse{Response: brief}
+	// The edition is opt-in: the assistant tool, MCP and older apps read
+	// this route too, and its series would only weigh down their payloads.
+	if includes(httpx.QueryString(c, "include"), "edition") && brief.TradingDate != nil && brief.Slot != nil {
+		edition, err := h.repo.Edition(ctx, *brief.TradingDate, *brief.Slot)
+		if err != nil {
+			return err
+		}
+		out.Edition = edition
+	}
 	c.Response().Header().Set("Cache-Control", "private, max-age=300")
-	return httpx.OK(c, brief)
+	return httpx.OK(c, out)
+}
+
+// showResponse is the brief plus, when asked for, its edition.
+type showResponse struct {
+	Response
+	Edition *Edition `json:"edition,omitempty"`
+}
+
+// includes reports whether a comma-separated `include` list names want.
+func includes(raw *string, want string) bool {
+	if raw == nil {
+		return false
+	}
+	for _, part := range strings.Split(*raw, ",") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // GET /v1/market/brief/notifications
@@ -213,8 +242,10 @@ func NewLiveGenerator(d *server.Deps, s Settings) (*LLMGenerator, error) {
 	if model == "" {
 		model = DefaultModel
 	}
+	yahoo := yahoochart.New(yahoochart.Settings{BaseURL: s.YahooBaseURL}.ResolveBaseURL(), &http.Client{}, d.Logger)
 	g := &LLMGenerator{
-		Quotes:   yahoochart.New(yahoochart.Settings{BaseURL: s.YahooBaseURL}.ResolveBaseURL(), &http.Client{}, d.Logger),
+		Quotes:   yahoo,
+		Intraday: yahoo,
 		News:     news.Provider,
 		Earnings: cal,
 		WebModel: model,

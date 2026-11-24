@@ -5,6 +5,7 @@
 package marketbriefdb
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +21,9 @@ type MarketBrief struct {
 	Degraded    bool
 	GeneratedAt time.Time
 	CreatedAt   time.Time
+	Revision    int32
+	ContentHash *string
+	Edition     json.RawMessage
 }
 
 type MarketBriefNotificationPreference struct {

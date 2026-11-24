@@ -38,6 +38,9 @@ type FactQuote struct {
 	Price         float64 `json:"price"`
 	PreviousClose float64 `json:"previousClose"`
 	ChangePercent float64 `json:"changePercent"`
+	// ChangeBps is set for yields only: the move in basis points. A yield's
+	// changePercent is relative and must not be narrated as its move.
+	ChangeBps *float64 `json:"changeBps,omitempty"`
 }
 
 // FactHeadline is MarketBriefFacts.Headline.
@@ -82,10 +85,15 @@ func buildFacts(slot, tradingDate string, quotes []yahoochart.Quote, news []news
 		if in, ok := catalogInstrument(q.Symbol); ok {
 			name = in.Name
 		}
-		f.Quotes = append(f.Quotes, FactQuote{
+		fq := FactQuote{
 			Symbol: q.Symbol, Name: name,
 			Price: round2(q.Price), PreviousClose: round2(q.PreviousClose), ChangePercent: round2(q.ChangePercent()),
-		})
+		}
+		if isYield(q.Symbol) {
+			bps := changeBps(q)
+			fq.ChangeBps = &bps
+		}
+		f.Quotes = append(f.Quotes, fq)
 	}
 	recent := []newsprovider.Item{}
 	for _, n := range news {
@@ -123,6 +131,9 @@ func (f Facts) GroundedNumbers() []float64 {
 	var out []float64
 	for _, q := range f.Quotes {
 		out = append(out, q.Price, q.PreviousClose, q.ChangePercent, math.Abs(q.ChangePercent))
+		if q.ChangeBps != nil {
+			out = append(out, *q.ChangeBps, math.Abs(*q.ChangeBps), math.Round(math.Abs(*q.ChangeBps)))
+		}
 	}
 	for _, e := range f.Earnings {
 		for _, v := range []*float64{e.EpsEstimate, e.EpsActual} {

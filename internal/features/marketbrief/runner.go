@@ -50,7 +50,7 @@ func (r Runner) Run(ctx context.Context, due Due, replace bool) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := r.Repository.Save(ctx, brief.Responses, brief.Model, time.Now()); err != nil {
+	if err := r.Repository.Save(ctx, brief.Responses, brief.Model, time.Now(), brief.Edition); err != nil {
 		// Another replica (or a manual run) wrote the slot while we were
 		// generating. Theirs stands; this is not a failure to retry.
 		if isConstraintFailure(err) {

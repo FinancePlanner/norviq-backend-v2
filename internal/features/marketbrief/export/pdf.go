@@ -65,6 +65,13 @@ func (p *PDFSurface) useFont(f Font, size float64) {
 	p.pdf.SetFont(pdfFamilies[f], "", size)
 }
 
+// SetInfo records the document's title, its author as Norviq, and its language.
+func (p *PDFSurface) SetInfo(title, lang string) {
+	p.pdf.SetTitle(title, true)
+	p.pdf.SetAuthor("Norviq", true)
+	p.pdf.SetLang(lang)
+}
+
 func (p *PDFSurface) Size() (w, h float64) { return p.pdf.GetPageSize() }
 
 func (p *PDFSurface) PageCount() int { return p.pdf.PageCount() }

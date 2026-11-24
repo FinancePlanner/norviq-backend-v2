@@ -300,9 +300,6 @@ func TestRenderRefusesWhatItCannotDraw(t *testing.T) {
 	if _, _, err := Render("gif", fixtureDoc("en")); err == nil {
 		t.Error("unknown format rendered")
 	}
-	if _, _, err := Render(FormatPDF, fixtureDoc("en")); err == nil || !strings.Contains(err.Error(), "pdf: not implemented") {
-		t.Errorf("pdf err %v", err)
-	}
 }
 
 // Every move, relative or absolute, and its arrow is drawn in its direction's color.

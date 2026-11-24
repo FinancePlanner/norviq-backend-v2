@@ -1,10 +1,10 @@
 package export
 
 import (
-	"errors"
 	"fmt"
 	"image/color"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	_ "time/tzdata" // chart time labels must not depend on the host's zoneinfo
@@ -42,6 +42,7 @@ const (
 	arrowGap   = 0.35 // space after the arrow, as a share of the figure size
 	logoAspect = 313.0 / 367.0
 	pngMIME    = "image/png"
+	pdfMIME    = "application/pdf"
 
 	headlineMinScale = 0.9 // smallest share of its size a headline steps down to
 	headlineBadBreak = 1e6 // a bad line break outweighs any width
@@ -63,7 +64,7 @@ func Render(f Format, d Doc) ([]byte, string, error) {
 	case FormatStory:
 		w, h, draw = storyW, storyH, DrawStory
 	case FormatPDF:
-		return nil, "", errors.New("pdf: not implemented")
+		return renderReport(d)
 	default:
 		return nil, "", fmt.Errorf("export: unknown format %q", f)
 	}
@@ -76,16 +77,33 @@ func Render(f Format, d Doc) ([]byte, string, error) {
 	return b, pngMIME, nil
 }
 
-// dirColor is the only color a move is ever drawn in. Anything that is not
-// "up" or "down", including a legacy direction nobody normalized, is flat.
-func dirColor(dir string) color.RGBA {
+// renderReport encodes the A4 report. Its dates are the edition's
+// publication, so the same Doc always gives the same bytes.
+func renderReport(d Doc) ([]byte, string, error) {
+	p := NewPDFSurface()
+	p.SetCreationTime(publishedAt(d))
+	p.SetInfo(d.Headline, d.Lang)
+	DrawReport(p, d)
+	b, err := p.Bytes()
+	if err != nil {
+		return nil, "", err
+	}
+	return b, pdfMIME, nil
+}
+
+// dirColor is the only color a move is ever drawn in on the dark formats.
+func dirColor(dir string) color.RGBA { return Dark.move(dir) }
+
+// move is the palette's color for a move. Anything that is not "up" or
+// "down", including a legacy direction nobody normalized, is flat.
+func (p Palette) move(dir string) color.RGBA {
 	switch dir {
 	case "up":
-		return Dark.Gain
+		return p.Gain
 	case "down":
-		return Dark.Loss
+		return p.Loss
 	default:
-		return Dark.Flat
+		return p.Flat
 	}
 }
 
@@ -302,6 +320,7 @@ type leadLine struct {
 	tz     string
 	dir    string
 	name   string
+	last   string // the series' last value as the Doc prints it
 }
 
 // leadChart is the chart's first series and nothing else: its points draw
@@ -316,15 +335,47 @@ func leadChart(d Doc) (leadLine, bool) {
 	if d.Chart == nil || len(d.Chart.Series) == 0 || len(d.Chart.Series[0].Points) < 2 {
 		return leadLine{}, false
 	}
-	sr := &d.Chart.Series[0]
-	ln := leadLine{tz: d.Chart.TZ, name: sr.Name}
+	return seriesLine(&d.Chart.Series[0], d.Chart.TZ), true
+}
+
+// seriesLine is one series as a line, its range its own first and last
+// timestamps. It needs at least two points.
+func seriesLine(sr *ChartSeries, tz string) leadLine {
+	ln := leadLine{tz: tz, name: sr.Name, last: sr.Last}
 	for _, p := range sr.Points {
 		ln.times = append(ln.times, p[0])
 		ln.values = append(ln.values, p[1])
 	}
 	ln.t0, ln.t1 = int64(ln.times[0]), int64(ln.times[len(ln.times)-1])
 	ln.dir = pctDir(ln.values[len(ln.values)-1])
-	return ln, true
+	return ln
+}
+
+// chartLines are every series with two points or more, in Doc order, for the
+// comparative chart; a series with fewer has no line and no legend entry.
+// They share one time axis, from the earliest first point to the latest
+// last one, set as every line's t0 and t1.
+func chartLines(d Doc) []leadLine {
+	if d.Chart == nil {
+		return nil
+	}
+	var out []leadLine
+	for i := range d.Chart.Series {
+		if len(d.Chart.Series[i].Points) >= 2 {
+			out = append(out, seriesLine(&d.Chart.Series[i], d.Chart.TZ))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	t0, t1 := out[0].t0, out[0].t1
+	for i := range out[1:] {
+		t0, t1 = min(t0, out[i+1].t0), max(t1, out[i+1].t1)
+	}
+	for i := range out {
+		out[i].t0, out[i].t1 = t0, t1
+	}
+	return out
 }
 
 // pctDir is the direction of a percent change as shown at two decimals, the
@@ -418,4 +469,141 @@ func lineYAt(pts [][2]float64, px float64) float64 {
 		}
 	}
 	return pts[len(pts)-1][1]
+}
+
+// compareStyle is how the comparative chart draws its frame.
+type compareStyle struct {
+	grid, zero, label color.RGBA
+	labelSize         float64 // percent and hour labels
+	lineW, gridW      float64
+	lang              string
+	maxTicks          int
+}
+
+// compareTickGap is the space between the plot and its labels, as a share
+// of the label size.
+const compareTickGap = 0.8
+
+// drawCompareChart plots every line on one percent axis inside the box:
+// gridlines at round percents, labeled in the gutter left of x, the
+// previous close dashed at 0%, a line per series in its ink, and full-hour
+// ticks in the series' zone under the plot. inks[i] draws lines[i]; with
+// fewer inks than lines they repeat. The first line is drawn last, on top.
+func drawCompareChart(s Surface, lines []leadLine, inks []color.RGBA, x, y, w, h float64, st compareStyle) {
+	if len(lines) == 0 || len(inks) == 0 {
+		return
+	}
+	lo, hi := 0.0, 0.0
+	for i := range lines {
+		for _, v := range lines[i].values {
+			lo, hi = math.Min(lo, v), math.Max(hi, v)
+		}
+	}
+	if hi-lo < 1e-9 {
+		lo, hi = lo-1, hi+1
+	}
+	step := niceStep(hi-lo, st.maxTicks)
+	lo, hi = math.Floor(lo/step-chartPad)*step, math.Ceil(hi/step+chartPad)*step
+	yOf := func(v float64) float64 { return math.Max(y, math.Min(y+h, y+h-(v-lo)/(hi-lo)*h)) }
+	for k := math.Round(lo / step); k*step <= hi+1e-9; k++ {
+		v := k * step
+		gy := yOf(v)
+		lab := pctLabel(v, step, st.lang)
+		s.Text(x-st.labelSize*compareTickGap, gy+st.labelSize*capHeight/2, SansRegular, st.labelSize, st.label, lab, AlignRight)
+		if math.Abs(v) < step/2 {
+			continue // the previous close is drawn dashed, after the grid
+		}
+		s.Line(x, gy, x+w, gy, st.gridW, st.grid, 0)
+	}
+	s.Line(x, yOf(0), x+w, yOf(0), st.gridW*1.6, st.zero, dashLen/2)
+
+	t0, t1 := lines[0].t0, lines[0].t1
+	span := float64(t1 - t0)
+	xOf := func(t float64) float64 {
+		if span <= 0 {
+			return x
+		}
+		return x + math.Max(0, math.Min(1, (t-float64(t0))/span))*w
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		ln := lines[i]
+		pts := make([][2]float64, len(ln.values))
+		for j, v := range ln.values {
+			px := x + float64(j)/float64(len(ln.values)-1)*w
+			if span > 0 {
+				px = xOf(ln.times[j])
+			}
+			pts[j] = [2]float64{px, yOf(v)}
+		}
+		s.Polyline(pts, st.lineW, inks[i%len(inks)])
+	}
+
+	// Full hours in the series' own zone, every one, two or three hours as
+	// the session's length allows, each label kept inside the plot's width.
+	if span <= 0 {
+		return
+	}
+	loc, err := time.LoadLocation(lines[0].tz)
+	if err != nil || lines[0].tz == "" {
+		loc = time.UTC
+	}
+	every := time.Hour
+	switch hours := span / 3600; {
+	case hours > 18:
+		every = 3 * time.Hour
+	case hours > 10:
+		every = 2 * time.Hour
+	}
+	start := time.Unix(t0, 0).In(loc)
+	tick := time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, loc)
+	for tick.Before(start) || tick.Hour()%int(every.Hours()) != 0 {
+		tick = tick.Add(time.Hour)
+	}
+	base := y + h + st.labelSize*(compareTickGap+capHeight) + st.labelSize*0.4
+	for ; !tick.After(time.Unix(t1, 0)); tick = tick.Add(every) {
+		tx := xOf(float64(tick.Unix()))
+		lab := tick.Format("15:04")
+		half := s.Measure(SansRegular, st.labelSize, lab) / 2
+		lx, a := tx, AlignCenter
+		switch {
+		case tx-half < x:
+			lx, a = x, AlignLeft
+		case tx+half > x+w:
+			lx, a = x+w, AlignRight
+		}
+		s.Line(tx, y+h, tx, y+h+st.labelSize*0.4, st.gridW, st.label, 0)
+		s.Text(lx, base, SansRegular, st.labelSize, st.label, lab, a)
+	}
+}
+
+// niceStep is the smallest round percent step that splits span into at
+// most maxTicks intervals.
+func niceStep(span float64, maxTicks int) float64 {
+	for _, m := range []float64{0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50} {
+		if span/m <= float64(maxTicks) {
+			return m
+		}
+	}
+	return 100
+}
+
+// pctLabel is a gridline's percent with as many decimals as the step needs,
+// signed with a true minus, in the brief's language.
+func pctLabel(v, step float64, lang string) string {
+	dec := 0
+	for p := step; math.Abs(p-math.Round(p)) > 1e-9 && dec < 2; p *= 10 {
+		dec++
+	}
+	if math.Abs(v) < step/2 {
+		return "0%"
+	}
+	num := strconv.FormatFloat(math.Abs(v), 'f', dec, 64)
+	if lang == "pt-PT" {
+		num = strings.Replace(num, ".", ",", 1)
+	}
+	sign := "+"
+	if v < 0 {
+		sign = "−"
+	}
+	return sign + num + "%"
 }

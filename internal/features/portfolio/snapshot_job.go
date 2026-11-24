@@ -86,16 +86,22 @@ func RunSnapshotTick(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logg
 		if ctx.Err() != nil {
 			return
 		}
-		if _, err := CaptureSnapshot(ctx, db, logger, *l, now); err != nil {
+		out, err := CaptureSnapshot(ctx, db, *l, now)
+		if err != nil {
 			logger.Warn("portfolio_snapshot capture failed", "portfolio_list_id", apijson.FormatUUID(l.ID), "error", err)
+			continue
 		}
+		logger.Info("portfolio_snapshot outcome", "list_id", apijson.FormatUUID(l.ID),
+			"outcome", out.Kind.String(), "priced", out.Priced, "missing", out.Missing)
 	}
 }
 
-// CaptureOutcome is PortfolioSnapshotJob.CaptureOutcome.
+// CaptureOutcome is what one capture did, with the symbol counts it
+// priced and could not price (zero unless a row was valued).
 type CaptureOutcome struct {
 	Kind    CaptureKind
-	Missing int // for CaptureIncompletePricing
+	Priced  int
+	Missing int
 }
 
 // CaptureKind enumerates why a capture did or did not write.
@@ -103,15 +109,36 @@ type CaptureKind int
 
 // CaptureOutcome cases.
 const (
+	// CaptureCaptured wrote a fully priced row.
 	CaptureCaptured CaptureKind = iota
 	CaptureAlreadyCaptured
 	CaptureMarketClosed
-	CaptureIncompletePricing
+	// CaptureCapturedPartial wrote a row with some symbols unpriced; they
+	// count as 0, as they do in live statistics.
+	CaptureCapturedPartial
 	CaptureEmpty
 )
 
+// String is the outcome as logged: captured, captured_partial,
+// already_captured, market_closed or no_holdings.
+func (k CaptureKind) String() string {
+	switch k {
+	case CaptureCaptured:
+		return "captured"
+	case CaptureAlreadyCaptured:
+		return "already_captured"
+	case CaptureMarketClosed:
+		return "market_closed"
+	case CaptureCapturedPartial:
+		return "captured_partial"
+	case CaptureEmpty:
+		return "no_holdings"
+	}
+	return "unknown"
+}
+
 // CaptureSnapshot is PortfolioSnapshotJob.capture(list:now:on:logger:).
-func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logger, list portfoliodb.PortfolioList, now time.Time) (CaptureOutcome, error) {
+func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.PortfolioList, now time.Time) (CaptureOutcome, error) {
 	q := portfoliodb.New(db)
 	day := StartOfDay(now)
 	exists := func() (bool, error) {
@@ -137,13 +164,12 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logg
 			return CaptureOutcome{Kind: CaptureMarketClosed}, nil
 		}
 	}
+	// An unpriced symbol counts as 0, as in live statistics, and the row
+	// records how many there were. Skipping the whole list instead froze
+	// the series at the last fully priced day.
+	written := CaptureOutcome{Kind: CaptureCaptured, Priced: v.PricedSymbols, Missing: v.MissingSymbols}
 	if !v.IsFullyPriced() {
-		if logger != nil {
-			logger.Warn("portfolio_snapshot skipped: incomplete pricing",
-				"portfolio_list_id", apijson.FormatUUID(list.ID),
-				"priced", strconv.Itoa(v.PricedSymbols), "missing", strconv.Itoa(v.MissingSymbols))
-		}
-		return CaptureOutcome{Kind: CaptureIncompletePricing, Missing: v.MissingSymbols}, nil
+		written.Kind = CaptureCapturedPartial
 	}
 	err = q.InsertSnapshot(ctx, portfoliodb.InsertSnapshotParams{
 		ID:              uuid.New(),
@@ -171,11 +197,16 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logg
 		}
 		return CaptureOutcome{Kind: CaptureAlreadyCaptured}, nil
 	}
-	return CaptureOutcome{Kind: CaptureCaptured}, nil
+	return written, nil
 }
 
-// marketTraded: some held symbol has a bar or a cached quote dated day.
+// marketTraded: day is a Monday-Friday (UTC), or some held symbol has a bar
+// or a cached quote dated day. A weekday without a quote for it (a symbol
+// the provider never prices) still trades.
 func marketTraded(ctx context.Context, q *portfoliodb.Queries, userID, listID uuid.UUID, day time.Time) (bool, error) {
+	if wd := day.UTC().Weekday(); wd != time.Saturday && wd != time.Sunday {
+		return true, nil
+	}
 	stocks, err := q.StocksForUserList(ctx, portfoliodb.StocksForUserListParams{UserID: userID, PortfolioListID: listID})
 	if err != nil {
 		return false, err

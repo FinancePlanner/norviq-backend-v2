@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"image/color"
 	"image/png"
 	"math"
 	"os"
@@ -357,9 +358,10 @@ func TestHeadlineNeverBreaksBeforeAFigure(t *testing.T) {
 	}
 }
 
-// openDoc is The Open: the lead card is the Nasdaq 100 futures under the
-// catalog name "Nasdaq 100", while BuildDoc names the series "Nasdaq 100
-// futures". The chart spans the overnight session, 18:00 to 03:00 New York.
+// openDoc is The Open ordered as BuildDoc orders it: the European open
+// first (the DAX, down, with its own spark), then the US futures. The chart
+// keeps only futures, so its first series is "Nasdaq 100 futures", rising
+// steadily overnight from 18:00 to 03:00 New York.
 func openDoc() Doc {
 	d := fixtureDoc("en")
 	d.EditionName, d.EditionID = "The Open", "MI-2026-11-21-O"
@@ -368,18 +370,61 @@ func openDoc() Doc {
 	d.URL = "https://www.norviq.org/brief/2026-11-21/morning"
 	d.Published = "08:15"
 	d.Provenance = "Market data: Yahoo Finance · Published 08:15 Lisbon · MI-2026-11-21-O r1"
-	const t0, t1 = 1795215600, 1795215600 + 9*3600 // 2026-11-20 23:00 UTC, 2026-11-21 08:00 UTC
-	spark := d.Cards[0].Spark
-	pts := make([][2]float64, len(spark))
-	for i, v := range spark {
-		pts[i] = [2]float64{t0 + float64(i)/float64(len(spark)-1)*(t1-t0), (v/26519.65 - 1) * 100}
+	const t0, t1, n = 1795215600, 1795215600 + 9*3600, 54 // 2026-11-20 23:00 UTC to 2026-11-21 08:00 UTC
+	pts := make([][2]float64, n)
+	for i := range pts {
+		f := float64(i) / (n - 1)
+		pts[i] = [2]float64{t0 + f*(t1-t0), 0.6*f + 0.08*math.Sin(float64(i)*0.9)}
 	}
-	d.Cards[0].Meta = "NQ=F"
+	daxSpark := []float64{24803.2, 24760.1, 24712.4, 24690.0, 24655.3}
+	d.Cards = []Card{
+		{Name: "DAX", Meta: "GDAXI · DE", Level: "24,655.30", Change: "−147.90", ChangePct: "−0.60%", Dir: "down", Spark: daxSpark, PrevClose: 24803.2},
+		{Name: "Nasdaq 100", Meta: "NQ=F · US", Level: "25,180.50", Change: "+150.25", ChangePct: "+0.60%", Dir: "up", PrevClose: 25030.25},
+		{Name: "S&P 500", Meta: "ES=F · US", Level: "6,941.75", Change: "+27.50", ChangePct: "+0.40%", Dir: "up", PrevClose: 6914.25},
+	}
 	d.Chart = &ChartData{
-		Series: []ChartSeries{{Name: "Nasdaq 100 futures", Points: pts, Last: "−5.62%"}},
-		T0:     t0, T1: t1, TZ: "America/New_York",
+		Series: []ChartSeries{
+			{Name: "Nasdaq 100 futures", Points: pts, Last: "+0.60%"},
+			{Name: "S&P 500 futures", Points: pts[:2], Last: "+0.40%"},
+		},
+		T0: t0, T1: t1, TZ: "America/New_York",
 	}
 	return d
+}
+
+// vertexSurface records how many vertices each polyline has, which
+// RecordingSurface does not keep.
+type vertexSurface struct {
+	*RecordingSurface
+	vertices []int
+}
+
+func (v *vertexSurface) Polyline(pts [][2]float64, width float64, c color.RGBA) {
+	v.vertices = append(v.vertices, len(pts))
+	v.RecordingSurface.Polyline(pts, width, c)
+}
+
+func TestChartPlotsTheLabelledSeries(t *testing.T) {
+	d := openDoc()
+	for _, tc := range []struct {
+		f    Format
+		w, h float64
+		draw func(Surface, Doc)
+	}{{FormatSocial, 1080, 1350, DrawSocial}, {FormatStory, 1080, 1920, DrawStory}} {
+		vs := &vertexSurface{RecordingSurface: &RecordingSurface{W: tc.w, H: tc.h}}
+		tc.draw(vs, d)
+		if len(vs.vertices) != 1 || vs.vertices[0] != len(d.Chart.Series[0].Points) {
+			t.Fatalf("%s: polylines with %v vertices, want one with %d (the series on the axis)", tc.f, vs.vertices, len(d.Chart.Series[0].Points))
+		}
+		for _, op := range vs.Ops {
+			if op.Kind == "polyline" && op.Color != Dark.Gain {
+				t.Errorf("%s: chart line in %v, want gain: the series rises though the DAX card is down", tc.f, op.Color)
+			}
+		}
+		if _, name := axisText(vs.RecordingSurface, "18:00"); name != "NASDAQ100FUTURES" {
+			t.Errorf("%s: axis name %q, want the plotted series", tc.f, name)
+		}
+	}
 }
 
 // axisText returns the time-axis labels and the centered series name drawn

@@ -293,46 +293,51 @@ func drawLogo(s Surface, x, y, h float64) float64 {
 	return w
 }
 
-// leadLine is what the chart plots: the lead card's session against its
+// leadLine is what the chart plots: one series, in percent from its
 // previous close.
 type leadLine struct {
+	times  []float64 // unix seconds, one per value
 	values []float64
-	base   float64
 	t0, t1 int64
 	tz     string
 	dir    string
 	name   string
 }
 
-// leadChart picks the one line worth a chart: the first card's session
-// against its previous close, or, without a spark, the chart's first series
-// against 0%. The first series is the lead series by construction, so the
-// axis takes its name and the chart's own range; nothing is joined on
-// display names, which differ between a card and its series (The Open's
-// "Nasdaq 100" card plots "Nasdaq 100 futures"). It is absent without a
-// Chart or without anything to plot, so a brief never shows an empty frame.
+// leadChart is the chart's first series and nothing else: its points draw
+// the line against a 0% (previous close) baseline, its name labels the axis,
+// its first and last timestamps are the axis range, and the direction of its
+// last point colors it. No card is consulted: BuildDoc orders cards by brief
+// group and filters chart series by edition, so Cards[0] need not be the
+// charted instrument (on The Open it is the DAX, while only futures are
+// charted). It is absent without a Chart or without two points, so a brief
+// never shows an empty frame.
 func leadChart(d Doc) (leadLine, bool) {
-	if d.Chart == nil || len(d.Cards) == 0 {
+	if d.Chart == nil || len(d.Chart.Series) == 0 || len(d.Chart.Series[0].Points) < 2 {
 		return leadLine{}, false
 	}
-	c := d.Cards[0]
-	ln := leadLine{dir: c.Dir, tz: d.Chart.TZ, t0: d.Chart.T0, t1: d.Chart.T1}
-	var first *ChartSeries
-	if len(d.Chart.Series) > 0 {
-		first = &d.Chart.Series[0]
-		ln.name = first.Name
+	sr := &d.Chart.Series[0]
+	ln := leadLine{tz: d.Chart.TZ, name: sr.Name}
+	for _, p := range sr.Points {
+		ln.times = append(ln.times, p[0])
+		ln.values = append(ln.values, p[1])
 	}
-	switch {
-	case len(c.Spark) >= 2 && c.PrevClose > 0:
-		ln.values, ln.base = c.Spark, c.PrevClose
-	case first != nil && len(first.Points) >= 2:
-		for _, p := range first.Points {
-			ln.values = append(ln.values, p[1])
-		}
-	default:
-		return leadLine{}, false
-	}
+	ln.t0, ln.t1 = int64(ln.times[0]), int64(ln.times[len(ln.times)-1])
+	ln.dir = pctDir(ln.values[len(ln.values)-1])
 	return ln, true
+}
+
+// pctDir is the direction of a percent change as shown at two decimals, the
+// precision every change in a brief is printed at.
+func pctDir(pct float64) string {
+	switch r := math.Round(pct * 100); {
+	case r > 0:
+		return "up"
+	case r < 0:
+		return "down"
+	default:
+		return "flat"
+	}
 }
 
 // timeLabels are the chart's first and last clock times in its own zone,
@@ -352,7 +357,7 @@ func (ln leadLine) timeLabels() (start, end string) {
 // dashed previous-close baseline, then the line itself. Every point is
 // clamped to the box.
 func drawChart(s Surface, ln leadLine, x, y, w, h float64) {
-	lo, hi := ln.base, ln.base
+	lo, hi := 0.0, 0.0 // the previous close is always in view
 	for _, v := range ln.values {
 		lo, hi = math.Min(lo, v), math.Max(hi, v)
 	}
@@ -364,13 +369,20 @@ func drawChart(s Surface, ln leadLine, x, y, w, h float64) {
 	yOf := func(v float64) float64 {
 		return math.Max(y, math.Min(y+h, y+h-(v-lo)/(hi-lo)*h))
 	}
+	// x follows the timestamps, so a gap in the data stays a gap in time;
+	// without a usable range the points are spaced evenly.
 	n := len(ln.values)
+	span := float64(ln.t1 - ln.t0)
 	pts := make([][2]float64, n)
 	for i, v := range ln.values {
-		pts[i] = [2]float64{x + float64(i)/float64(n-1)*w, yOf(v)}
+		f := float64(i) / float64(n-1)
+		if span > 0 {
+			f = math.Max(0, math.Min(1, (ln.times[i]-float64(ln.t0))/span))
+		}
+		pts[i] = [2]float64{x + f*w, yOf(v)}
 	}
 	col := dirColor(ln.dir)
-	baseY := math.Round(yOf(ln.base))
+	baseY := math.Round(yOf(0))
 	// Area: one column per two pixels, from the line to the baseline, graded
 	// in fixed bands from faint at the previous close to strongest at the
 	// session's furthest point from it.

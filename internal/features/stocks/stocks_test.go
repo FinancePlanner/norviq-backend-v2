@@ -1016,3 +1016,85 @@ func TestListHoldingsSpansPortfoliosAndStaysWithTheCaller(t *testing.T) {
 		t.Fatalf("capped = %+v, %v", capped, err)
 	}
 }
+
+// ---- stock_updated activity amount -------------------------------------------------
+
+// updatedActivity is the newest stock_updated activity: its amount (nil
+// when NULL) and is_growth.
+func (e *env) updatedActivity(t *testing.T, userID uuid.UUID) (*float64, bool) {
+	t.Helper()
+	var amount *float64
+	var growth bool
+	err := e.app.Deps.DB.QueryRow(context.Background(), `SELECT amount, is_growth FROM user_activities
+		WHERE user_id = $1 AND type = 'stock_updated' ORDER BY created_at DESC LIMIT 1`, userID).Scan(&amount, &growth)
+	if err != nil {
+		t.Fatalf("activity: %v", err)
+	}
+	return amount, growth
+}
+
+func (e *env) updateStock(t *testing.T, token, id string, body map[string]any) {
+	t.Helper()
+	if r := e.app.Do("PUT", "/v1/stocks/id/"+id, token, body); r.Status != 200 {
+		t.Fatalf("update: %d %s", r.Status, r.Body)
+	}
+}
+
+func TestUpdateStock_ActivityAmountIsCostDelta(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("upd-delta"))
+	s := e.createStock(t, token, stockBody("AAPL", 10, 100, "2024-01-01"))
+	e.updateStock(t, token, s.ID, stockBody("AAPL", 12, 100, "2024-01-01"))
+	amount, growth := e.updatedActivity(t, userID)
+	if amount == nil || *amount != 200 || !growth {
+		t.Fatalf("amount %v growth %v", amount, growth)
+	}
+}
+
+func TestUpdateStock_CostDecreaseIsNotGrowth(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("upd-down"))
+	s := e.createStock(t, token, stockBody("AAPL", 10, 100, "2024-01-01"))
+	e.updateStock(t, token, s.ID, stockBody("AAPL", 10, 90, "2024-01-01"))
+	amount, growth := e.updatedActivity(t, userID)
+	if amount == nil || *amount != -100 || growth {
+		t.Fatalf("amount %v growth %v", amount, growth)
+	}
+}
+
+func TestUpdateStock_NoCostChangeHasNoAmount(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("upd-notes"))
+	s := e.createStock(t, token, stockBody("AAPL", 3, 0.1, "2024-01-01"))
+	body := stockBody("AAPL", 3, 0.1, "2024-01-01")
+	body["notes"] = "long term"
+	e.updateStock(t, token, s.ID, body)
+	amount, growth := e.updatedActivity(t, userID)
+	if amount != nil || growth {
+		t.Fatalf("amount %v growth %v", amount, growth)
+	}
+}
+
+// Moving a holding onto the same symbol in another list merges the rows;
+// the activity is still this edit's cost change, not the merged total.
+func TestUpdateStock_MergeActivityAmountIsCostDelta(t *testing.T) {
+	e := newEnv(t)
+	userID, token := e.user(uniqueEmail("upd-merge"))
+	first := e.createStock(t, token, stockBody("AAPL", 1, 100, "2024-01-01"))
+	other := uuid.New()
+	if _, err := e.app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO portfolio_lists (id, user_id, name, mode, created_at) VALUES ($1, $2, 'Second', 'actual', now())`, other, userID); err != nil {
+		t.Fatal(err)
+	}
+	otherID := strings.ToUpper(other.String())
+	body := stockBody("AAPL", 3, 200, "2024-02-01")
+	body["portfolioListId"] = otherID
+	e.createStock(t, token, body)
+	body = stockBody("AAPL", 2, 100, "2024-01-01")
+	body["portfolioListId"] = otherID
+	e.updateStock(t, token, first.ID, body)
+	amount, growth := e.updatedActivity(t, userID)
+	if amount == nil || *amount != 100 || !growth {
+		t.Fatalf("amount %v growth %v", amount, growth)
+	}
+}

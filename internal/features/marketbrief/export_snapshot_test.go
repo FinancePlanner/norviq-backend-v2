@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,5 +156,23 @@ func TestRenderPanicBecomesError(t *testing.T) {
 	restore()
 	if r := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil); r.Status != http.StatusOK || r.Header.Get("Content-Type") != "image/png" {
 		t.Fatalf("after the panic: %d %v", r.Status, r.Header)
+	}
+}
+
+// The manifest's page count costs a full PDF layout, so it is computed once
+// per brief, language and renderer, then served from the cache.
+func TestExportManifestPagesAreCached(t *testing.T) {
+	var calls atomic.Int32
+	marketbrief.SetReportPagesForTest(t, func(export.Doc) int { calls.Add(1); return 3 })
+	h := stubApp(t, snapshotRepo{t: t, snap: snap(1, "hash-pages", "Text.")})
+	pat := h.pat("market:read")
+	for range 3 {
+		r := h.Do(http.MethodGet, "/v1/market/brief/exports?date="+exportDate+"&slot=evening", pat, nil)
+		if r.Status != http.StatusOK || !strings.Contains(string(r.Body), `"pages":3`) {
+			t.Fatalf("%d %s", r.Status, r.Body)
+		}
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("ReportPages ran %d times for one brief", n)
 	}
 }

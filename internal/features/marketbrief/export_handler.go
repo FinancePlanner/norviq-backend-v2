@@ -29,9 +29,24 @@ const exportFillTimeout = 20 * time.Second
 // renderExport draws one export. A variable so tests can make it fail.
 var renderExport = export.Render
 
+// reportPages counts the PDF's pages for the manifest. A variable so tests
+// can count its calls.
+var reportPages = export.ReportPages
+
+// exportRenderSlots is how many cold renders run at once, process-wide. A
+// render peaks at tens of MB of heap, and single-flight only merges
+// requests for the same key: without this a burst of distinct cold keys
+// (32 measured at 650 MB) outgrows the pod's 450 MiB.
+const exportRenderSlots = 2
+
+// renderSlots holds one token per running render.
+var renderSlots = make(chan struct{}, exportRenderSlots)
+
 type exportFile struct {
 	data []byte
 	mime string
+	// pages is the PDF's page count, for a manifest entry; data is then nil.
+	pages int
 }
 
 // exportCache is an LRU of rendered exports with a single-flight fill: ten
@@ -85,11 +100,13 @@ func (c *exportCache) put(key string, f exportFile) {
 }
 
 // fill returns the cached file for key, or runs render once however many
-// callers ask at the same time. A failed render is not cached.
+// callers ask at the same time. A failed render is not cached. Renders of
+// different keys queue for one of exportRenderSlots.
 //
 // The render is shared, so it must not depend on the first caller: the wait
 // runs on a context detached from the request (a client that hangs up does
-// not fail the waiters) and bounded by exportFillTimeout.
+// not fail the waiters) and bounded by exportFillTimeout, and so does the
+// wait for a slot.
 func (c *exportCache) fill(ctx context.Context, key string, render func() (exportFile, error)) (exportFile, error) {
 	if f, ok := c.get(key); ok {
 		return f, nil
@@ -100,6 +117,15 @@ func (c *exportCache) fill(ctx context.Context, key string, render func() (expor
 		if f, ok := c.get(key); ok {
 			return f, nil
 		}
+		wait := time.NewTimer(exportFillTimeout)
+		defer wait.Stop()
+		select {
+		case renderSlots <- struct{}{}:
+		case <-wait.C:
+			return nil, httpx.Abort(http.StatusServiceUnavailable, "Export renderer busy; try again shortly.")
+		}
+		// Released even when render panics: recovered returns normally.
+		defer func() { <-renderSlots }()
 		f, err := c.recovered(key, render)
 		if err != nil {
 			return nil, err
@@ -198,6 +224,15 @@ func (h *exportHandlers) manifest(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Counting pages lays the whole PDF out, so it is cached and queued for
+	// a render slot like a file.
+	key := snap.ContentHash + "-pages-" + p.lang + "-v" + strconv.Itoa(export.RendererVersion)
+	pages, err := h.cache.fill(c.Request().Context(), key, func() (exportFile, error) {
+		return exportFile{pages: reportPages(doc)}, nil
+	})
+	if err != nil {
+		return err
+	}
 	c.Response().Header().Set("Cache-Control", "public, max-age=300")
 	return httpx.OK(c, ExportManifest{
 		EditionID: doc.EditionID, Revision: snap.Revision, ContentHash: snap.ContentHash, RendererVersion: export.RendererVersion,
@@ -205,7 +240,7 @@ func (h *exportHandlers) manifest(c *echo.Context) error {
 			{ID: "og", Width: 1200, Height: 630, Mime: "image/png"},
 			{ID: "social", Width: 1080, Height: 1350, Mime: "image/png"},
 			{ID: "story", Width: 1080, Height: 1920, Mime: "image/png"},
-			{ID: "pdf", Pages: export.ReportPages(doc), Mime: "application/pdf"},
+			{ID: "pdf", Pages: pages.pages, Mime: "application/pdf"},
 		},
 	})
 }

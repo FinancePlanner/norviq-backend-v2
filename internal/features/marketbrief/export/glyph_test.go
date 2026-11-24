@@ -37,3 +37,12 @@ func TestRenderPDFSurvivesNonBMP(t *testing.T) {
 		t.Fatalf("Measure with emoji %v, without %v", got, want)
 	}
 }
+
+// Every surface draws with the one parse of each font.
+func TestParsedFontIsShared(t *testing.T) {
+	for f := range fontFiles {
+		if parsedFont(f) != parsedFont(f) {
+			t.Fatalf("font %d parsed twice", f)
+		}
+	}
+}

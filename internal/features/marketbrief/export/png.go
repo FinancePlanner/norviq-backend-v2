@@ -24,7 +24,6 @@ type faceKey struct {
 // PNGSurface draws onto an RGBA bitmap. It is not safe for concurrent use.
 type PNGSurface struct {
 	img   *image.RGBA
-	fonts map[Font]*opentype.Font
 	faces map[faceKey]font.Face
 }
 
@@ -32,7 +31,6 @@ type PNGSurface struct {
 func NewPNGSurface(w, h int) *PNGSurface {
 	return &PNGSurface{
 		img:   image.NewRGBA(image.Rect(0, 0, w, h)),
-		fonts: map[Font]*opentype.Font{},
 		faces: map[faceKey]font.Face{},
 	}
 }
@@ -117,21 +115,15 @@ func (p *PNGSurface) Image(img image.Image, x, y, w, h float64) {
 
 func floatToFixed(v float64) fixed.Int26_6 { return fixed.Int26_6(math.Round(v * 64)) }
 
-// face loads and caches the face for a font at a size. Fonts are embedded
-// and known good, so a parse failure is a build defect and panics.
+// face builds and caches the face for a font at a size, on the font parsed
+// once for the process. A face is not safe for concurrent use, so each
+// surface keeps its own.
 func (p *PNGSurface) face(f Font, size float64) font.Face {
 	key := faceKey{f, size}
 	if fc, ok := p.faces[key]; ok {
 		return fc
 	}
-	of, ok := p.fonts[f]
-	if !ok {
-		var err error
-		if of, err = opentype.Parse(FontBytes(f)); err != nil {
-			panic(fmt.Sprintf("export: parse embedded font %d: %v", f, err))
-		}
-		p.fonts[f] = of
-	}
+	of := parsedFont(f)
 	// DPI 72 makes the size a pixel size; no hinting keeps output stable across x/image versions.
 	fc, err := opentype.NewFace(of, &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingNone})
 	if err != nil {

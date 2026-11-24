@@ -208,8 +208,12 @@ func TestHistoricalSeriesAndPrices(t *testing.T) {
 	}
 }
 
-// 2024-03-19T12:00:00Z, a Tuesday.
-var tuesday = friday.Add(4 * 24 * time.Hour)
+// Tuesday 2024-03-19 (UTC) at 01:00, 10:00 and 22:30.
+var (
+	tuesdayEarly   = time.Date(2024, 3, 19, 1, 0, 0, 0, time.UTC)
+	tuesdayMorning = time.Date(2024, 3, 19, 10, 0, 0, 0, time.UTC)
+	tuesdayLate    = time.Date(2024, 3, 19, 22, 30, 0, 0, time.UTC)
+)
 
 // One unpriced symbol (A6I in the owner's account) no longer stops the
 // whole list from being captured: the row stores what is priced and counts
@@ -241,7 +245,7 @@ func TestCaptureSnapshot_NothingPricedWritesZeroValueRow(t *testing.T) {
 	l := h.listRow(user, "None", "actual")
 	h.stock(user, l.ID, "NVDA", 4, 500)
 
-	if out := h.capture(l, tuesday); out.Kind != portfolio.CaptureCapturedPartial || out.Priced != 0 || out.Missing != 1 {
+	if out := h.capture(l, tuesdayLate); out.Kind != portfolio.CaptureCapturedPartial || out.Priced != 0 || out.Missing != 1 {
 		t.Fatalf("%+v", out)
 	}
 	rows := h.snapshots(user)
@@ -250,19 +254,53 @@ func TestCaptureSnapshot_NothingPricedWritesZeroValueRow(t *testing.T) {
 	}
 }
 
-// A weekday counts as traded without a quote or bar dated that day; the
-// last close prices it.
-func TestMarketTraded_WeekdayWithoutQuotesCountsAsTraded(t *testing.T) {
+// Early on a weekday, no bar or quote for the day yet means the market has
+// not traded: capturing now would date yesterday's close as today.
+func TestMarketTraded_WeekdayBeforeCloseWithoutEvidenceIsNotTraded(t *testing.T) {
 	h := newJobHarness(t)
-	user := h.CreateUser("snap-tue@example.com")
-	l := h.listRow(user, "Tue", "actual")
+	user := h.CreateUser("snap-tue-early@example.com")
+	l := h.listRow(user, "TueEarly", "actual")
 	h.stock(user, l.ID, "AAPL", 10, 150)
 	h.bar("AAPL", friday, 200)
 
-	if out := h.capture(l, tuesday); out.Kind != portfolio.CaptureCaptured || out.Kind.String() != "captured" {
+	if out := h.capture(l, tuesdayEarly); out.Kind != portfolio.CaptureMarketClosed {
+		t.Fatalf("%+v", out)
+	}
+	if len(h.snapshots(user)) != 0 {
+		t.Fatal("wrote a row before the close")
+	}
+}
+
+// From 22:00 UTC a weekday counts as traded without evidence (a symbol the
+// provider never prices); the last close prices what it can.
+func TestMarketTraded_WeekdayAfterCloseWithoutEvidenceIsTraded(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-tue-late@example.com")
+	l := h.listRow(user, "TueLate", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+
+	if out := h.capture(l, tuesdayLate); out.Kind != portfolio.CaptureCaptured {
 		t.Fatalf("%+v", out)
 	}
 	if rows := h.snapshots(user); len(rows) != 1 || rows[0].MarketValue != 2000 {
+		t.Fatalf("%+v", rows)
+	}
+}
+
+// A quote dated today is evidence at any hour.
+func TestMarketTraded_WeekdayWithQuoteTodayIsTraded(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-tue-quote@example.com")
+	l := h.listRow(user, "TueQuote", "actual")
+	h.stock(user, l.ID, "AAPL", 10, 150)
+	h.bar("AAPL", friday, 200)
+	h.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'AAPL', 'usd', 210, $2, now())`, uuid.New(), tuesdayMorning.Add(-time.Hour))
+
+	if out := h.capture(l, tuesdayMorning); out.Kind != portfolio.CaptureCaptured {
+		t.Fatalf("%+v", out)
+	}
+	if rows := h.snapshots(user); len(rows) != 1 || rows[0].MarketValue != 2100 {
 		t.Fatalf("%+v", rows)
 	}
 }

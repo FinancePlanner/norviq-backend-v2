@@ -156,7 +156,7 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.
 	}
 	// A cash-only portfolio has no symbol to date the market by.
 	if v.PositionCount > 0 {
-		traded, err := marketTraded(ctx, q, list.UserID, list.ID, day)
+		traded, err := marketTraded(ctx, q, list.UserID, list.ID, now)
 		if err != nil {
 			return CaptureOutcome{}, err
 		}
@@ -200,26 +200,34 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.
 	return written, nil
 }
 
-// marketTraded: day is a Monday-Friday (UTC), or some held symbol has a bar
-// or a cached quote dated day. A weekday without a quote for it (a symbol
-// the provider never prices) still trades.
-func marketTraded(ctx context.Context, q *portfoliodb.Queries, userID, listID uuid.UUID, day time.Time) (bool, error) {
-	if wd := day.UTC().Weekday(); wd != time.Saturday && wd != time.Sunday {
-		return true, nil
-	}
+// weekdayCloseHourUTC is the hour (UTC) from which a weekday counts as
+// traded without a bar or quote dated it. US markets have closed by then
+// (21:00 UTC in winter, 20:00 in summer).
+const weekdayCloseHourUTC = 22
+
+// marketTraded: some held symbol has a bar or a cached quote dated now's
+// day (UTC). Failing that, a Monday-Friday counts as traded from
+// weekdayCloseHourUTC, so a symbol the provider never prices cannot stop
+// capture; before then the day has no evidence yet and is not captured.
+func marketTraded(ctx context.Context, q *portfoliodb.Queries, userID, listID uuid.UUID, now time.Time) (bool, error) {
+	day := StartOfDay(now)
 	stocks, err := q.StocksForUserList(ctx, portfoliodb.StocksForUserListParams{UserID: userID, PortfolioListID: listID})
 	if err != nil {
 		return false, err
 	}
 	symbols := UniqueSymbols(stockSymbols(stocks))
-	if len(symbols) == 0 {
-		return false, nil
+	if len(symbols) > 0 {
+		next := AddDays(day, 1)
+		bars, err := q.CountBarsOnDay(ctx, portfoliodb.CountBarsOnDayParams{Symbols: symbols, Day: day, NextDay: next})
+		if err != nil || bars > 0 {
+			return bars > 0, err
+		}
+		quotes, err := q.CountQuotesInRange(ctx, portfoliodb.CountQuotesInRangeParams{Symbols: symbols, FromTime: day, ToTime: next})
+		if err != nil || quotes > 0 {
+			return quotes > 0, err
+		}
 	}
-	next := AddDays(day, 1)
-	bars, err := q.CountBarsOnDay(ctx, portfoliodb.CountBarsOnDayParams{Symbols: symbols, Day: day, NextDay: next})
-	if err != nil || bars > 0 {
-		return bars > 0, err
-	}
-	quotes, err := q.CountQuotesInRange(ctx, portfoliodb.CountQuotesInRangeParams{Symbols: symbols, FromTime: day, ToTime: next})
-	return quotes > 0, err
+	u := now.UTC()
+	weekday := u.Weekday() != time.Saturday && u.Weekday() != time.Sunday
+	return weekday && u.Hour() >= weekdayCloseHourUTC, nil
 }

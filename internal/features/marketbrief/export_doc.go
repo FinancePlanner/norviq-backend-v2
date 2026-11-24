@@ -423,6 +423,10 @@ func docCrossAsset(e *Edition, lang string, str docStrings) []export.Row {
 				row.Level = formatPrecise(in.Last, in.Precision, lang) + "%"
 				row.Change = formatBps(*in.ChangeBps, lang)
 				row.Dir = dirOf(*in.ChangeBps, 1)
+			case in.AssetClass == AssetRate:
+				// A yield's ChangePct is relative and is never its move.
+				row.Level = formatPrecise(in.Last, in.Precision, lang) + "%"
+				row.Dir = DirectionFlat
 			default:
 				row.Level = formatPrecise(in.Last, in.Precision, lang)
 				if in.Unit == UnitUSDBbl {

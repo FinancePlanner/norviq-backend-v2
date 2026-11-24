@@ -241,3 +241,26 @@ func TestFormatHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestDocYieldWithoutBpsShowsLevelOnly(t *testing.T) {
+	for _, tc := range []struct{ lang, level, leak string }{
+		{"en", "4.910%", "2.75"},
+		{"pt-PT", "4,910%", "2,75"},
+	} {
+		e := docEdition()
+		for i := range e.Instruments {
+			if e.Instruments[i].Symbol == "^TNX" {
+				e.Instruments[i].ChangeBps = nil
+			}
+		}
+		d := BuildDoc(docBrief(tc.lang), e, "https://www.norviq.org")
+		r := d.CrossAsset[0]
+		if r.Level != tc.level || r.Change != "" || r.Dir != "flat" {
+			t.Fatalf("%s rates row: %+v", tc.lang, r)
+		}
+		b, _ := json.Marshal(d)
+		if strings.Contains(string(b), "2.75") || strings.Contains(string(b), "2,75") {
+			t.Fatalf("%s: relative yield change leaked: %s", tc.lang, b)
+		}
+	}
+}

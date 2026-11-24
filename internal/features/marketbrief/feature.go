@@ -159,6 +159,7 @@ func (h *handlers) show(c *echo.Context) error {
 			return err
 		}
 		out.Edition = edition
+		out.Headline = Headline(brief, edition)
 	}
 	c.Response().Header().Set("Cache-Control", "private, max-age=300")
 	return httpx.OK(c, out)
@@ -168,6 +169,8 @@ func (h *handlers) show(c *echo.Context) error {
 type showResponse struct {
 	Response
 	Edition *Edition `json:"edition,omitempty"`
+	// Headline is derived from the numbers; set only under include=edition.
+	Headline string `json:"headline,omitempty"`
 }
 
 // includes reports whether a comma-separated `include` list names want.

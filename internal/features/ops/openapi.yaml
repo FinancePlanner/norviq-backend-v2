@@ -15528,6 +15528,12 @@ components:
         degraded:
           type: boolean
           description: Web search was unavailable; the text came from in-house sources only.
+        headline:
+          type: string
+          description: >-
+            One factual line: the lead session's tone and its largest mover.
+            Present only with `include=edition`; deterministic and derived
+            from the numbers.
         previous:
           allOf:
             - $ref: '#/components/schemas/MarketBriefRef'

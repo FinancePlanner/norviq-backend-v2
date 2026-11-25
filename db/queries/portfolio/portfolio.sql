@@ -110,8 +110,8 @@ SELECT EXISTS (
 INSERT INTO portfolio_value_snapshots (
     id, user_id, portfolio_list_id, captured_on, currency, market_value,
     cost_basis, cash_balance, position_count, source, priced_symbols,
-    missing_symbols, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+    missing_symbols, created_at, fx_as_of, fx_missing
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
 
 -- name: CountBarsOnDay :one
 SELECT count(*) FROM market_price_bars
@@ -132,7 +132,7 @@ ORDER BY symbol, as_of DESC;
 
 -- name: AdjustedCloses :many
 -- MarketPriceBarRepository.adjustedCloses.
-SELECT date, adjusted_close FROM market_price_bars
+SELECT date, adjusted_close, currency FROM market_price_bars
 WHERE instrument_key = sqlc.arg(instrument_key)::text
   AND date BETWEEN sqlc.arg(from_day)::date AND sqlc.arg(to_day)::date
 ORDER BY date ASC;

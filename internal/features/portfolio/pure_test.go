@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"norviq-api/internal/platform/fx"
 	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/store/portfoliodb"
 
@@ -192,28 +193,124 @@ func stock(sym string, shares, price float64) portfoliodb.Stock {
 	return portfoliodb.Stock{ID: uuid.New(), Symbol: sym, Shares: shares, BuyPrice: price}
 }
 
+// usd wraps raw prices as USD quotes.
+func usd(m map[string]float64) map[string]Price {
+	out := make(map[string]Price, len(m))
+	for k, v := range m {
+		out[k] = Price{Value: v, Currency: "USD", Factor: 1}
+	}
+	return out
+}
+
+// mustValuate is the flag-off Valuate: base USD, Passthrough rates.
+func mustValuate(t *testing.T, stocks []portfoliodb.Stock, prices map[string]Price, cash float64) SnapshotValuation {
+	t.Helper()
+	v, err := Valuate(context.Background(), stocks, prices, cash, "USD", fx.Passthrough{}, time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func ccy(s string) *string { return &s }
+
+func fxStock(sym string, shares, buy float64, currency *string) portfoliodb.Stock {
+	st := stock(sym, shares, buy)
+	st.Currency = currency
+	return st
+}
+
+var fxFixture = []fx.DailyRate{
+	{Date: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC), Quote: "USD", Rate: "1.05"},
+	{Date: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC), Quote: "DKK", Rate: "7.46"},
+}
+
+func multiCurrencyFixture() ([]portfoliodb.Stock, map[string]Price) {
+	stocks := []portfoliodb.Stock{
+		fxStock("AAPL", 10, 100, nil),
+		fxStock("NOVO", 5, 500, ccy("DKK")),
+		fxStock("NOVO", 5, 500, nil),
+		fxStock("SHOP", 1, 50, ccy("USD")),
+		fxStock("VOD.L", 100, 1, nil),
+	}
+	prices := map[string]Price{
+		"AAPL":  {200, "USD", 1},
+		"NOVO":  {700, "DKK", 1},
+		"SHOP":  {90, "CAD", 1},
+		"VOD.L": {500, "GBP", 0.01},
+	}
+	return stocks, prices
+}
+
+func TestValuateMultiCurrency(t *testing.T) {
+	ctx := context.Background()
+	day := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	stocks, prices := multiCurrencyFixture()
+
+	v, err := Valuate(ctx, stocks, prices, 0, "USD", fx.Static(fxFixture), day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMV := 2000 + 10*700*(1.05/7.46)
+	if v.MarketValue != round2(wantMV) {
+		t.Errorf("market value %v want %v", v.MarketValue, round2(wantMV))
+	}
+	// Rows count: AAPL, NOVO x2 priced; SHOP and VOD.L missing.
+	if v.PositionCount != 5 || v.PricedSymbols != 3 || v.MissingSymbols != 2 {
+		t.Errorf("counts %+v", v)
+	}
+	if v.Currency != "USD" {
+		t.Errorf("currency %q", v.Currency)
+	}
+	if v.FxAsOf == nil || !v.FxAsOf.Equal(time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("fx as of %v", v.FxAsOf)
+	}
+	if len(v.FxMissing) != 1 || v.FxMissing[0] != "GBP" {
+		t.Errorf("fx missing %v", v.FxMissing)
+	}
+	if len(v.ListingMismatches) != 1 || v.ListingMismatches[0] != (ListingMismatch{Symbol: "SHOP", HoldingCurrency: "USD", QuoteCurrency: "CAD"}) {
+		t.Errorf("mismatches %+v", v.ListingMismatches)
+	}
+	// Cost: AAPL 1000, both NOVO rows (5000 DKK, the merged holding currency)
+	// converted, SHOP 50; VOD.L has no rate, so its cost is left out.
+	wantCost := 1000 + 5000*(1.05/7.46) + 50
+	if v.CostBasis != round2(wantCost) {
+		t.Errorf("cost basis %v want %v", v.CostBasis, round2(wantCost))
+	}
+
+	// Flag off: raw sums, no guard, no factor, no conversion.
+	off, err := Valuate(ctx, stocks, prices, 0, "USD", fx.Passthrough{}, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.MarketValue != 2000+7000+90+50000 || off.PricedSymbols != 5 || off.MissingSymbols != 0 ||
+		len(off.FxMissing) != 0 || off.FxAsOf != nil || off.Currency != "USD" || len(off.ListingMismatches) != 0 {
+		t.Errorf("flag off %+v", off)
+	}
+}
+
 func TestValuateRule(t *testing.T) {
-	v := Valuate([]portfoliodb.Stock{stock("AAPL", 10, 150), stock("NVDA", 4, 500)}, map[string]float64{"AAPL": 200}, 0, "USD")
+	v := mustValuate(t, []portfoliodb.Stock{stock("AAPL", 10, 150), stock("NVDA", 4, 500)}, usd(map[string]float64{"AAPL": 200}), 0)
 	if v.MarketValue != 2000 || v.CostBasis != 3500 || v.MissingSymbols != 1 || v.PricedSymbols != 1 || v.IsFullyPriced() {
 		t.Fatalf("unpriced %+v", v)
 	}
-	v = Valuate([]portfoliodb.Stock{stock("AAPL", 10, 150), stock("MSFT", 5, 300)}, map[string]float64{"AAPL": 200, "MSFT": 400}, 0, "USD")
+	v = mustValuate(t, []portfoliodb.Stock{stock("AAPL", 10, 150), stock("MSFT", 5, 300)}, usd(map[string]float64{"AAPL": 200, "MSFT": 400}), 0)
 	if !v.IsFullyPriced() || v.MarketValue != 4000 {
 		t.Fatalf("priced %+v", v)
 	}
-	v = Valuate([]portfoliodb.Stock{stock("AAPL", 10, 150)}, map[string]float64{"AAPL": 0}, 0, "USD")
+	v = mustValuate(t, []portfoliodb.Stock{stock("AAPL", 10, 150)}, usd(map[string]float64{"AAPL": 0}), 0)
 	if v.MissingSymbols != 1 || v.MarketValue != 0 {
 		t.Fatalf("zero price %+v", v)
 	}
-	v = Valuate([]portfoliodb.Stock{stock(" aapl\n", 1, 1)}, map[string]float64{"AAPL": 2}, 0, "USD")
+	v = mustValuate(t, []portfoliodb.Stock{stock(" aapl\n", 1, 1)}, usd(map[string]float64{"AAPL": 2}), 0)
 	if v.PricedSymbols != 1 {
 		t.Fatal("symbol normalization")
 	}
-	v = Valuate([]portfoliodb.Stock{stock("AAPL", 1, 100), stock("AAPL", 2, 100)}, map[string]float64{"AAPL": 110}, 0, "USD")
+	v = mustValuate(t, []portfoliodb.Stock{stock("AAPL", 1, 100), stock("AAPL", 2, 100)}, usd(map[string]float64{"AAPL": 110}), 0)
 	if v.PositionCount != 2 || v.PricedSymbols != 2 || v.MarketValue != 330 {
 		t.Fatalf("two rows %+v", v)
 	}
-	v = Valuate([]portfoliodb.Stock{stock("AAPL", 3, 33.333)}, map[string]float64{"AAPL": 10.004}, 12.345, "USD")
+	v = mustValuate(t, []portfoliodb.Stock{stock("AAPL", 3, 33.333)}, usd(map[string]float64{"AAPL": 10.004}), 12.345)
 	if v.CostBasis != 100 || v.MarketValue != 30.01 || v.CashBalance != 12.35 {
 		t.Fatalf("rounding %+v", v)
 	}
@@ -320,5 +417,55 @@ func TestShareSlugAndBaseURL(t *testing.T) {
 	t.Setenv("SHARE_PORTFOLIO_BASE_URL", "")
 	if ShareBaseURL() != "https://norviq.org" {
 		t.Fatal(ShareBaseURL())
+	}
+}
+
+type errRates struct{ err error }
+
+func (e errRates) Rate(context.Context, string, string, time.Time) (fx.Rate, error) {
+	return fx.Rate{}, e.err
+}
+
+func TestValuateRateErrors(t *testing.T) {
+	ctx := context.Background()
+	day := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	stocks := []portfoliodb.Stock{fxStock("NOVO", 1, 10, ccy("DKK"))}
+	prices := map[string]Price{"NOVO": {700, "DKK", 1}}
+
+	boom := errors.New("db down")
+	if _, err := Valuate(ctx, stocks, prices, 0, "USD", errRates{boom}, day); !errors.Is(err, boom) {
+		t.Fatalf("non-ErrMissing error must abort, got %v", err)
+	}
+	// An unpriced foreign holding's cost also needs a rate; a hard error aborts there too.
+	if _, err := Valuate(ctx, stocks, map[string]Price{}, 0, "USD", errRates{boom}, day); !errors.Is(err, boom) {
+		t.Fatalf("cost-side error must abort, got %v", err)
+	}
+	v, err := Valuate(ctx, stocks, prices, 0, "USD", errRates{fx.ErrMissing}, day)
+	if err != nil || v.MissingSymbols != 1 || v.MarketValue != 0 || v.CostBasis != 0 ||
+		len(v.FxMissing) != 1 || v.FxMissing[0] != "DKK" || v.FxAsOf != nil {
+		t.Fatalf("ErrMissing: %+v %v", v, err)
+	}
+}
+
+func TestValuateMinorUnitFactor(t *testing.T) {
+	ctx := context.Background()
+	day := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	rates := fx.Static([]fx.DailyRate{
+		{Date: day, Quote: "USD", Rate: "1.25"},
+		{Date: day, Quote: "GBP", Rate: "0.85"},
+	})
+	stocks := []portfoliodb.Stock{fxStock("VOD.L", 100, 1, ccy("GBP"))}
+	// Quoted in pence: 500p = GBP 5.00.
+	v, err := Valuate(ctx, stocks, map[string]Price{"VOD.L": {500, "GBP", 0.01}}, 0, "USD", rates, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := round2(100 * 500 * 0.01 * (1.25 / 0.85)); v.MarketValue != want {
+		t.Errorf("pence %v want %v", v.MarketValue, want)
+	}
+	// A Price literal without a factor counts as 1 (R20).
+	v, err = Valuate(ctx, []portfoliodb.Stock{stock("AAPL", 10, 100)}, map[string]Price{"AAPL": {200, "USD", 0}}, 0, "USD", rates, day)
+	if err != nil || v.MarketValue != 2000 {
+		t.Errorf("zero factor %+v %v", v, err)
 	}
 }

@@ -88,7 +88,7 @@ func (q *Queries) ActiveShareLinksForUser(ctx context.Context, userID uuid.UUID)
 }
 
 const adjustedCloses = `-- name: AdjustedCloses :many
-SELECT date, adjusted_close FROM market_price_bars
+SELECT date, adjusted_close, currency FROM market_price_bars
 WHERE instrument_key = $1::text
   AND date BETWEEN $2::date AND $3::date
 ORDER BY date ASC
@@ -103,6 +103,7 @@ type AdjustedClosesParams struct {
 type AdjustedClosesRow struct {
 	Date          time.Time
 	AdjustedClose float64
+	Currency      string
 }
 
 // MarketPriceBarRepository.adjustedCloses.
@@ -115,7 +116,7 @@ func (q *Queries) AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) 
 	items := []AdjustedClosesRow{}
 	for rows.Next() {
 		var i AdjustedClosesRow
-		if err := rows.Scan(&i.Date, &i.AdjustedClose); err != nil {
+		if err := rows.Scan(&i.Date, &i.AdjustedClose, &i.Currency); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -344,8 +345,8 @@ const insertSnapshot = `-- name: InsertSnapshot :exec
 INSERT INTO portfolio_value_snapshots (
     id, user_id, portfolio_list_id, captured_on, currency, market_value,
     cost_basis, cash_balance, position_count, source, priced_symbols,
-    missing_symbols, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    missing_symbols, created_at, fx_as_of, fx_missing
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 `
 
 type InsertSnapshotParams struct {
@@ -362,6 +363,8 @@ type InsertSnapshotParams struct {
 	PricedSymbols   int64
 	MissingSymbols  int64
 	CreatedAt       time.Time
+	FxAsOf          *time.Time
+	FxMissing       []string
 }
 
 func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) error {
@@ -379,6 +382,8 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 		arg.PricedSymbols,
 		arg.MissingSymbols,
 		arg.CreatedAt,
+		arg.FxAsOf,
+		arg.FxMissing,
 	)
 	return err
 }

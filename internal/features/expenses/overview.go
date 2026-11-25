@@ -74,8 +74,8 @@ func resolvePortfolioStatistics(ctx context.Context, db expensesdb.DBTX, preferr
 		return preferred, err
 	}
 	marketValue := func(s expensesdb.OverviewStocksRow) float64 {
-		if p, ok := prices[normalizePortfolioSymbol(s.Symbol)]; ok && p > 0 {
-			return s.Shares * p
+		if p, ok := prices[normalizePortfolioSymbol(s.Symbol)]; ok && p.Value > 0 {
+			return s.Shares * p.Value
 		}
 		return s.Shares * s.BuyPrice
 	}

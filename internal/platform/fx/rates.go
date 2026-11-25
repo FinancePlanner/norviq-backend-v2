@@ -187,3 +187,61 @@ func (s *Store) lookup(ctx context.Context, quote string, day time.Time) (float6
 	s.mu.Unlock()
 	return c.value, c.asOf, c.err
 }
+
+// Preload fills the cache for every day in [from, to] and each quote's
+// currency with one query over [from-MaxLookbackDays, to], so Rate calls in
+// that window run no further query. EUR and invalid codes are skipped (they
+// never reach the database). A day with no fixing inside its own lookback is
+// cached as missing, exactly as a lookup would find it.
+func (s *Store) Preload(ctx context.Context, quotes []string, from, to time.Time) error {
+	from, to = utcDay(from), utcDay(to)
+	if from.After(to) {
+		return nil
+	}
+	seen := map[string]bool{}
+	var want []string
+	for _, code := range quotes {
+		iso, _, ok := Normalize(code)
+		if !ok || iso == "EUR" || seen[iso] {
+			continue
+		}
+		seen[iso] = true
+		want = append(want, iso)
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	rows, err := s.q.RatesOnOrBefore(ctx, fxdb.RatesOnOrBeforeParams{
+		Quotes:  want,
+		Day:     to,
+		FromDay: from.AddDate(0, 0, -MaxLookbackDays),
+	})
+	if err != nil {
+		return err
+	}
+	byQuote := map[string][]fixing{} // newest first, per the query's ORDER BY
+	for _, r := range rows {
+		byQuote[r.Quote] = append(byQuote[r.Quote], fixing{utcDay(r.Date), r.Rate})
+	}
+	filled := map[cacheKey]cacheVal{}
+	for _, quote := range want {
+		for day := from; !day.After(to); day = day.AddDate(0, 0, 1) {
+			val := cacheVal{err: ErrMissing}
+			earliest := day.AddDate(0, 0, -MaxLookbackDays)
+			for _, f := range byQuote[quote] {
+				if f.date.After(day) || f.date.Before(earliest) {
+					continue
+				}
+				val = cacheVal{value: f.value, asOf: f.date}
+				break
+			}
+			filled[cacheKey{quote, day}] = val
+		}
+	}
+	s.mu.Lock()
+	for k, v := range filled {
+		s.cache[k] = v
+	}
+	s.mu.Unlock()
+	return nil
+}

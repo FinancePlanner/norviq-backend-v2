@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"norviq-api/internal/store/fxdb"
 	"norviq-api/internal/testutil"
@@ -115,5 +118,82 @@ func TestPassthrough(t *testing.T) {
 	}
 	if !Converting(Static(nil)) {
 		t.Error("Converting(Static) = false")
+	}
+}
+
+// countingDB counts the queries that reach the database.
+type countingDB struct {
+	fxdb.DBTX
+	n atomic.Int64
+}
+
+func (c *countingDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	c.n.Add(1)
+	return c.DBTX.Query(ctx, sql, args...)
+}
+
+func (c *countingDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	c.n.Add(1)
+	return c.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func TestStorePreloadRunsNoFurtherQueries(t *testing.T) {
+	pool := testutil.DB(t)
+	ctx := context.Background()
+	q := fxdb.New(pool)
+	// Weekday fixings only, USD from 2026-09-24 (so the window's first days
+	// look back across the boundary) and DKK with a gap after 2026-10-09.
+	for day := d("2026-09-24"); !day.After(d("2026-10-30")); day = day.AddDate(0, 0, 1) {
+		if wd := day.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue
+		}
+		rows := []DailyRate{{Date: day, Quote: "USD", Rate: "1.10"}}
+		if !day.After(d("2026-10-09")) {
+			rows = append(rows, DailyRate{Date: day, Quote: "DKK", Rate: "7.46"})
+		}
+		for _, r := range rows {
+			if _, err := q.InsertECBRate(ctx, fxdb.InsertECBRateParams{Date: r.Date, Quote: r.Quote, Rate: r.Rate}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	db := &countingDB{DBTX: pool}
+	store := NewStore(db)
+	from, to := d("2026-10-01"), d("2026-10-30")
+	if err := store.Preload(ctx, []string{"USD", "DKK", "EUR", "usd", "N/A"}, from, to); err != nil {
+		t.Fatal(err)
+	}
+	if got := db.n.Load(); got != 1 {
+		t.Fatalf("Preload ran %d queries, want 1", got)
+	}
+	// The reference answers come from an uncached store on the same data.
+	ref := NewStore(pool)
+	checked := 0
+	for day := from; !day.After(to); day = day.AddDate(0, 0, 1) {
+		for _, pair := range [][2]string{{"USD", "EUR"}, {"DKK", "USD"}, {"EUR", "DKK"}} {
+			want, wantErr := ref.Rate(ctx, pair[0], pair[1], day)
+			got, gotErr := store.Rate(ctx, pair[0], pair[1], day)
+			if !errors.Is(gotErr, wantErr) {
+				t.Fatalf("%v %s: err %v want %v", pair, day.Format("2006-01-02"), gotErr, wantErr)
+			}
+			if got != want {
+				t.Fatalf("%v %s: %+v want %+v", pair, day.Format("2006-01-02"), got, want)
+			}
+			checked++
+		}
+	}
+	if got := db.n.Load(); got != 1 {
+		t.Fatalf("%d lookups issued %d further queries", checked, got-1)
+	}
+	// DKK stops after 2026-10-09: day 7 past still resolves, day 8 is missing.
+	if _, err := store.Rate(ctx, "DKK", "EUR", d("2026-10-16")); err != nil {
+		t.Errorf("DKK day 7: %v", err)
+	}
+	if _, err := store.Rate(ctx, "DKK", "EUR", d("2026-10-17")); !errors.Is(err, ErrMissing) {
+		t.Errorf("DKK day 8: %v", err)
+	}
+	// Outside the preloaded window the store still falls back to a query.
+	if _, err := store.Rate(ctx, "USD", "EUR", d("2026-11-02")); err != nil || db.n.Load() != 2 {
+		t.Errorf("outside window: %v, queries %d", err, db.n.Load())
 	}
 }

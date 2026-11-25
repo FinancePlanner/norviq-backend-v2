@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"norviq-api/internal/features/portfolio"
+	"norviq-api/internal/platform/fx"
 	"norviq-api/internal/store/portfoliodb"
 
 	"github.com/google/uuid"
@@ -52,7 +54,7 @@ func (h *jobHarness) bar(symbol string, day time.Time, close float64) {
 
 func (h *jobHarness) capture(l portfoliodb.PortfolioList, now time.Time) portfolio.CaptureOutcome {
 	h.T.Helper()
-	out, err := portfolio.CaptureSnapshot(h.ctx, h.Deps.DB, l, now)
+	out, err := portfolio.CaptureSnapshot(h.ctx, h.Deps.DB, portfolio.RatesFor(h.Deps.DB), l, now)
 	if err != nil {
 		h.T.Fatal(err)
 	}
@@ -190,7 +192,7 @@ func TestHistoricalSeriesAndPrices(t *testing.T) {
 	h.bar("MSFT", friday, 400)
 
 	v := portfolio.SnapshotValuator{DB: h.Deps.DB}
-	series, err := v.HistoricalSeries(h.ctx, user, l.ID, friday.AddDate(0, 0, -3), friday)
+	series, err := v.HistoricalSeries(h.ctx, user, l.ID, friday.AddDate(0, 0, -3), friday, "USD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,10 +201,10 @@ func TestHistoricalSeriesAndPrices(t *testing.T) {
 		t.Fatalf("%+v", series)
 	}
 	prices, err := v.Prices(h.ctx, []string{"aapl", "ZZZ"}, friday, portfolio.PricingHistorical)
-	if err != nil || prices["AAPL"] != 200 || len(prices) != 1 {
+	if err != nil || prices["AAPL"].Value != 200 || len(prices) != 1 {
 		t.Fatalf("%v %v", prices, err)
 	}
-	hist, err := v.Value(h.ctx, user, l.ID, friday.AddDate(0, 0, -2), portfolio.PricingHistorical)
+	hist, err := v.Value(h.ctx, user, l.ID, friday.AddDate(0, 0, -2), portfolio.PricingHistorical, "USD")
 	if err != nil || hist.PositionCount != 1 || hist.MarketValue != 1900 {
 		t.Fatalf("%+v %v", hist, err)
 	}
@@ -381,5 +383,197 @@ func TestSnapshotTickLogsNoOpsAtDebug(t *testing.T) {
 		if !strings.Contains(line, c.level) || !strings.Contains(line, c.kind+" ") || !strings.Contains(line, "portfolio_list_id=") || strings.Contains(line, " list_id=") {
 			t.Fatalf("want %s %s: %q", c.level, c.kind, line)
 		}
+	}
+}
+
+// MARK: - FX valuation
+
+func (h *jobHarness) barIn(symbol string, day time.Time, close float64, currency string) {
+	h.T.Helper()
+	h.exec(`INSERT INTO market_price_bars (instrument_key, date, open, high, low, close, adjusted_close, currency, provider)
+		VALUES ($1, $2, $3, $3, $3, $3, $3, $4, 'test')`, symbol, portfolio.StartOfDay(day).Format("2006-01-02"), close, currency)
+}
+
+func (h *jobHarness) fxRate(day time.Time, quote, rate string) {
+	h.T.Helper()
+	h.exec(`INSERT INTO fx_daily_rates (id, date, base, quote, rate) VALUES (gen_random_uuid(), $1, 'EUR', $2, $3::numeric)`,
+		portfolio.StartOfDay(day).Format("2006-01-02"), quote, rate)
+}
+
+func (h *jobHarness) stockIn(user, list uuid.UUID, symbol string, shares, price float64, currency *string) {
+	h.T.Helper()
+	h.exec(`INSERT INTO stocks (id, user_id, symbol, shares, buy_price, buy_date, created_at, portfolio_list_id, currency)
+		VALUES ($1, $2, $3, $4, $5, '2023-11-14', now(), $6, $7)`, uuid.New(), user, symbol, shares, price, list, currency)
+}
+
+type fxRow struct {
+	asOf    *time.Time
+	missing []string
+	market  float64
+	cost    float64
+	nMiss   int
+}
+
+func (h *jobHarness) fxSnapshot(user uuid.UUID) fxRow {
+	h.T.Helper()
+	var r fxRow
+	if err := h.Deps.DB.QueryRow(h.ctx, `SELECT fx_as_of, fx_missing, market_value, cost_basis, missing_symbols FROM portfolio_value_snapshots WHERE user_id = $1`, user).
+		Scan(&r.asOf, &r.missing, &r.market, &r.cost, &r.nMiss); err != nil {
+		h.T.Fatal(err)
+	}
+	return r
+}
+
+func cents(x float64) float64 { return math.Round(x*100) / 100 }
+
+func ptr(s string) *string { return &s }
+
+func TestCaptureSnapshotWritesFx(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newJobHarness(t)
+
+	// A DKK holding with a seeded rate: converted, fx_as_of set, fx_missing NULL.
+	user := h.CreateUser("snap-fx@example.com")
+	l := h.listRow(user, "FX", "actual")
+	h.stockIn(user, l.ID, "NOVO-B.CO", 10, 500, ptr("DKK"))
+	h.barIn("NOVO-B.CO", friday, 700, "DKK")
+	h.fxRate(friday.AddDate(0, 0, -1), "USD", "1.05")
+	h.fxRate(friday.AddDate(0, 0, -1), "DKK", "7.46")
+	if out := h.capture(l, friday); out.Kind != portfolio.CaptureCaptured || out.Priced != 1 || out.Missing != 0 {
+		t.Fatalf("%+v", out)
+	}
+	r := h.fxSnapshot(user)
+	rate := 1.05 / 7.46
+	wantMV := cents(10 * 700 * rate)
+	if r.asOf == nil || !r.asOf.Equal(portfolio.StartOfDay(friday.AddDate(0, 0, -1))) || r.missing != nil ||
+		r.market != wantMV || r.nMiss != 0 {
+		t.Fatalf("%+v want market %v", r, wantMV)
+	}
+
+	// A GBp-quoted holding with no GBP rate: counted missing, GBP recorded.
+	user2 := h.CreateUser("snap-fx2@example.com")
+	l2 := h.listRow(user2, "FX2", "actual")
+	h.stock(user2, l2.ID, "VOD.L", 100, 1)
+	h.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'VOD.L', 'GBp', 72, $2, now())`, uuid.New(), friday)
+	out := h.capture(l2, friday)
+	if out.Kind != portfolio.CaptureCapturedPartial || out.Missing != 1 || out.Priced != 0 {
+		t.Fatalf("%+v", out)
+	}
+	r = h.fxSnapshot(user2)
+	if len(r.missing) != 1 || r.missing[0] != "GBP" || r.nMiss != 1 || r.market != 0 || r.asOf != nil {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// With a GBP rate the pence quote is scaled to pounds before converting.
+func TestCaptureSnapshotAppliesMinorUnitFactor(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-fx3@example.com")
+	l := h.listRow(user, "FX3", "actual")
+	h.stock(user, l.ID, "VOD.L", 100, 1)
+	h.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'VOD.L', 'GBp', 72, $2, now())`, uuid.New(), friday)
+	h.fxRate(friday, "USD", "1.25")
+	h.fxRate(friday, "GBP", "0.85")
+	if out := h.capture(l, friday); out.Kind != portfolio.CaptureCaptured {
+		t.Fatalf("%+v", out)
+	}
+	want := cents(100 * 72 * 0.01 * (1.25 / 0.85))
+	if r := h.fxSnapshot(user); r.market != want || r.missing != nil {
+		t.Fatalf("%+v want %v", r, want)
+	}
+}
+
+// Flag off: a listing-mismatch holding is counted at the raw quote, as today.
+func TestCaptureSnapshotFlagOffIgnoresListingMismatch(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "false")
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-off@example.com")
+	l := h.listRow(user, "Off", "actual")
+	h.stockIn(user, l.ID, "SHOP", 2, 50, ptr("USD"))
+	h.barIn("SHOP", friday, 90, "CAD")
+	if out := h.capture(l, friday); out.Kind != portfolio.CaptureCaptured || len(out.Mismatches) != 0 {
+		t.Fatalf("%+v", out)
+	}
+	if r := h.fxSnapshot(user); r.market != 180 || r.asOf != nil || r.missing != nil || r.nMiss != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// With the flag on the same holding is missing, and the tick logs why.
+func TestTickLogsListingMismatch(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newJobHarness(t)
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	user := h.CreateUser("snap-mm@example.com")
+	l := h.listRow(user, "MM", "actual")
+	h.stockIn(user, l.ID, "SHOP", 2, 50, ptr("USD"))
+	h.barIn("SHOP", friday, 90, "CAD")
+	h.fxRate(friday, "USD", "1.05")
+	h.fxRate(friday, "CAD", "1.50")
+	portfolio.RunSnapshotTick(h.ctx, h.Deps.DB, logger, friday)
+	log := buf.String()
+	for _, want := range []string{"portfolio.valuation listing_mismatch", "symbol=SHOP", "holding_currency=USD", "quote_currency=CAD", "missing=1"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("missing %q in %s", want, log)
+		}
+	}
+	if r := h.fxSnapshot(user); r.market != 0 || r.nMiss != 1 || r.cost != 100 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+type failingRates struct{}
+
+func (failingRates) Rate(context.Context, string, string, time.Time) (fx.Rate, error) {
+	return fx.Rate{}, context.DeadlineExceeded
+}
+
+// A rates failure other than ErrMissing writes no row.
+func TestCaptureSnapshotAbortsOnRatesError(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-err@example.com")
+	l := h.listRow(user, "Err", "actual")
+	h.stockIn(user, l.ID, "NOVO-B.CO", 10, 500, ptr("DKK"))
+	h.barIn("NOVO-B.CO", friday, 700, "DKK")
+	if _, err := portfolio.CaptureSnapshot(h.ctx, h.Deps.DB, failingRates{}, l, friday); err == nil {
+		t.Fatal("rates error swallowed")
+	}
+	if len(h.snapshots(user)) != 0 {
+		t.Fatal("row written")
+	}
+}
+
+func TestHistoricalSeriesConvertsWithPreload(t *testing.T) {
+	h := newJobHarness(t)
+	user := h.CreateUser("snap-hs@example.com")
+	l := h.listRow(user, "HS", "actual")
+	h.stockIn(user, l.ID, "NOVO-B.CO", 10, 500, ptr("DKK"))
+	h.stockIn(user, l.ID, "AAPL", 1, 100, nil)
+	h.barIn("NOVO-B.CO", friday.AddDate(0, 0, -1), 700, "DKK")
+	h.barIn("NOVO-B.CO", friday, 710, "DKK")
+	h.barIn("AAPL", friday, 200, "USD")
+	for _, day := range []time.Time{friday.AddDate(0, 0, -1), friday} {
+		h.fxRate(day, "USD", "1.05")
+		h.fxRate(day, "DKK", "7.46")
+	}
+	v := portfolio.SnapshotValuator{DB: h.Deps.DB, Rates: fx.NewStore(h.Deps.DB)}
+	series, err := v.HistoricalSeries(h.ctx, user, l.ID, friday.AddDate(0, 0, -1), friday, "USD")
+	if err != nil || len(series) != 2 {
+		t.Fatalf("%+v %v", series, err)
+	}
+	rate := 1.05 / 7.46
+	round := cents
+	if got, want := series[0].Valuation.MarketValue, round(10*700*rate); got != want || series[0].Valuation.Currency != "USD" || series[0].Valuation.FxAsOf == nil {
+		t.Errorf("thursday %+v want %v", series[0].Valuation, want)
+	}
+	if got, want := series[1].Valuation.MarketValue, round(10*710*rate+200); got != want {
+		t.Errorf("friday %v want %v", got, want)
+	}
+	// Flag off: the same series sums raw.
+	raw, err := portfolio.SnapshotValuator{DB: h.Deps.DB}.HistoricalSeries(h.ctx, user, l.ID, friday.AddDate(0, 0, -1), friday, "USD")
+	if err != nil || raw[1].Valuation.MarketValue != 10*710+200 || raw[1].Valuation.FxAsOf != nil {
+		t.Fatalf("%+v %v", raw, err)
 	}
 }

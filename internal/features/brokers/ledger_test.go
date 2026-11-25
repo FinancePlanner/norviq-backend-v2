@@ -289,8 +289,8 @@ func TestSyncWritesStockCurrency(t *testing.T) {
 	}
 }
 
-// A minor-unit position (GBX) is stored as ISO GBP with buy_price in pounds.
-func TestSyncScalesMinorUnitAverageCost(t *testing.T) {
+// A minor-unit position (GBX) is stored raw: code GBX and the pence cost.
+func TestSyncKeepsMinorUnitCostAndCurrencyRaw(t *testing.T) {
 	h := newHarness(t, nil)
 	userID, _ := h.user(t)
 	symbol := strings.ToUpper("LDM" + uuid.NewString()[:4])
@@ -304,7 +304,7 @@ func TestSyncScalesMinorUnitAverageCost(t *testing.T) {
 	if err := h.app.Deps.DB.QueryRow(bg, `SELECT currency, buy_price FROM stocks WHERE user_id = $1 AND symbol = $2`, userID, symbol).Scan(&currency, &buy); err != nil {
 		t.Fatal(err)
 	}
-	if currency == nil || *currency != "GBP" || math.Abs(buy-2.5) > 1e-9 {
-		t.Fatalf("currency %v buy_price %v, want GBP 2.5", currency, buy)
+	if currency == nil || *currency != "GBX" || buy != 250 {
+		t.Fatalf("currency %v buy_price %v, want GBX 250", currency, buy)
 	}
 }

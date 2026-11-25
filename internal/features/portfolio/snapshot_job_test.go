@@ -577,3 +577,42 @@ func TestHistoricalSeriesConvertsWithPreload(t *testing.T) {
 		t.Fatalf("%+v %v", raw, err)
 	}
 }
+
+// An IBKR-style GBX holding: stored currency GBX, buy_price in pence, quote in GBp.
+func (h *jobHarness) gbxHolding(email string) (uuid.UUID, portfoliodb.PortfolioList) {
+	h.T.Helper()
+	user := h.CreateUser(email)
+	l := h.listRow(user, "GBX", "actual")
+	h.stockIn(user, l.ID, "VOD.L", 100, 250, ptr("GBX"))
+	h.exec(`INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, created_at) VALUES ($1, 'test', 'VOD.L', 'GBp', 72, $2, now())`, uuid.New(), friday)
+	h.fxRate(friday, "USD", "1.25")
+	h.fxRate(friday, "GBP", "0.85")
+	return user, l
+}
+
+func TestCaptureSnapshotFlagOffGBXHoldingIsRaw(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "false")
+	h := newJobHarness(t)
+	user, l := h.gbxHolding("snap-gbx-off@example.com")
+	if out := h.capture(l, friday); out.Kind != portfolio.CaptureCaptured || len(out.Mismatches) != 0 {
+		t.Fatalf("%+v", out)
+	}
+	if r := h.fxSnapshot(user); r.market != 100*72 || r.cost != 100*250 || r.asOf != nil || r.missing != nil {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestCaptureSnapshotFlagOnGBXHoldingIsMajorUnits(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newJobHarness(t)
+	user, l := h.gbxHolding("snap-gbx-on@example.com")
+	out := h.capture(l, friday)
+	if out.Kind != portfolio.CaptureCaptured || len(out.Mismatches) != 0 {
+		t.Fatalf("%+v", out)
+	}
+	rate := 1.25 / 0.85
+	r := h.fxSnapshot(user)
+	if r.market != cents(100*72*0.01*rate) || r.cost != cents(100*250*0.01*rate) || r.nMiss != 0 {
+		t.Fatalf("%+v", r)
+	}
+}

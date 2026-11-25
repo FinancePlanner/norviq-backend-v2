@@ -38,6 +38,20 @@ type Settings struct {
 	// YahooBaseURL is v2-only (Vapor hard-coded Yahoo's chart URL): test
 	// stubs and parity runs. Unset means the real endpoint.
 	YahooBaseURL string `env:"YAHOO_CHART_BASE_URL"`
+	// PublicBaseURL is the site the exports link back to (default
+	// DefaultPublicBaseURL). Not SHARE_PUBLIC_BASE_URL: that one belongs to
+	// the share screen.
+	PublicBaseURL string `env:"MARKET_BRIEF_PUBLIC_BASE_URL"`
+}
+
+// DefaultPublicBaseURL is where an export's links point unless configured.
+const DefaultPublicBaseURL = "https://www.norviq.org"
+
+func (s Settings) publicBaseURL() string {
+	if v := strings.TrimSpace(s.PublicBaseURL); v != "" {
+		return v
+	}
+	return DefaultPublicBaseURL
 }
 
 // IsEnabled is envBool("MARKET_BRIEF_ENABLED", default: false).
@@ -94,6 +108,9 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	// notification scopes rather than market:read.
 	g.GET("/notifications", h.notificationPreferences, auth.RequireScope(auth.ScopeNotificationsRead))
 	g.PUT("/notifications", h.updateNotificationPreferences, auth.RequireScope(auth.ScopeNotificationsWrite))
+	x := &exportHandlers{repo: h.repo, baseURL: s.publicBaseURL(), cache: newExportCache(exportCacheSize, d.Logger), enabled: h.enabled}
+	g.GET("/exports", x.manifest, auth.RequireScope(auth.ScopeMarketRead))
+	g.GET("/export", x.file, auth.RequireScope(auth.ScopeMarketRead))
 	return nil
 }
 
@@ -159,6 +176,7 @@ func (h *handlers) show(c *echo.Context) error {
 			return err
 		}
 		out.Edition = edition
+		out.Headline = Headline(brief, edition)
 	}
 	c.Response().Header().Set("Cache-Control", "private, max-age=300")
 	return httpx.OK(c, out)
@@ -168,6 +186,8 @@ func (h *handlers) show(c *echo.Context) error {
 type showResponse struct {
 	Response
 	Edition *Edition `json:"edition,omitempty"`
+	// Headline is derived from the numbers; set only under include=edition.
+	Headline string `json:"headline,omitempty"`
 }
 
 // includes reports whether a comma-separated `include` list names want.

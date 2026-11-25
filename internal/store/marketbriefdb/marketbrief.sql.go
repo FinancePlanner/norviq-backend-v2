@@ -318,6 +318,39 @@ func (q *Queries) MarketBriefOnDay(ctx context.Context, arg MarketBriefOnDayPara
 	return i, err
 }
 
+const marketBriefSnapshot = `-- name: MarketBriefSnapshot :one
+SELECT payload, edition, revision, content_hash FROM market_briefs
+WHERE trading_date = $1 AND slot = $2 AND language = $3
+LIMIT 1
+`
+
+type MarketBriefSnapshotParams struct {
+	TradingDate string
+	Slot        string
+	Language    string
+}
+
+type MarketBriefSnapshotRow struct {
+	Payload     string
+	Edition     json.RawMessage
+	Revision    int32
+	ContentHash *string
+}
+
+// One statement, so payload, edition, revision and hash always belong to the
+// same revision of the slot. content_hash is NULL on a legacy row.
+func (q *Queries) MarketBriefSnapshot(ctx context.Context, arg MarketBriefSnapshotParams) (MarketBriefSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, marketBriefSnapshot, arg.TradingDate, arg.Slot, arg.Language)
+	var i MarketBriefSnapshotRow
+	err := row.Scan(
+		&i.Payload,
+		&i.Edition,
+		&i.Revision,
+		&i.ContentHash,
+	)
+	return i, err
+}
+
 const nextMarketBriefRevision = `-- name: NextMarketBriefRevision :one
 SELECT (COALESCE(MAX(revision), 0) + 1)::integer AS next_revision FROM market_brief_revisions
 WHERE trading_date = $1 AND slot = $2

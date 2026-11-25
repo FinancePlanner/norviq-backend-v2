@@ -3,6 +3,7 @@ module norviq-api
 go 1.27.3
 
 require (
+	codeberg.org/go-pdf/fpdf v0.12.0
 	github.com/caarlos0/env/v11 v11.4.2
 	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/go-webauthn/webauthn v0.18.2

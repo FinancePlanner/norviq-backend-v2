@@ -2187,6 +2187,91 @@ paths:
           description: Token lacks the market:read scope
         '404':
           description: No brief for that date and slot
+  /v1/market/brief/exports:
+    get:
+      operationId: getMarketBriefExports
+      tags: [MarketData]
+      summary: Shareable renders available for a brief
+      description: >-
+        Lists the image and PDF renders of one brief with the revision and
+        content hash they are cached under. The same for every caller. A 404
+        for every slot while the market brief is switched off.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date }, description: 'Lisbon trading date, `yyyy-MM-dd`.' }
+        - { name: slot, in: query, required: true, schema: { type: string, enum: [morning, evening] } }
+        - { name: lang, in: query, required: false, schema: { type: string, default: en }, description: '`en` or `pt-PT`; anything starting with `pt` is `pt-PT`.' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketBriefExportManifest'
+          headers:
+            Cache-Control: { schema: { type: string, example: 'public, max-age=300' } }
+        '400':
+          description: Unknown slot or malformed date
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the market:read scope
+        '404':
+          description: No brief for that date and slot, or the market brief is switched off
+  /v1/market/brief/export:
+    get:
+      operationId: getMarketBriefExport
+      tags: [MarketData]
+      summary: One render of a brief (PNG or PDF)
+      description: >-
+        The bytes are identical for every caller. Byte identity holds within
+        one build (CPU architecture and Go version), not across builds at the
+        same `rendererVersion`. `ETag` is
+        `"<contentHash>-<format>-<lang>-v<rendererVersion>"`. The response is
+        immutable only when `rev` is the current revision and `v` the current
+        renderer version; append the manifest's `query` for that format to get
+        such a URL. Without `rev` or without `v` it is cached for five
+        minutes. A `rev` or `v` that is no longer current is a 404, so a
+        renderer change never hides behind a year-long cache.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: slot, in: query, required: true, schema: { type: string, enum: [morning, evening] } }
+        - { name: lang, in: query, required: false, schema: { type: string, default: en } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [og, social, story, pdf] } }
+        - { name: rev, in: query, required: false, schema: { type: integer, minimum: 1 }, description: Revision from the manifest. }
+        - { name: v, in: query, required: false, schema: { type: integer, minimum: 1 }, description: Renderer version from the manifest (`rendererVersion`). }
+        - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The file
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+            Content-Disposition: { schema: { type: string } }
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '304':
+          description: Not modified
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+        '400':
+          description: Unknown slot or format, malformed date, rev or v
+        '401':
+          description: Unauthorized
+        '403':
+          description: Token lacks the market:read scope
+        '404':
+          description: >-
+            No brief for that date and slot (or the market brief is switched
+            off), `rev` is superseded (reason `revision superseded`), or `v`
+            is not the current renderer (reason `renderer superseded`)
   /v1/market/brief/notifications:
     get:
       operationId: getMarketBriefNotificationPreferences
@@ -15528,6 +15613,12 @@ components:
         degraded:
           type: boolean
           description: Web search was unavailable; the text came from in-house sources only.
+        headline:
+          type: string
+          description: >-
+            One factual line: the lead session's tone and its largest mover.
+            Present only with `include=edition`; deterministic and derived
+            from the numbers.
         previous:
           allOf:
             - $ref: '#/components/schemas/MarketBriefRef'
@@ -15608,6 +15699,30 @@ components:
         asOf: { type: string, format: date-time }
         source: { type: string }
       required: [symbol, interval, points, asOf, source]
+    MarketBriefExportManifest:
+      type: object
+      properties:
+        editionId: { type: string, description: 'MI-<date>-<O|C>; derived from the date and slot for a brief written before editions existed.' }
+        revision: { type: integer, minimum: 1 }
+        contentHash: { type: string }
+        rendererVersion: { type: integer }
+        formats:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, enum: [og, social, story, pdf] }
+              width: { type: integer }
+              height: { type: integer }
+              pages: { type: integer, description: PDF only. }
+              mime: { type: string }
+              query:
+                type: string
+                description: >-
+                  Appended to `/v1/market/brief/export?date=&slot=&lang=&format=<id>&`,
+                  gives the immutable URL for this render, e.g. `rev=1&v=1`.
+            required: [id, mime, query]
+      required: [editionId, revision, contentHash, rendererVersion, formats]
     MarketBriefRef:
       type: object
       properties:

@@ -2,6 +2,8 @@ package marketbrief
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -26,6 +28,11 @@ type Repository interface {
 	// Edition is the slot's structured market data, nil for a legacy brief
 	// or a slot that does not exist.
 	Edition(ctx context.Context, tradingDate, slot string) (*Edition, error)
+	// Snapshot reads a brief, its edition, revision and content hash in one
+	// statement, so they always belong to the same revision. nil when the
+	// slot has no row in that language. A legacy row has no stored hash, so
+	// one is computed from its payload.
+	Snapshot(ctx context.Context, tradingDate, slot, language string) (*Snapshot, error)
 	Latest(ctx context.Context, language string) (*Response, error)
 	Find(ctx context.Context, tradingDate, slot, language string) (*Response, error)
 	// Previous is the brief stored just before (tradingDate, slot) in this
@@ -121,6 +128,38 @@ func (r DBRepository) Edition(ctx context.Context, tradingDate, slot string) (*E
 		return nil, err
 	}
 	return decodeEdition(row.Edition), nil
+}
+
+// Snapshot is one revision of a brief as stored.
+type Snapshot struct {
+	Response
+	Edition     *Edition
+	Revision    int
+	ContentHash string
+}
+
+// Snapshot implements Repository.
+func (r DBRepository) Snapshot(ctx context.Context, tradingDate, slot, language string) (*Snapshot, error) {
+	row, err := r.q().MarketBriefSnapshot(ctx, marketbriefdb.MarketBriefSnapshotParams{TradingDate: tradingDate, Slot: slot, Language: language})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	resp, err := decodePayload(row.Payload)
+	if err != nil {
+		return nil, err
+	}
+	hash := ""
+	if row.ContentHash != nil {
+		hash = *row.ContentHash
+	}
+	if hash == "" {
+		sum := sha256.Sum256([]byte(row.Payload))
+		hash = hex.EncodeToString(sum[:])[:16]
+	}
+	return &Snapshot{Response: resp, Edition: decodeEdition(row.Edition), Revision: int(row.Revision), ContentHash: hash}, nil
 }
 
 // Latest implements Repository: by trading day, not by write time, so a

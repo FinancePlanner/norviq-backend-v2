@@ -30,6 +30,9 @@ type Querier interface {
 	// The edition is language-neutral; every language row of a slot holds the same one.
 	MarketBriefEdition(ctx context.Context, arg MarketBriefEditionParams) (MarketBriefEditionRow, error)
 	MarketBriefOnDay(ctx context.Context, arg MarketBriefOnDayParams) (MarketBriefOnDayRow, error)
+	// One statement, so payload, edition, revision and hash always belong to the
+	// same revision of the slot. content_hash is NULL on a legacy row.
+	MarketBriefSnapshot(ctx context.Context, arg MarketBriefSnapshotParams) (MarketBriefSnapshotRow, error)
 	// 1 for a slot never regenerated, else one past the newest archived revision.
 	NextMarketBriefRevision(ctx context.Context, arg NextMarketBriefRevisionParams) (int32, error)
 	UpdateMarketBriefNotificationPreference(ctx context.Context, arg UpdateMarketBriefNotificationPreferenceParams) error

@@ -1,38 +1,28 @@
 package portfolio_test
 
 import (
-	"context"
 	"math"
 	"net/http"
 	"strings"
 	"testing"
 
 	"norviq-api/internal/features/portfolio"
-	"norviq-api/internal/platform/marketdata"
 	"norviq-api/internal/server"
 	"norviq-api/internal/testutil"
 
 	"github.com/google/uuid"
 )
 
-type stubFx map[string]float64
-
-func (s stubFx) Fx(_ context.Context, pair string) (marketdata.FxRateResponse, error) {
-	rate, ok := s[strings.ToUpper(pair)]
-	if !ok {
-		return marketdata.FxRateResponse{}, context.DeadlineExceeded
-	}
-	return marketdata.FxRateResponse{Base: pair[:3], Quote: pair[3:], Rate: rate}, nil
-}
-
 // /v1/portfolio/summary and /v1/pnl answered realizedPnl 0 always. Now they
 // sum broker lot disposals and manual/ledger sells (transactions.realized_pnl)
 // over the portfolio's accounts, converted into its base currency; a sell a
 // disposal already accounts for is counted once.
 func TestRealizedPnlFromDisposalsAndSells(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
 	q := &stubQuotes{fail: true}
-	app := testutil.NewApp(t, []server.Feature{portfolio.Feature{Quotes: q, Fx: stubFx{"EURUSD": 1.1}}})
+	app := testutil.NewApp(t, []server.Feature{portfolio.Feature{Quotes: q}})
 	h := &harness{App: app, quotes: q}
+	h.fxToday("USD", "1.1")
 	user := h.CreateUser("realized@example.com")
 	main := h.list(user, "Main", true)
 	other := h.list(user, "Other", false)
@@ -104,5 +94,31 @@ func TestRealizedPnlFromDisposalsAndSells(t *testing.T) {
 	ok(t, r, 200)
 	if !strings.Contains(string(r.Body), `"realizedPnl":0`) {
 		t.Fatalf("%s", r.Body)
+	}
+}
+
+// A disposal in a currency with no rate is left out and reported, never
+// counted 1:1; with a rate it converts at EUR->base over EUR->currency.
+func TestRealizedPnlMissingRateNotOneToOne(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newHarness(t)
+	user := h.CreateUser("realized-missing@example.com")
+	main := h.list(user, "Main", true)
+	h.stock(user, main, "AAPL", 1, 100)
+	h.fxToday("USD", "1.05")
+	novo := uuid.New()
+	h.exec(`INSERT INTO instruments (id, conid, symbol, exchange, currency, created_at) VALUES ($1, 'r9', 'NOVO', 'CPH', 'DKK', now())`, novo)
+	acct := h.account(user, &main, "manual")
+	h.exec(`INSERT INTO transactions (id, account_id, instrument_id, type, quantity, price, currency, trade_date, realized_pnl, created_at)
+		VALUES ($1, $2, $3, 'sell', 1, 1, 'DKK', '2026-03-01', 746, now())`, uuid.New(), acct, novo)
+
+	s := h.summary(t, user, main)
+	if s.RealizedPnl != 0 || len(s.FxMissing) != 1 || s.FxMissing[0] != "DKK" {
+		t.Fatalf("missing: %+v", s)
+	}
+	h.fxToday("DKK", "7.46")
+	s = h.summary(t, user, main)
+	if math.Abs(s.RealizedPnl-746*1.05/7.46) > 0.011 || len(s.FxMissing) != 0 {
+		t.Fatalf("with rate: %+v", s)
 	}
 }

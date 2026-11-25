@@ -359,13 +359,22 @@ func (s stubQuotes) QuoteBatch(_ context.Context, symbols []string) (marketdata.
 
 func fp(v float64) *float64 { return &v }
 
+func mustValue(t *testing.T, svc ValuationService, ctx context.Context, stocks []portfoliodb.Stock, cash float64) Valuation {
+	t.Helper()
+	v, err := svc.Value(ctx, stocks, cash, "USD", nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func TestValuationService(t *testing.T) {
 	ctx := context.Background()
 	svc := ValuationService{Quotes: stubQuotes{quotes: map[string]marketdata.QuoteResponse{
 		"AAPL": {Symbol: "AAPL", Currency: "USD", CurrentPrice: 200, Change: fp(2), PercentChange: fp(1)},
 		"MSFT": {Symbol: "MSFT", Currency: "USD", CurrentPrice: 400, Change: fp(0), PercentChange: fp(0)},
 	}}}
-	v := svc.Value(ctx, []portfoliodb.Stock{stock("AAPL", 10, 150)}, 0, time.Now())
+	v := mustValue(t, svc, ctx, []portfoliodb.Stock{stock("AAPL", 10, 150)}, 0)
 	h := v.Holdings[0]
 	if len(v.Holdings) != 1 || h.Symbol != "AAPL" || h.Shares != 10 || h.CostBasis != 1500 || h.AverageBuyPrice != 150 ||
 		*h.CurrentPrice != 200 || h.MarketValue != 2000 || h.UnrealizedPnl != 500 || !near(*h.UnrealizedPnlPercent, 33.33, 0.01) ||
@@ -373,30 +382,30 @@ func TestValuationService(t *testing.T) {
 		t.Fatalf("live %+v", h)
 	}
 
-	v = svc.Value(ctx, []portfoliodb.Stock{stock("TSLA", 10, 200)}, 0, time.Now())
+	v = mustValue(t, svc, ctx, []portfoliodb.Stock{stock("TSLA", 10, 200)}, 0)
 	h = v.Holdings[0]
 	if h.CurrentPrice != nil || h.HasLiveQuote || h.CostBasis != 2000 || h.MarketValue != 2000 || h.UnrealizedPnl != 0 || h.DayChange != nil || h.DayChangePercent != nil {
 		t.Fatalf("no quote %+v", h)
 	}
 
-	v = svc.Value(ctx, []portfoliodb.Stock{stock("AAPL", 10, 100), stock("aapl", 10, 200)}, 0, time.Now())
+	v = mustValue(t, svc, ctx, []portfoliodb.Stock{stock("AAPL", 10, 100), stock("aapl", 10, 200)}, 0)
 	if len(v.Holdings) != 1 || v.Holdings[0].Shares != 20 || v.Holdings[0].CostBasis != 3000 || v.Holdings[0].AverageBuyPrice != 150 || v.Holdings[0].MarketValue != 4000 {
 		t.Fatalf("merge %+v", v.Holdings)
 	}
 
-	v = svc.Value(ctx, nil, 500, time.Now())
+	v = mustValue(t, svc, ctx, nil, 500)
 	if len(v.Holdings) != 0 || v.HoldingsMarketValue != 0 || v.TotalCost != 0 || v.UnrealizedPnl != 0 || v.UnrealizedPnlPercent != nil ||
 		v.DayChange != 0 || v.CashBalance != 500 || v.TotalValue != 500 || *v.DayChangePercent != 0 {
 		t.Fatalf("empty %+v", v)
 	}
 
-	v = svc.Value(ctx, []portfoliodb.Stock{stock("AAPL", 10, 150), stock("MSFT", 10, 300)}, 0, time.Now())
+	v = mustValue(t, svc, ctx, []portfoliodb.Stock{stock("AAPL", 10, 150), stock("MSFT", 10, 300)}, 0)
 	if v.DayChange != 20 || v.TotalValue != 6000 || !near(*v.DayChangePercent, 20.0/5980*100, 1e-4) || v.Holdings[0].Symbol != "MSFT" {
 		t.Fatalf("day change %+v", v)
 	}
 
 	down := ValuationService{Quotes: stubQuotes{fail: true}}
-	v = down.Value(ctx, []portfoliodb.Stock{stock("NVDA", 5, 150)}, 100, time.Now())
+	v = mustValue(t, down, ctx, []portfoliodb.Stock{stock("NVDA", 5, 150)}, 100)
 	h = v.Holdings[0]
 	if h.CurrentPrice != nil || h.HasLiveQuote || h.MarketValue != 750 || h.UnrealizedPnl != 0 || v.TotalValue != 850 {
 		t.Fatalf("outage %+v", v)

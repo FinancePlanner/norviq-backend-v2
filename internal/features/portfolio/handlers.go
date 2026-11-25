@@ -26,7 +26,6 @@ type handlers struct {
 	d            *server.Deps
 	filters      FilterResolver
 	valuation    ValuationService
-	fx           FxSource // nil: realized P&L converts 1:1
 	entitlements *entitlements.Service
 }
 
@@ -43,9 +42,13 @@ func (h *handlers) resolveFilter(c *echo.Context, userID uuid.UUID) (ResolvedFil
 // MARK: - DTOs (StockPlanShared.PortfolioDTOs)
 
 type allocationItem struct {
-	Symbol   string  `json:"symbol"`
+	Symbol string `json:"symbol"`
+	// Value is in Currency, the instrument currency (CASH: the base).
 	Value    float64 `json:"value"`
 	Currency string  `json:"currency"`
+	// ValueInBase is Value in BaseCurrency; null when no rate exists.
+	ValueInBase  *float64 `json:"valueInBase"`
+	BaseCurrency string   `json:"baseCurrency"`
 }
 
 type summaryResponse struct {
@@ -60,6 +63,8 @@ type summaryResponse struct {
 	DayChangePercent     *float64         `json:"dayChangePercent,omitempty"`
 	UnrealizedPnlPercent *float64         `json:"unrealizedPnlPercent,omitempty"`
 	AsOf                 *string          `json:"asOf,omitempty"`
+	Fx                   Provenance       `json:"fx"`
+	FxMissing            []string         `json:"fxMissing,omitempty"`
 }
 
 type dividendProjectedItem struct {
@@ -121,9 +126,14 @@ type lotResponse struct {
 }
 
 type pnlBySymbol struct {
-	Symbol               string   `json:"symbol"`
+	Symbol string `json:"symbol"`
+	// Currency is the instrument currency; unrealizedPnl, buyPrice, costBasis,
+	// currentPrice and marketValue are in it. realizedPnl is in BaseCurrency.
 	Currency             string   `json:"currency"`
+	BaseCurrency         string   `json:"baseCurrency"`
 	RealizedPnl          float64  `json:"realizedPnl"`
+	UnrealizedPnlInBase  *float64 `json:"unrealizedPnlInBase"`
+	ValueInBase          *float64 `json:"valueInBase"`
 	UnrealizedPnl        float64  `json:"unrealizedPnl"`
 	Shares               *float64 `json:"shares,omitempty"`
 	BuyPrice             *float64 `json:"buyPrice,omitempty"`
@@ -216,14 +226,16 @@ func (h *handlers) sectorExposure(c *echo.Context) error {
 	// Vapor valued each stock row at cost (shares × buy price) and did not
 	// merge rows of the same symbol. v2 uses the portfolio valuation the
 	// summary uses: one position per symbol at its live price (cost when
-	// unpriced).
-	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation)
+	// unpriced), in the base currency.
+	rates := RatesFor(h.d.DB)
+	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation, rates)
 	if err != nil {
 		return err
 	}
 	cash := v.CashBalance
 	symbols := make([]string, 0, len(v.Holdings))
-	for _, hd := range v.Holdings {
+	for i := range v.Holdings {
+		hd := &v.Holdings[i]
 		symbols = append(symbols, hd.Symbol)
 	}
 	notesBySymbol := map[string][]portfoliodb.ResearchNote{}
@@ -244,8 +256,12 @@ func (h *handlers) sectorExposure(c *echo.Context) error {
 	sectorValues := map[string]float64{}
 	var sectorOrder []string
 	holdingsBySector := map[string][]sectorHolding{}
-	for _, hd := range v.Holdings {
-		value := hd.MarketValue
+	for i := range v.Holdings {
+		hd := &v.Holdings[i]
+		if hd.MarketValueInBase == nil {
+			continue // no rate: left out, as the totals leave it out
+		}
+		value := *hd.MarketValueInBase
 		sector := inferSector(hd.Symbol, notesBySymbol[hd.Symbol])
 		if _, ok := sectorValues[sector]; !ok {
 			sectorOrder = append(sectorOrder, sector)
@@ -355,22 +371,28 @@ func (h *handlers) summary(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation)
+	rates := RatesFor(h.d.DB)
+	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation, rates)
 	if err != nil {
 		return err
 	}
-	realized, err := filter.realizedPnl(ctx, h.d.DB, h.fx, h.d.Logger)
+	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, v.AsOf)
 	if err != nil {
 		return err
 	}
 	allocation := make([]allocationItem, 0, len(v.Holdings)+1)
-	for _, hd := range v.Holdings {
-		allocation = append(allocation, allocationItem{Symbol: hd.Symbol, Value: round2(hd.MarketValue), Currency: filter.BaseCurrency})
+	for i := range v.Holdings {
+		hd := &v.Holdings[i]
+		allocation = append(allocation, allocationItem{
+			Symbol: hd.Symbol, Value: round2(hd.MarketValue), Currency: hd.Currency,
+			ValueInBase: round2Ptr(hd.MarketValueInBase), BaseCurrency: filter.BaseCurrency,
+		})
 	}
 	if v.CashBalance > 0 {
-		allocation = append(allocation, allocationItem{Symbol: "CASH", Value: round2(v.CashBalance), Currency: filter.BaseCurrency})
+		cash := round2(v.CashBalance)
+		allocation = append(allocation, allocationItem{Symbol: "CASH", Value: cash, Currency: filter.BaseCurrency, ValueInBase: &cash, BaseCurrency: filter.BaseCurrency})
 	}
-	sort.SliceStable(allocation, func(i, j int) bool { return allocation[i].Value > allocation[j].Value })
+	sort.SliceStable(allocation, func(i, j int) bool { return lessInBase(allocation[i].ValueInBase, allocation[j].ValueInBase) })
 	return httpx.OK(c, summaryResponse{
 		BaseCurrency:         filter.BaseCurrency,
 		TotalValue:           round2(v.TotalValue),
@@ -383,7 +405,34 @@ func (h *handlers) summary(c *echo.Context) error {
 		DayChangePercent:     round2Ptr(v.DayChangePercent),
 		UnrealizedPnlPercent: round2Ptr(v.UnrealizedPnlPercent),
 		AsOf:                 ptr(portfolios.FormatDateOnly(v.AsOf)),
+		Fx:                   v.Fx,
+		FxMissing:            unionSorted(v.FxMissing, realized.FxMissing),
 	})
+}
+
+// lessInBase orders base-currency values descending, unconverted (nil) last.
+func lessInBase(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a != nil && b == nil
+	}
+	return *a > *b
+}
+
+// unionSorted merges currency lists into one sorted, unique list; nil when
+// both are empty.
+func unionSorted(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range lists {
+		for _, c := range l {
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // MARK: - performance
@@ -500,21 +549,26 @@ func (h *handlers) pnl(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation)
+	rates := RatesFor(h.d.DB)
+	v, err := filter.LoadValuation(ctx, h.d.DB, h.valuation, rates)
 	if err != nil {
 		return err
 	}
-	realized, err := filter.realizedPnl(ctx, h.d.DB, h.fx, h.d.Logger)
+	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, v.AsOf)
 	if err != nil {
 		return err
 	}
 	items := make([]pnlBySymbol, 0, len(v.Holdings))
-	for _, hd := range v.Holdings {
+	for i := range v.Holdings {
+		hd := &v.Holdings[i]
 		item := pnlBySymbol{
 			Symbol:               hd.Symbol,
-			Currency:             filter.BaseCurrency,
+			Currency:             hd.Currency,
+			BaseCurrency:         filter.BaseCurrency,
 			RealizedPnl:          round2(realized.BySymbol[hd.Symbol]),
 			UnrealizedPnl:        round2(hd.UnrealizedPnl),
+			UnrealizedPnlInBase:  round2Ptr(hd.UnrealizedPnlInBase),
+			ValueInBase:          round2Ptr(hd.MarketValueInBase),
 			Shares:               ptr(hd.Shares),
 			BuyPrice:             ptr(round2(hd.AverageBuyPrice)),
 			CostBasis:            ptr(round2(hd.CostBasis)),
@@ -524,12 +578,12 @@ func (h *handlers) pnl(c *echo.Context) error {
 			DayChange:            round2Ptr(hd.DayChange),
 			DayChangePercent:     hd.DayChangePercent,
 		}
-		if v.TotalValue > 0 {
-			item.WeightPercent = ptr(percentage(hd.MarketValue, v.TotalValue))
+		if v.TotalValue > 0 && hd.MarketValueInBase != nil {
+			item.WeightPercent = ptr(percentage(*hd.MarketValueInBase, v.TotalValue))
 		}
 		items = append(items, item)
 	}
-	sort.SliceStable(items, func(i, j int) bool { return *items[i].MarketValue > *items[j].MarketValue })
+	sort.SliceStable(items, func(i, j int) bool { return lessInBase(items[i].ValueInBase, items[j].ValueInBase) })
 	return httpx.OK(c, pnlResponse{BaseCurrency: filter.BaseCurrency, Items: items})
 }
 

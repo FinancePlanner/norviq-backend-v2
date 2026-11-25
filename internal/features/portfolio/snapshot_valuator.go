@@ -2,7 +2,6 @@ package portfolio
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -278,35 +277,7 @@ func Valuate(ctx context.Context, stocks []portfoliodb.Stock, prices map[string]
 
 	var marketValue, costBasis float64
 	out := SnapshotValuation{PositionCount: len(stocks), Currency: base}
-	var oldest time.Time
-	missingSeen := map[string]bool{}
-	type looked struct {
-		rate fx.Rate
-		ok   bool
-	}
-	cache := map[string]looked{}
-	rateFor := func(ccy string) (fx.Rate, bool, error) {
-		if l, hit := cache[ccy]; hit {
-			return l.rate, l.ok, nil
-		}
-		r, err := rates.Rate(ctx, ccy, base, day)
-		switch {
-		case err == nil:
-			cache[ccy] = looked{r, true}
-			if !r.AsOf.IsZero() && (oldest.IsZero() || r.AsOf.Before(oldest)) {
-				oldest = r.AsOf
-			}
-			return r, true, nil
-		case errors.Is(err, fx.ErrMissing):
-			cache[ccy] = looked{}
-			if !missingSeen[ccy] {
-				missingSeen[ccy] = true
-				out.FxMissing = append(out.FxMissing, ccy)
-			}
-			return fx.Rate{}, false, nil
-		}
-		return fx.Rate{}, false, err
-	}
+	book := newRateBook(rates, base, day)
 
 	for _, h := range order {
 		price, hasPrice := prices[h.symbol]
@@ -323,21 +294,16 @@ func Valuate(ctx context.Context, stocks []portfoliodb.Stock, prices map[string]
 			quoteCcy = price.Currency
 		}
 		holding, mismatch := HoldingCurrency(stockCcy, quoteCcy, base)
-		rate, haveRate, err := rateFor(holding)
+		rate, haveRate, err := book.lookup(ctx, holding)
 		if err != nil {
 			return SnapshotValuation{}, err
 		}
 		for _, i := range h.rows {
 			st := &stocks[i]
 			if haveRate {
-				// A stored minor-unit currency (GBX) means buy_price is in
-				// minor units too; scale it to the ISO unit like a quote.
-				costFactor := 1.0
-				if st.Currency != nil {
-					if _, f, ok := fx.Normalize(*st.Currency); ok {
-						costFactor = f
-					}
-				}
+				// A stored minor-unit currency (GBX) means buy_price is in minor
+				// units too; scale it to the ISO unit like a quote.
+				costFactor := storedCostFactor(st.Currency)
 				costBasis += float64(st.Shares * st.BuyPrice * costFactor * rate.Value)
 			}
 		}
@@ -357,13 +323,11 @@ func Valuate(ctx context.Context, stocks []portfoliodb.Stock, prices map[string]
 		}
 		out.PricedSymbols += len(h.rows)
 	}
-	sort.Strings(out.FxMissing)
+	out.FxMissing = book.fxMissing()
 	out.MarketValue = round2(marketValue)
 	out.CostBasis = round2(costBasis)
 	out.CashBalance = round2(cash)
-	if !oldest.IsZero() {
-		out.FxAsOf = &oldest
-	}
+	out.FxAsOf = book.fxAsOf()
 	return out, nil
 }
 

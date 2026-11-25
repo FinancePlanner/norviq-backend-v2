@@ -267,10 +267,7 @@ func (s ValuationService) Value(ctx context.Context, stocks []portfoliodb.Stock,
 		p := (v.DayChange / prev) * 100
 		v.DayChangePercent = &p
 	}
-	if at := book.fxAsOf(); at != nil {
-		date, src := portfolios.FormatDateOnly(*at), book.source
-		v.Fx = Provenance{Source: &src, AsOf: &date, Converted: true}
-	}
+	v.Fx = book.provenance()
 	return v, nil
 }
 

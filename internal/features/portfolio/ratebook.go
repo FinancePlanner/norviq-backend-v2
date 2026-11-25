@@ -83,3 +83,14 @@ func storedCostFactor(currency *string) float64 {
 	}
 	return 1
 }
+
+// provenance reports what the lookups used; the zero value when nothing was
+// converted.
+func (b *rateBook) provenance() Provenance {
+	at := b.fxAsOf()
+	if at == nil {
+		return Provenance{}
+	}
+	date, src := at.Format("2006-01-02"), b.source
+	return Provenance{Source: &src, AsOf: &date, Converted: true}
+}

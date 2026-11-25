@@ -220,3 +220,45 @@ func TestSummaryStoredGBXCostInMajorUnits(t *testing.T) {
 		t.Fatalf("%s", r.Body)
 	}
 }
+
+// Only the realized P&L converted (the holding is in the base currency): the
+// summary's fx provenance must still say so, with the oldest fixing used.
+func TestSummaryFxProvenanceIncludesRealizedPnl(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newHarness(t)
+	user := h.CreateUser("fx-prov@example.com")
+	list := h.list(user, "Main", true)
+	h.stock(user, list, "AAPL", 10, 150)
+	h.quoteSet(map[string]marketdata.QuoteResponse{"AAPL": {Symbol: "AAPL", Currency: "USD", CurrentPrice: 200}})
+	h.fxToday("USD", "1.05")
+	h.fxToday("DKK", "7.46")
+	novo := uuid.New()
+	h.exec(`INSERT INTO instruments (id, conid, symbol, exchange, currency, created_at) VALUES ($1, 'p1', 'NOVO', 'CPH', 'DKK', now())`, novo)
+	acct := h.account(user, &list, "manual")
+	h.exec(`INSERT INTO transactions (id, account_id, instrument_id, type, quantity, price, currency, trade_date, realized_pnl, created_at)
+		VALUES ($1, $2, $3, 'sell', 1, 1, 'DKK', '2026-03-01', 746, now())`, uuid.New(), acct, novo)
+	s := h.summary(t, user, list)
+	today := time.Now().UTC().Format("2006-01-02")
+	if !s.Fx.Converted || s.Fx.Source == nil || *s.Fx.Source != "ECB" || s.Fx.AsOf == nil || *s.Fx.AsOf != today {
+		t.Fatalf("fx %+v", s.Fx)
+	}
+	if s.RealizedPnl == 0 {
+		t.Fatalf("%+v", s)
+	}
+}
+
+// A rate lookup that fails for any reason other than a missing rate is not
+// absorbed: the summary answers 500 rather than a quietly wrong total.
+func TestSummaryRateErrorIs500(t *testing.T) {
+	t.Setenv("FX_VALUATION_ENABLED", "true")
+	h := newHarness(t)
+	user := h.CreateUser("fx-500@example.com")
+	list := h.list(user, "Main", true)
+	h.stock(user, list, "NOVO", 10, 600)
+	h.quoteSet(map[string]marketdata.QuoteResponse{"NOVO": {Symbol: "NOVO", Currency: "DKK", CurrentPrice: 700}})
+	h.exec(`DROP TABLE fx_daily_rates`)
+	r := h.Do(http.MethodGet, "/v1/portfolio/summary?portfolioId="+list.String(), h.Token(user), nil)
+	if r.Status != 500 {
+		t.Fatalf("status %d: %s", r.Status, r.Body)
+	}
+}

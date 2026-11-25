@@ -26,6 +26,7 @@ type handlers struct {
 	d            *server.Deps
 	filters      FilterResolver
 	valuation    ValuationService
+	fx           FxSource // flag-off realized P&L; nil converts 1:1
 	entitlements *entitlements.Service
 }
 
@@ -376,7 +377,7 @@ func (h *handlers) summary(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, v.AsOf)
+	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, h.fx, v.AsOf, h.d.Logger)
 	if err != nil {
 		return err
 	}
@@ -405,9 +406,25 @@ func (h *handlers) summary(c *echo.Context) error {
 		DayChangePercent:     round2Ptr(v.DayChangePercent),
 		UnrealizedPnlPercent: round2Ptr(v.UnrealizedPnlPercent),
 		AsOf:                 ptr(portfolios.FormatDateOnly(v.AsOf)),
-		Fx:                   v.Fx,
+		Fx:                   mergeProvenance(v.Fx, realized.Fx),
 		FxMissing:            unionSorted(v.FxMissing, realized.FxMissing),
 	})
+}
+
+// mergeProvenance combines the valuation's and the realized P&L's rate usage:
+// converted if either converted, the oldest fixing date, the first source.
+func mergeProvenance(a, b Provenance) Provenance {
+	out := a
+	if !b.Converted {
+		return out
+	}
+	if !a.Converted {
+		return b
+	}
+	if b.AsOf != nil && (a.AsOf == nil || *b.AsOf < *a.AsOf) {
+		out.AsOf = b.AsOf
+	}
+	return out
 }
 
 // lessInBase orders base-currency values descending, unconverted (nil) last.
@@ -554,7 +571,7 @@ func (h *handlers) pnl(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, v.AsOf)
+	realized, err := filter.realizedPnl(ctx, h.d.DB, rates, h.fx, v.AsOf, h.d.Logger)
 	if err != nil {
 		return err
 	}

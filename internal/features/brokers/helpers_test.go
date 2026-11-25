@@ -1,6 +1,7 @@
 package brokers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -69,6 +70,7 @@ type stubPosition struct {
 	quantity   float64
 	avgCost    float64
 	assetClass string
+	currency   string // default USD
 }
 
 type stubTrade struct {
@@ -108,7 +110,7 @@ func (g *stubGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/positions/0"):
 		out := []map[string]any{}
 		for _, p := range g.positions {
-			o := map[string]any{"ticker": p.ticker, "position": p.quantity, "avgCost": p.avgCost, "currency": "USD"}
+			o := map[string]any{"ticker": p.ticker, "position": p.quantity, "avgCost": p.avgCost, "currency": cmp.Or(p.currency, "USD")}
 			if p.assetClass != "" {
 				o["assetClass"] = p.assetClass
 			}

@@ -31,7 +31,7 @@ type SnapshotValuation struct {
 	// was converted.
 	FxAsOf *time.Time
 	// FxMissing lists the currencies that had no rate (within the lookback),
-	// in first-seen order. Their positions count as missing.
+	// sorted and unique. Their positions count as missing.
 	FxMissing []string
 	// ListingMismatches are the symbols left out because their quote is in a
 	// different currency than the holding. The caller logs them.
@@ -330,7 +330,15 @@ func Valuate(ctx context.Context, stocks []portfoliodb.Stock, prices map[string]
 		for _, i := range h.rows {
 			st := &stocks[i]
 			if haveRate {
-				costBasis += float64(st.Shares * st.BuyPrice * rate.Value)
+				// A stored minor-unit currency (GBX) means buy_price is in
+				// minor units too; scale it to the ISO unit like a quote.
+				costFactor := 1.0
+				if st.Currency != nil {
+					if _, f, ok := fx.Normalize(*st.Currency); ok {
+						costFactor = f
+					}
+				}
+				costBasis += float64(st.Shares * st.BuyPrice * costFactor * rate.Value)
 			}
 		}
 		if mismatch && hasPrice {
@@ -349,6 +357,7 @@ func Valuate(ctx context.Context, stocks []portfoliodb.Stock, prices map[string]
 		}
 		out.PricedSymbols += len(h.rows)
 	}
+	sort.Strings(out.FxMissing)
 	out.MarketValue = round2(marketValue)
 	out.CostBasis = round2(costBasis)
 	out.CashBalance = round2(cash)

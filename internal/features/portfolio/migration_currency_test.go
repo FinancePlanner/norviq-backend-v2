@@ -71,6 +71,14 @@ func TestStockCurrencyBackfill(t *testing.T) {
 	position(instrument("DUAL", "CAD"), "CAD")
 	dual := stock("DUAL", &account)
 
+	// Minor-unit and mixed-case codes could carry minor-unit average costs.
+	var minor []uuid.UUID
+	for i, code := range []string{"GBX", "GBp", "ZAc", "ZAC", "ILA", "dkk"} {
+		sym := "MIN" + string(rune('A'+i))
+		position(instrument(sym, code), code)
+		minor = append(minor, stock(sym, &account))
+	}
+
 	if _, err := db.Exec(ctx, backfillSQL(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -89,5 +97,10 @@ func TestStockCurrencyBackfill(t *testing.T) {
 	}
 	if c := get(dual); c != nil {
 		t.Fatalf("ambiguous row = %q, want NULL", *c)
+	}
+	for i, id := range minor {
+		if c := get(id); c != nil {
+			t.Fatalf("minor/mixed-case row %d = %q, want NULL", i, *c)
+		}
 	}
 }

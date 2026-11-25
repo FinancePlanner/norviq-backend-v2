@@ -288,3 +288,23 @@ func TestSyncWritesStockCurrency(t *testing.T) {
 		t.Fatalf("stocks.currency = %v, want USD", currency)
 	}
 }
+
+// A minor-unit position (GBX) is stored as ISO GBP with buy_price in pounds.
+func TestSyncScalesMinorUnitAverageCost(t *testing.T) {
+	h := newHarness(t, nil)
+	userID, _ := h.user(t)
+	symbol := strings.ToUpper("LDM" + uuid.NewString()[:4])
+	h.instrument(t, symbol)
+	h.connection(t, userID)
+	h.gateway.positions = []stubPosition{{ticker: symbol, quantity: 2, avgCost: 250, currency: "GBX"}}
+	h.sync(t, userID)
+
+	var currency *string
+	var buy float64
+	if err := h.app.Deps.DB.QueryRow(bg, `SELECT currency, buy_price FROM stocks WHERE user_id = $1 AND symbol = $2`, userID, symbol).Scan(&currency, &buy); err != nil {
+		t.Fatal(err)
+	}
+	if currency == nil || *currency != "GBP" || math.Abs(buy-2.5) > 1e-9 {
+		t.Fatalf("currency %v buy_price %v, want GBP 2.5", currency, buy)
+	}
+}

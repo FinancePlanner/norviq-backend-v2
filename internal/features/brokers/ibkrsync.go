@@ -239,14 +239,18 @@ func (x ibkrSyncService) upsertPosition(ctx context.Context, symbol string, p ib
 		if listID == nil {
 			return nil
 		}
+		// buy_price is in major units of the stored ISO code: a minor-unit
+		// code (GBX, GBp, ZAc) scales the average cost down by its factor.
 		var currency *string
-		if iso, _, ok := fx.Normalize(p.Currency); ok {
+		buyPrice := averageCost
+		if iso, factor, ok := fx.Normalize(p.Currency); ok {
 			currency = &iso
+			buyPrice = averageCost * factor
 		}
 		_, err = q.InsertStock(ctx, brokersdb.InsertStockParams{
 			Currency: currency,
 			ID:       uuid.New(), UserID: userID, PortfolioListID: *listID, Symbol: symbol,
-			Shares: quantity, BuyPrice: averageCost, BuyDate: utcDay(now), Category: brokersdb.AssetCategoryStock,
+			Shares: quantity, BuyPrice: buyPrice, BuyDate: utcDay(now), Category: brokersdb.AssetCategoryStock,
 			SourceProvider: &provider, SourceAccountID: &accountID, Now: now,
 		})
 		return err

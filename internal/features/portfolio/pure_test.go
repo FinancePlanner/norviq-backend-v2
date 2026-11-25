@@ -469,3 +469,35 @@ func TestValuateMinorUnitFactor(t *testing.T) {
 		t.Errorf("zero factor %+v %v", v, err)
 	}
 }
+
+func TestValuateFxMissingSorted(t *testing.T) {
+	ctx := context.Background()
+	day := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	stocks := []portfoliodb.Stock{fxStock("VOD.L", 1, 1, ccy("GBP")), fxStock("NESN", 1, 1, ccy("CHF"))}
+	prices := map[string]Price{"VOD.L": {5, "GBP", 1}, "NESN": {90, "CHF", 1}}
+	v, err := Valuate(ctx, stocks, prices, 0, "USD", fx.Static(fxFixture), day)
+	if err != nil || len(v.FxMissing) != 2 || v.FxMissing[0] != "CHF" || v.FxMissing[1] != "GBP" {
+		t.Fatalf("%+v %v", v.FxMissing, err)
+	}
+}
+
+// A stored minor-unit currency means buy_price is in minor units: cost is
+// scaled to major units before converting.
+func TestValuateCostScalesMinorUnitStockCurrency(t *testing.T) {
+	ctx := context.Background()
+	day := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	rates := fx.Static([]fx.DailyRate{
+		{Date: day, Quote: "USD", Rate: "1.25"},
+		{Date: day, Quote: "GBP", Rate: "0.85"},
+	})
+	stocks := []portfoliodb.Stock{fxStock("VOD.L", 100, 250, ccy("GBX"))}
+	for _, tc := range []struct {
+		base string
+		want float64
+	}{{"USD", 100 * 250 * 0.01 * (1.25 / 0.85)}, {"GBP", 100 * 250 * 0.01}} {
+		v, err := Valuate(ctx, stocks, map[string]Price{}, 0, tc.base, rates, day)
+		if err != nil || v.CostBasis != round2(tc.want) {
+			t.Errorf("%s: cost %v want %v (%v)", tc.base, v.CostBasis, round2(tc.want), err)
+		}
+	}
+}

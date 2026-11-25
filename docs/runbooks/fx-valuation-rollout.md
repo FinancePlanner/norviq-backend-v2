@@ -56,8 +56,8 @@ WHERE s.currency IS NULL
   AND NOT EXISTS (SELECT 1 FROM quote_cache c WHERE upper(c.symbol) = upper(s.symbol));
 
 -- (4) Listing mismatches: stocks.currency is set and its normalised code differs from the
---     normalised currency of the latest quote. With the flag on these are unpriced in
---     snapshots (valued at cost) instead of being converted.
+--     normalised currency of the latest quote. With the flag on these are unpriced: snapshots leave
+--     them out of market value, and the live summary values them at cost.
 SELECT count(*)
 FROM stocks s
 JOIN LATERAL (
@@ -88,7 +88,8 @@ ADR" section: the owner accepts or rejects those two behaviours before the flip.
 tells you how many holdings rely on a stored minor-unit code being normalised at read time.
 
 Check (4) counts holdings whose stored currency disagrees with the provider's quote
-currency. They are valued at cost in snapshots once the flag is on, so a high count means
+currency. With the flag on, snapshots leave them out of market value while the live summary values
+them at cost, so a high count means
 the snapshot totals will look different from the live summary.
 
 Check (5) feeds pre-flip step 4 below.

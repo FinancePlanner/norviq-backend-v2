@@ -105,7 +105,20 @@ func RunECBTick(ctx context.Context, db fxdb.DBTX, client *http.Client, baseURL 
 			continue
 		}
 		if len(rates) == 0 {
-			logger.Info("fx_ecb_daily unsupported currency", "currency", c)
+			// A currency we already hold rows for that suddenly returns none
+			// means the fixings stopped (or the format changed): say so loudly.
+			// One never published at all (e.g. TWD) is just unsupported.
+			known, err := q.RatesOnOrBefore(ctx, fxdb.RatesOnOrBeforeParams{
+				Quotes: []string{c}, Day: now, FromDay: time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				return inserted, err
+			}
+			if len(known) > 0 {
+				logger.Warn("fx_ecb_daily no new fixings", "currency", c, "latest", known[0].Date)
+			} else {
+				logger.Info("fx_ecb_daily unsupported currency", "currency", c)
+			}
 			continue
 		}
 		for _, r := range rates {

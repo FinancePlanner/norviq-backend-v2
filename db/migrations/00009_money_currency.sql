@@ -6,7 +6,8 @@
 -- cannot be told apart; it is never guessed.
 --
 -- Backfill (broker positions only): a stocks row imported from a broker
--- account takes the currency of the matching position (same account, same
+-- account (never a CSV import account, external_id csv-import-*: CSV holdings
+-- keep NULL, their instrument currency being a symbol-search default) takes the currency of the matching position (same account, same
 -- symbol) when exactly one distinct currency matches and it is a plain ISO
 -- code (case-exact three capitals, not a minor-unit code such as GBX, ZAC or
 -- ILA): a position's average cost may be in minor units, so those and
@@ -28,6 +29,8 @@ SET currency = m.cur
 FROM (
     SELECT s2.id, min(p.currency) AS cur
     FROM public.stocks s2
+    JOIN public.accounts a ON a.id = s2.source_account_id
+        AND a.external_id NOT LIKE 'csv-import-%'
     JOIN public.positions p ON p.account_id = s2.source_account_id
     JOIN public.instruments i ON i.id = p.instrument_id AND upper(i.symbol) = upper(s2.symbol)
     WHERE s2.currency IS NULL AND s2.source_account_id IS NOT NULL

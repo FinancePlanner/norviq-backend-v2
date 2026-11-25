@@ -197,3 +197,9 @@ func TestStorePreloadRunsNoFurtherQueries(t *testing.T) {
 		t.Errorf("outside window: %v, queries %d", err, db.n.Load())
 	}
 }
+
+func TestConvertingNilIsFalse(t *testing.T) {
+	if Converting(nil) || Converting(Passthrough{}) || Converting(&Passthrough{}) {
+		t.Fatal("nil and Passthrough must not convert")
+	}
+}

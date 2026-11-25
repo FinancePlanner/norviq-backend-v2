@@ -40,10 +40,10 @@ func (Passthrough) Rate(context.Context, string, string, time.Time) (Rate, error
 	return Rate{Value: 1}, nil
 }
 
-// Converting reports whether r actually converts, i.e. is not Passthrough.
+// Converting reports whether r actually converts, i.e. is neither nil nor Passthrough.
 func Converting(r Rates) bool {
 	switch r.(type) {
-	case Passthrough, *Passthrough:
+	case nil, Passthrough, *Passthrough:
 		return false
 	}
 	return true

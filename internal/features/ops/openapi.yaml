@@ -17743,7 +17743,7 @@ components:
           description: >-
             ISO instrument currency of the holding (minor-unit codes such as GBX
             appear as GBP). CASH carries the portfolio base currency. With
-            FX_VALUATION_ENABLED off, a holding quoted in raw minor units keeps
+            FX valuation disabled, a holding quoted in raw minor units keeps
             the base currency, because its amounts stay raw.
         valueInBase:
           type: number
@@ -17751,7 +17751,7 @@ components:
           nullable: true
           description: >-
             `value` converted into `baseCurrency`; null when no FX rate exists.
-            With FX valuation off it equals `value`. Allocation is sorted by this
+            While FX valuation is disabled it equals `value`. Allocation is sorted by this
             field descending, nulls last.
         baseCurrency:
           type: string
@@ -17798,7 +17798,11 @@ components:
           items:
             $ref: '#/components/schemas/AllocationItem'
         fx:
-          $ref: '#/components/schemas/FxProvenance'
+          allOf:
+            - $ref: '#/components/schemas/FxProvenance'
+          description: >-
+            Conversion provenance. Populated only while FX valuation is enabled;
+            realized P&L uses the legacy conversion while it is disabled.
         fxMissing:
           type: array
           items:
@@ -18017,12 +18021,18 @@ components:
           type: number
           format: double
           nullable: true
-          description: unrealizedPnl in `baseCurrency`; null when no FX rate exists.
+          description: >-
+            unrealizedPnl in `baseCurrency`; null when no FX rate exists. While
+            FX valuation is disabled it equals the raw instrument-currency
+            `unrealizedPnl`.
         valueInBase:
           type: number
           format: double
           nullable: true
-          description: marketValue in `baseCurrency`; null when no FX rate exists.
+          description: >-
+            marketValue in `baseCurrency`; null when no FX rate exists. While FX
+            valuation is disabled it equals the raw instrument-currency
+            `marketValue`.
         shares:
           type: number
           format: double

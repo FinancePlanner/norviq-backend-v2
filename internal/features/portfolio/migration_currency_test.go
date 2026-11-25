@@ -45,16 +45,20 @@ func TestStockCurrencyBackfill(t *testing.T) {
 	account := uuid.New()
 	exec(`INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at) VALUES ($1,$2,'U1','ibkr','USD',now())`, account, uid)
 
+	csvAccount := uuid.New()
+	exec(`INSERT INTO accounts (id, user_id, external_id, broker, base_currency, created_at) VALUES ($1,$2,'csv-import-ibkr-default','ibkr','USD',now())`, csvAccount, uid)
+
 	instrument := func(symbol, currency string) uuid.UUID {
 		id := uuid.New()
 		exec(`INSERT INTO instruments (id, conid, symbol, exchange, currency, created_at) VALUES ($1,$2,$3,'TEST',$4,now())`,
 			id, "bf:"+id.String(), symbol, currency)
 		return id
 	}
-	position := func(inst uuid.UUID, currency string) {
+	positionIn := func(acct uuid.UUID, inst uuid.UUID, currency string) {
 		exec(`INSERT INTO positions (id, account_id, instrument_id, quantity, average_cost, currency, created_at) VALUES ($1,$2,$3,1,1,$4,now())`,
-			uuid.New(), account, inst, currency)
+			uuid.New(), acct, inst, currency)
 	}
+	position := func(inst uuid.UUID, currency string) { positionIn(account, inst, currency) }
 	stock := func(symbol string, source *uuid.UUID) uuid.UUID {
 		id := uuid.New()
 		exec(`INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, source_provider, source_account_id, created_at)
@@ -65,6 +69,10 @@ func TestStockCurrencyBackfill(t *testing.T) {
 	position(instrument("NOVO", "DKK"), "DKK")
 	novo := stock("novo", &account)
 	manual := stock("NOVO", nil)
+
+	// CSV-imported holding (R16): positions carry the search default, stocks stay NULL.
+	positionIn(csvAccount, instrument("CSVX", "USD"), "USD")
+	csvRow := stock("CSVX", &csvAccount)
 
 	// Two instruments with the same symbol in different currencies: ambiguous.
 	position(instrument("DUAL", "USD"), "USD")
@@ -94,6 +102,9 @@ func TestStockCurrencyBackfill(t *testing.T) {
 	}
 	if c := get(manual); c != nil {
 		t.Fatalf("manual row = %q, want NULL", *c)
+	}
+	if c := get(csvRow); c != nil {
+		t.Fatalf("csv-import row = %q, want NULL", *c)
 	}
 	if c := get(dual); c != nil {
 		t.Fatalf("ambiguous row = %q, want NULL", *c)

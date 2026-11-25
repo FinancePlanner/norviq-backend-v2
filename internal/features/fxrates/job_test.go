@@ -157,6 +157,28 @@ func TestRunECBTickUnsupportedAndFailure(t *testing.T) {
 	}
 }
 
+func TestRunECBTickWarnsWhenKnownCurrencyStops(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	seed(t, app, "TWD")
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO fx_daily_rates (id, date, base, quote, rate) VALUES ($1,'2026-11-20','EUR','TWD',35)`, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	stub := newECBStub(t) // answers 200 with no rows for TWD
+	logger, buf := logs()
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	if _, err := fxrates.RunECBTick(context.Background(), app.Deps.DB, stub.srv.Client(), stub.srv.URL, now, logger); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN msg=\"fx_ecb_daily no new fixings\" currency=TWD") {
+		t.Errorf("missing warn in:\n%s", out)
+	}
+	if strings.Contains(out, "unsupported currency\" currency=TWD") {
+		t.Errorf("known currency logged as unsupported:\n%s", out)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

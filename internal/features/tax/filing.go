@@ -2,8 +2,8 @@ package tax
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/fx"
 	dec "norviq-api/internal/platform/nsdecimal"
 	"norviq-api/internal/store/taxdb"
 
@@ -274,7 +275,7 @@ func (r fxResolver) cachedRates(ctx context.Context, quote string, from, to time
 }
 
 // ecbBaseURL is ECBDailyRateProvider.baseURL; tests point it at a stub.
-var ecbBaseURL = "https://data-api.ecb.europa.eu/service/data"
+var ecbBaseURL = fx.ECBBaseURL
 
 // ecbProvider is ECBDailyRateProvider: ECB Data Portal flow EXR,
 // key D.<QUOTE>.EUR.SP00.A, as CSV.
@@ -288,66 +289,30 @@ func newECBProvider() ecbProvider {
 }
 
 func (p ecbProvider) rates(ctx context.Context, quote string, from, to time.Time) ([]fxDailyRate, error) {
-	normalized := strings.ToUpper(quote)
-	key := "D." + normalized + ".EUR.SP00.A"
-	url := p.baseURL + "/EXR/" + key + "?startPeriod=" + filingISODate(from) + "&endPeriod=" + filingISODate(to) + "&format=csvdata"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	rows, err := fx.FetchECB(ctx, p.client, p.baseURL, quote, from, to)
 	if err != nil {
+		var se *fx.StatusError
+		if errors.As(err, &se) {
+			return nil, httpx.Abort(http.StatusBadGateway, se.Error())
+		}
 		return nil, err
 	}
-	req.Header.Set("Accept", "text/csv")
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, httpx.Abort(http.StatusBadGateway, fmt.Sprintf("ECB EXR %s returned %d", normalized, resp.StatusCode))
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return parseECBCSV(string(body), normalized), nil
+	return fxDailyRates(rows), nil
 }
 
-// parseECBCSV is ECBDailyRateProvider.parseCSV: TIME_PERIOD and OBS_VALUE
-// located by header name; rows that do not parse, or a rate <= 0, are
-// skipped.
+// parseECBCSV adapts fx.ParseECBCSV to the filing pack's decimal rows.
 func parseECBCSV(body, quote string) []fxDailyRate {
-	lines := strings.FieldsFunc(body, func(r rune) bool { return r == '\n' || r == '\r' })
-	if len(lines) == 0 {
-		return []fxDailyRate{}
-	}
-	columns := strings.Split(lines[0], ",")
-	timeIndex, valueIndex := -1, -1
-	for i, c := range columns {
-		c = strings.TrimSpace(c)
-		if c == "TIME_PERIOD" && timeIndex < 0 {
-			timeIndex = i
-		}
-		if c == "OBS_VALUE" && valueIndex < 0 {
-			valueIndex = i
-		}
-	}
-	if timeIndex < 0 || valueIndex < 0 {
-		return []fxDailyRate{}
-	}
-	out := []fxDailyRate{}
-	for _, line := range lines[1:] {
-		parts := strings.Split(line, ",")
-		if len(parts) <= max(timeIndex, valueIndex) {
+	return fxDailyRates(fx.ParseECBCSV(body, quote))
+}
+
+func fxDailyRates(rows []fx.DailyRate) []fxDailyRate {
+	out := make([]fxDailyRate, 0, len(rows))
+	for _, r := range rows {
+		rate, ok := dec.Parse(r.Rate)
+		if !ok {
 			continue
 		}
-		date, err := time.Parse("2006-01-02", strings.TrimSpace(parts[timeIndex]))
-		if err != nil {
-			continue
-		}
-		rate, ok := dec.Parse(strings.TrimSpace(parts[valueIndex]))
-		if !ok || rate.Sign() <= 0 {
-			continue
-		}
-		out = append(out, fxDailyRate{date: date, base: "EUR", quote: quote, rate: rate})
+		out = append(out, fxDailyRate{date: r.Date, base: "EUR", quote: r.Quote, rate: rate})
 	}
 	return out
 }

@@ -213,7 +213,7 @@ func (q *Queries) ListPlanningScenarios(ctx context.Context, userID uuid.UUID) (
 }
 
 const planningStocks = `-- name: PlanningStocks :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1
 `
 
 func (q *Queries) PlanningStocks(ctx context.Context, userID uuid.UUID) ([]Stock, error) {
@@ -239,6 +239,7 @@ func (q *Queries) PlanningStocks(ctx context.Context, userID uuid.UUID) ([]Stock
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}

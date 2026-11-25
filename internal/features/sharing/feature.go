@@ -114,7 +114,7 @@ func (h *handler) publicShare(c *echo.Context) error {
 		}
 		return err
 	}
-	valuation, err := filter.LoadValuation(ctx, h.d.DB, h.valuation)
+	valuation, err := filter.LoadValuation(ctx, h.d.DB, h.valuation, portfolio.RatesFor(h.d.DB))
 	if err != nil {
 		return err
 	}
@@ -162,10 +162,11 @@ func Build(v portfolio.Valuation, changes *portfolio.PortfolioChanges, asOf stri
 		return response{AsOf: asOf, Totals: t, Holdings: []holding{}}
 	}
 	stocks := make([]holding, len(v.Holdings))
-	for i, hv := range v.Holdings {
+	for i := range v.Holdings {
+		hv := &v.Holdings[i]
 		stocks[i] = holding{
 			Symbol:               hv.Symbol,
-			WeightPercent:        hv.MarketValue / v.TotalValue * 100,
+			WeightPercent:        baseValue(hv) / v.TotalValue * 100,
 			UnrealizedPnlPercent: round2Ptr(hv.UnrealizedPnlPercent),
 			DayChangePercent:     round2Ptr(hv.DayChangePercent),
 		}
@@ -195,4 +196,13 @@ func Build(v portfolio.Valuation, changes *portfolio.PortfolioChanges, asOf stri
 		out.OtherWeightPercent = &r
 	}
 	return out
+}
+
+// baseValue is a holding's value in the portfolio's base currency; a holding
+// without a rate carries no weight.
+func baseValue(hv *portfolio.HoldingValuation) float64 {
+	if hv.MarketValueInBase == nil {
+		return 0
+	}
+	return *hv.MarketValueInBase
 }

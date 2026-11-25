@@ -8,6 +8,7 @@ import (
 
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/config"
+	"norviq-api/internal/platform/fx"
 	"norviq-api/internal/platform/joblock"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/server"
@@ -81,15 +82,20 @@ func RunSnapshotTick(ctx context.Context, db portfoliodb.DBTX, logger *slog.Logg
 		logger.Error("portfolio_snapshot run failed", "error", err)
 		return
 	}
+	rates := RatesFor(db) // once per tick: its cache serves every list
 	for iL := range lists {
 		l := &lists[iL]
 		if ctx.Err() != nil {
 			return
 		}
-		out, err := CaptureSnapshot(ctx, db, *l, now)
+		out, err := CaptureSnapshot(ctx, db, rates, *l, now)
 		if err != nil {
 			logger.Warn("portfolio_snapshot capture failed", "portfolio_list_id", apijson.FormatUUID(l.ID), "error", err)
 			continue
+		}
+		for _, m := range out.Mismatches {
+			logger.Warn("portfolio.valuation listing_mismatch", "portfolio_list_id", apijson.FormatUUID(l.ID),
+				"symbol", m.Symbol, "holding_currency", m.HoldingCurrency, "quote_currency", m.QuoteCurrency)
 		}
 		// The tick runs hourly, so no-ops (already captured, market closed,
 		// nothing held) repeat all day and log at Debug; writes log at Info.
@@ -110,6 +116,8 @@ type CaptureOutcome struct {
 	Kind    CaptureKind
 	Priced  int
 	Missing int
+	// Mismatches are the symbols left out for a quote in another currency.
+	Mismatches []ListingMismatch
 }
 
 // CaptureKind enumerates why a capture did or did not write.
@@ -146,7 +154,7 @@ func (k CaptureKind) String() string {
 }
 
 // CaptureSnapshot is PortfolioSnapshotJob.capture(list:now:on:logger:).
-func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.PortfolioList, now time.Time) (CaptureOutcome, error) {
+func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, rates fx.Rates, list portfoliodb.PortfolioList, now time.Time) (CaptureOutcome, error) {
 	q := portfoliodb.New(db)
 	day := StartOfDay(now)
 	exists := func() (bool, error) {
@@ -155,7 +163,7 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.
 	if ok, err := exists(); err != nil || ok {
 		return CaptureOutcome{Kind: CaptureAlreadyCaptured}, err
 	}
-	v, err := SnapshotValuator{DB: db}.Value(ctx, list.UserID, list.ID, now, PricingLive)
+	v, err := SnapshotValuator{DB: db, Rates: rates}.Value(ctx, list.UserID, list.ID, now, PricingLive, list.BaseCurrency)
 	if err != nil {
 		return CaptureOutcome{}, err
 	}
@@ -175,8 +183,8 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.
 	// An unpriced symbol counts as 0, as in live statistics, and the row
 	// records how many there were. Skipping the whole list instead froze
 	// the series at the last fully priced day.
-	written := CaptureOutcome{Kind: CaptureCaptured, Priced: v.PricedSymbols, Missing: v.MissingSymbols}
-	if !v.IsFullyPriced() {
+	written := CaptureOutcome{Kind: CaptureCaptured, Priced: v.PricedSymbols, Missing: v.MissingSymbols, Mismatches: v.ListingMismatches}
+	if !v.IsFullyPriced() || len(v.FxMissing) > 0 {
 		written.Kind = CaptureCapturedPartial
 	}
 	err = q.InsertSnapshot(ctx, portfoliodb.InsertSnapshotParams{
@@ -194,6 +202,8 @@ func CaptureSnapshot(ctx context.Context, db portfoliodb.DBTX, list portfoliodb.
 		PricedSymbols:  int64(v.PricedSymbols),
 		MissingSymbols: int64(v.MissingSymbols),
 		CreatedAt:      portfolios.Now(),
+		FxAsOf:         v.FxAsOf,
+		FxMissing:      v.FxMissing,
 	})
 	if err != nil {
 		// Another replica may have won the race; the row exists either way.

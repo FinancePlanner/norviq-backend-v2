@@ -283,6 +283,7 @@ func copySandbox(ctx context.Context, tx pgx.Tx, sourceID uuid.UUID, dest portfo
 			Notes:           st.Notes,
 			Category:        st.Category,
 			SourceProvider:  &provider,
+			Currency:        st.Currency,
 			CreatedAt:       portfolios.Now(),
 		}); err != nil {
 			return err

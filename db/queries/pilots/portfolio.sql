@@ -109,8 +109,8 @@ UPDATE stocks SET shares = @shares, updated_at = now() WHERE id = @id;
 UPDATE stocks SET shares = @shares, buy_price = @buy_price, buy_date = @buy_date, updated_at = now() WHERE id = @id;
 
 -- name: InsertStock :exec
-INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, category, source_provider, created_at, updated_at)
-VALUES (@id, @user_id, @portfolio_list_id, @symbol, @shares, @buy_price, @buy_date, 'stock', @source_provider, @created_at, @created_at);
+INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, category, source_provider, currency, created_at, updated_at)
+VALUES (@id, @user_id, @portfolio_list_id, @symbol, @shares, @buy_price, @buy_date, 'stock', @source_provider, sqlc.narg(currency), @created_at, @created_at);
 
 -- name: InsertTransaction :exec
 INSERT INTO transactions (id, account_id, instrument_id, external_id, type, quantity, price, currency, trade_date, realized_pnl, created_at, updated_at)

@@ -88,9 +88,9 @@ SELECT EXISTS (
 -- name: InsertStock :one
 INSERT INTO stocks (
     id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, notes,
-    category, source_provider, source_account_id, created_at, updated_at
+    category, source_provider, source_account_id, currency, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, sqlc.arg(now), sqlc.arg(now)
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, sqlc.narg(currency), sqlc.arg(now), sqlc.arg(now)
 )
 RETURNING *;
 

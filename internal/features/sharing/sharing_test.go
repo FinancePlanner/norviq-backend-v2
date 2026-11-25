@@ -24,14 +24,14 @@ func ptr(v float64) *float64 { return &v }
 func hv(symbol string, value float64) portfolio.HoldingValuation {
 	return portfolio.HoldingValuation{
 		Symbol: symbol, Shares: 1, CostBasis: value, AverageBuyPrice: value, CurrentPrice: ptr(value),
-		MarketValue: value, UnrealizedPnlPercent: ptr(10), DayChangePercent: ptr(1),
+		MarketValue: value, MarketValueInBase: &value, UnrealizedPnlPercent: ptr(10), DayChangePercent: ptr(1),
 	}
 }
 
 func val(holdings []portfolio.HoldingValuation, cash float64) portfolio.Valuation {
 	total := 0.0
-	for _, h := range holdings {
-		total += h.MarketValue
+	for i := range holdings {
+		total += holdings[i].MarketValue
 	}
 	return portfolio.Valuation{
 		Holdings: holdings, HoldingsMarketValue: total, TotalCost: total, UnrealizedPnlPercent: ptr(5),

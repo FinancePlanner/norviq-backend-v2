@@ -17737,9 +17737,42 @@ components:
         value:
           type: number
           format: double
+          description: Value in `currency`, the instrument currency (CASH is in the base currency).
         currency:
           type: string
-      required: [symbol, value, currency]
+          description: >-
+            ISO instrument currency of the holding (minor-unit codes such as GBX
+            appear as GBP). CASH carries the portfolio base currency. With
+            FX valuation disabled, a holding quoted in raw minor units keeps
+            the base currency, because its amounts stay raw.
+        valueInBase:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            `value` converted into `baseCurrency`; null when no FX rate exists.
+            While FX valuation is disabled it equals `value`. Allocation is sorted by this
+            field descending, nulls last.
+        baseCurrency:
+          type: string
+          description: The portfolio base currency `valueInBase` is in.
+      required: [symbol, value, currency, valueInBase, baseCurrency]
+    FxProvenance:
+      type: object
+      properties:
+        source:
+          type: string
+          nullable: true
+          description: Rate source (`ECB`); null when nothing needed converting.
+        asOf:
+          type: string
+          format: date
+          nullable: true
+          description: Date of the oldest rate used; null when nothing was converted.
+        converted:
+          type: boolean
+          description: True when at least one amount was converted from another currency.
+      required: [source, asOf, converted]
     PortfolioSummaryResponse:
       type: object
       properties:
@@ -17764,7 +17797,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AllocationItem'
-      required: [baseCurrency, totalValue, totalCost, unrealizedPnl, realizedPnl, cashBalance, allocation]
+        fx:
+          allOf:
+            - $ref: '#/components/schemas/FxProvenance'
+          description: >-
+            Conversion provenance. Populated only while FX valuation is enabled;
+            realized P&L uses the legacy conversion while it is disabled.
+        fxMissing:
+          type: array
+          items:
+            type: string
+          description: >-
+            Currencies with no FX rate (sorted, unique). Their holdings and
+            realized sales are left out of the base-currency totals; a missing
+            rate is never treated as 1:1. Omitted when empty.
+      description: >-
+        totalValue, totalCost, unrealizedPnl, realizedPnl and cashBalance are in
+        `baseCurrency`, summed over the holdings that have an FX rate.
+      required: [baseCurrency, totalValue, totalCost, unrealizedPnl, realizedPnl, cashBalance, allocation, fx]
     PerformancePoint:
       type: object
       properties:
@@ -17953,12 +18003,36 @@ components:
           type: string
         currency:
           type: string
+          description: >-
+            ISO instrument currency. unrealizedPnl, buyPrice, costBasis,
+            currentPrice, marketValue and dayChange are in this currency.
+        baseCurrency:
+          type: string
+          description: The portfolio base currency; realizedPnl, unrealizedPnlInBase and valueInBase are in it.
         realizedPnl:
           type: number
           format: double
+          description: Realized P&L in `baseCurrency`.
         unrealizedPnl:
           type: number
           format: double
+          description: Unrealized P&L in `currency`.
+        unrealizedPnlInBase:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            unrealizedPnl in `baseCurrency`; null when no FX rate exists. While
+            FX valuation is disabled it equals the raw instrument-currency
+            `unrealizedPnl`.
+        valueInBase:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            marketValue in `baseCurrency`; null when no FX rate exists. While FX
+            valuation is disabled it equals the raw instrument-currency
+            `marketValue`.
         shares:
           type: number
           format: double
@@ -17990,8 +18064,8 @@ components:
         weightPercent:
           type: number
           format: double
-          description: Percent of total account value (holdings market value plus cash).
-      required: [symbol, currency, realizedPnl, unrealizedPnl]
+          description: Percent of total account value (holdings market value plus cash), in base currency. Omitted without an FX rate.
+      required: [symbol, currency, baseCurrency, realizedPnl, unrealizedPnl, unrealizedPnlInBase, valueInBase]
     PnlResponse:
       type: object
       properties:

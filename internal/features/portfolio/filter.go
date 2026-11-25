@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/fx"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/store/portfoliocoredb"
 	"norviq-api/internal/store/portfoliodb"
@@ -72,8 +73,9 @@ func (r ResolvedFilter) CashBalance(ctx context.Context, db portfoliocoredb.DBTX
 }
 
 // LoadValuation is PortfolioFilterResolver.loadValuation: the filter's
-// holdings priced as /v1/portfolio/summary prices them.
-func (r ResolvedFilter) LoadValuation(ctx context.Context, db portfoliodb.DBTX, svc ValuationService) (Valuation, error) {
+// holdings priced as /v1/portfolio/summary prices them, in the filter's base
+// currency.
+func (r ResolvedFilter) LoadValuation(ctx context.Context, db portfoliodb.DBTX, svc ValuationService, rates fx.Rates) (Valuation, error) {
 	stocks, err := r.Stocks(ctx, db)
 	if err != nil {
 		return Valuation{}, err
@@ -82,5 +84,5 @@ func (r ResolvedFilter) LoadValuation(ctx context.Context, db portfoliodb.DBTX, 
 	if err != nil {
 		return Valuation{}, err
 	}
-	return svc.Value(ctx, stocks, cash, portfolios.Now()), nil
+	return svc.Value(ctx, stocks, cash, r.BaseCurrency, rates, portfolios.Now())
 }

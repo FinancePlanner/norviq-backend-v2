@@ -40,6 +40,7 @@ import (
 	"norviq-api/internal/features/expenses"
 	"norviq-api/internal/features/feedback"
 	"norviq-api/internal/features/financing"
+	"norviq-api/internal/features/fxrates"
 	"norviq-api/internal/features/goalplanning"
 	"norviq-api/internal/features/goals"
 	"norviq-api/internal/features/groups"
@@ -278,6 +279,7 @@ func AllJobs() []Job {
 		reporting.RetentionJob{},
 		expenseimport.RetentionJob{},
 		portfolio.SnapshotJob{},
+		fxrates.ECBJob{},
 		achievements.SweepJob{},
 		pilots.IngestionJob{},
 		pilots.MirrorJob{},

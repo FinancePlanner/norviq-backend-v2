@@ -619,9 +619,9 @@ func (q *Queries) InsertRetirementPlan(ctx context.Context, arg InsertRetirement
 const insertStock = `-- name: InsertStock :exec
 INSERT INTO stocks (
     id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, notes,
-    category, source_provider, source_account_id, created_at, updated_at
+    category, source_provider, source_account_id, currency, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $12, $11, $11
 )
 `
 
@@ -637,6 +637,7 @@ type InsertStockParams struct {
 	Category        AssetCategory
 	SourceProvider  *string
 	CreatedAt       time.Time
+	Currency        *string
 }
 
 func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) error {
@@ -652,6 +653,7 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) error 
 		arg.Category,
 		arg.SourceProvider,
 		arg.CreatedAt,
+		arg.Currency,
 	)
 	return err
 }
@@ -1048,7 +1050,7 @@ func (q *Queries) SetPortfolioListOwnership(ctx context.Context, arg SetPortfoli
 }
 
 const stocksForPortfolio = `-- name: StocksForPortfolio :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE portfolio_list_id = $1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE portfolio_list_id = $1
 `
 
 func (q *Queries) StocksForPortfolio(ctx context.Context, portfolioListID uuid.UUID) ([]Stock, error) {
@@ -1074,6 +1076,7 @@ func (q *Queries) StocksForPortfolio(ctx context.Context, portfolioListID uuid.U
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}

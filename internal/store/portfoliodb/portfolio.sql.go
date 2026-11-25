@@ -88,7 +88,7 @@ func (q *Queries) ActiveShareLinksForUser(ctx context.Context, userID uuid.UUID)
 }
 
 const adjustedCloses = `-- name: AdjustedCloses :many
-SELECT date, adjusted_close FROM market_price_bars
+SELECT date, adjusted_close, currency FROM market_price_bars
 WHERE instrument_key = $1::text
   AND date BETWEEN $2::date AND $3::date
 ORDER BY date ASC
@@ -103,6 +103,7 @@ type AdjustedClosesParams struct {
 type AdjustedClosesRow struct {
 	Date          time.Time
 	AdjustedClose float64
+	Currency      string
 }
 
 // MarketPriceBarRepository.adjustedCloses.
@@ -115,7 +116,7 @@ func (q *Queries) AdjustedCloses(ctx context.Context, arg AdjustedClosesParams) 
 	items := []AdjustedClosesRow{}
 	for rows.Next() {
 		var i AdjustedClosesRow
-		if err := rows.Scan(&i.Date, &i.AdjustedClose); err != nil {
+		if err := rows.Scan(&i.Date, &i.AdjustedClose, &i.Currency); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -254,7 +255,7 @@ func (q *Queries) DeleteStock(ctx context.Context, id uuid.UUID) error {
 }
 
 const duplicateStockInList = `-- name: DuplicateStockInList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 AND id <> $4::uuid
 LIMIT 1
 `
@@ -294,6 +295,7 @@ func (q *Queries) DuplicateStockInList(ctx context.Context, arg DuplicateStockIn
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -343,8 +345,8 @@ const insertSnapshot = `-- name: InsertSnapshot :exec
 INSERT INTO portfolio_value_snapshots (
     id, user_id, portfolio_list_id, captured_on, currency, market_value,
     cost_basis, cash_balance, position_count, source, priced_symbols,
-    missing_symbols, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    missing_symbols, created_at, fx_as_of, fx_missing
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 `
 
 type InsertSnapshotParams struct {
@@ -361,6 +363,8 @@ type InsertSnapshotParams struct {
 	PricedSymbols   int64
 	MissingSymbols  int64
 	CreatedAt       time.Time
+	FxAsOf          *time.Time
+	FxMissing       []string
 }
 
 func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) error {
@@ -378,6 +382,8 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 		arg.PricedSymbols,
 		arg.MissingSymbols,
 		arg.CreatedAt,
+		arg.FxAsOf,
+		arg.FxMissing,
 	)
 	return err
 }
@@ -779,7 +785,7 @@ func (q *Queries) SnapshotExists(ctx context.Context, arg SnapshotExistsParams) 
 
 const snapshotsForUserLists = `-- name: SnapshotsForUserLists :many
 
-SELECT id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at FROM portfolio_value_snapshots
+SELECT id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at, fx_as_of, fx_missing FROM portfolio_value_snapshots
 WHERE user_id = $1 AND portfolio_list_id = ANY($2::uuid[])
 ORDER BY captured_on ASC
 `
@@ -813,6 +819,8 @@ func (q *Queries) SnapshotsForUserLists(ctx context.Context, arg SnapshotsForUse
 			&i.PricedSymbols,
 			&i.MissingSymbols,
 			&i.CreatedAt,
+			&i.FxAsOf,
+			&i.FxMissing,
 		); err != nil {
 			return nil, err
 		}
@@ -825,7 +833,7 @@ func (q *Queries) SnapshotsForUserLists(ctx context.Context, arg SnapshotsForUse
 }
 
 const stocksForUserList = `-- name: StocksForUserList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2
 `
 
 type StocksForUserListParams struct {
@@ -856,6 +864,7 @@ func (q *Queries) StocksForUserList(ctx context.Context, arg StocksForUserListPa
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -870,7 +879,7 @@ func (q *Queries) StocksForUserList(ctx context.Context, arg StocksForUserListPa
 const stocksForUserLists = `-- name: StocksForUserLists :many
 
 
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = ANY($2::uuid[])
 `
 
@@ -908,6 +917,7 @@ func (q *Queries) StocksForUserLists(ctx context.Context, arg StocksForUserLists
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}

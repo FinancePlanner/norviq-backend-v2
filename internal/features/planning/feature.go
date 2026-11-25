@@ -371,10 +371,16 @@ func (h *handler) portfolioValue(ctx context.Context, userID uuid.UUID) (float64
 		stocks[i] = portfoliodb.Stock{
 			ID: r.ID, UserID: r.UserID, Symbol: r.Symbol, Shares: r.Shares, BuyPrice: r.BuyPrice, BuyDate: r.BuyDate,
 			Notes: r.Notes, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Category: portfoliodb.AssetCategory(r.Category),
-			SourceProvider: r.SourceProvider, SourceAccountID: r.SourceAccountID, PortfolioListID: r.PortfolioListID,
+			SourceProvider: r.SourceProvider, SourceAccountID: r.SourceAccountID, PortfolioListID: r.PortfolioListID, Currency: r.Currency,
 		}
 	}
-	return math.Max(0, h.valuation.Value(ctx, stocks, cash, h.now()).TotalValue), nil
+	// No single base currency here (R3): value in USD, as the all-portfolios
+	// summary does.
+	v, err := h.valuation.Value(ctx, stocks, cash, "USD", portfolio.RatesFor(h.db), h.now())
+	if err != nil {
+		return 0, err
+	}
+	return math.Max(0, v.TotalValue), nil
 }
 
 func (h *handler) budgetPrefill(ctx context.Context, userID uuid.UUID, out *Prefill) error {

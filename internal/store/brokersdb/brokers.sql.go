@@ -865,7 +865,7 @@ func (q *Queries) HasImportedSymbol(ctx context.Context, arg HasImportedSymbolPa
 }
 
 const holdingsPage = `-- name: HoldingsPage :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 100
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 100
 `
 
 // DatabaseStocksRepository.list(limit: 100, cursor: nil).
@@ -892,6 +892,7 @@ func (q *Queries) HoldingsPage(ctx context.Context, userID uuid.UUID) ([]Stock, 
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -904,7 +905,7 @@ func (q *Queries) HoldingsPage(ctx context.Context, userID uuid.UUID) ([]Stock, 
 }
 
 const importedStocks = `-- name: ImportedStocks :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND source_provider = $2 AND source_account_id = $3
 `
 
@@ -937,6 +938,7 @@ func (q *Queries) ImportedStocks(ctx context.Context, arg ImportedStocksParams) 
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -1390,11 +1392,11 @@ func (q *Queries) InsertPosition(ctx context.Context, arg InsertPositionParams) 
 const insertStock = `-- name: InsertStock :one
 INSERT INTO stocks (
     id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, notes,
-    category, source_provider, source_account_id, created_at, updated_at
+    category, source_provider, source_account_id, currency, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13
 )
-RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id
+RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency
 `
 
 type InsertStockParams struct {
@@ -1409,6 +1411,7 @@ type InsertStockParams struct {
 	Category        AssetCategory
 	SourceProvider  *string
 	SourceAccountID *uuid.UUID
+	Currency        *string
 	Now             time.Time
 }
 
@@ -1425,6 +1428,7 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) (Stock
 		arg.Category,
 		arg.SourceProvider,
 		arg.SourceAccountID,
+		arg.Currency,
 		arg.Now,
 	)
 	var i Stock
@@ -1442,6 +1446,7 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) (Stock
 		&i.SourceProvider,
 		&i.SourceAccountID,
 		&i.PortfolioListID,
+		&i.Currency,
 	)
 	return i, err
 }
@@ -2178,7 +2183,7 @@ func (q *Queries) SetTransactionQuantity(ctx context.Context, arg SetTransaction
 }
 
 const stocksInListForSymbols = `-- name: StocksInListForSymbols :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = ANY($3::text[])
 `
 
@@ -2211,6 +2216,7 @@ func (q *Queries) StocksInListForSymbols(ctx context.Context, arg StocksInListFo
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -2521,7 +2527,7 @@ func (q *Queries) UserPlan(ctx context.Context, arg UserPlanParams) ([]TaxAction
 }
 
 const userStocks = `-- name: UserStocks :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1
 `
 
 func (q *Queries) UserStocks(ctx context.Context, userID uuid.UUID) ([]Stock, error) {
@@ -2547,6 +2553,7 @@ func (q *Queries) UserStocks(ctx context.Context, userID uuid.UUID) ([]Stock, er
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}

@@ -95,7 +95,7 @@ func (q *Queries) DeleteTransaction(ctx context.Context, id uuid.UUID) error {
 }
 
 const duplicateStockInList = `-- name: DuplicateStockInList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 AND id <> $4
 LIMIT 1
 `
@@ -135,6 +135,7 @@ func (q *Queries) DuplicateStockInList(ctx context.Context, arg DuplicateStockIn
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -296,7 +297,7 @@ func (q *Queries) GetTransaction(ctx context.Context, id uuid.UUID) ([]Transacti
 }
 
 const getUserStock = `-- name: GetUserStock :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE id = $1 AND user_id = $2 LIMIT 1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE id = $1 AND user_id = $2 LIMIT 1
 `
 
 type GetUserStockParams struct {
@@ -327,6 +328,7 @@ func (q *Queries) GetUserStock(ctx context.Context, arg GetUserStockParams) ([]S
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -463,7 +465,7 @@ INSERT INTO stocks (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
 )
-RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id
+RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency
 `
 
 type InsertStockParams struct {
@@ -511,6 +513,7 @@ func (q *Queries) InsertStock(ctx context.Context, arg InsertStockParams) (Stock
 		&i.SourceProvider,
 		&i.SourceAccountID,
 		&i.PortfolioListID,
+		&i.Currency,
 	)
 	return i, err
 }
@@ -722,7 +725,7 @@ func (q *Queries) InstrumentsByIDs(ctx context.Context, ids []uuid.UUID) ([]Inst
 
 const listStocks = `-- name: ListStocks :many
 
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1
   AND ($2::uuid IS NULL OR portfolio_list_id = $2::uuid)
   AND (
@@ -778,6 +781,7 @@ func (q *Queries) ListStocks(ctx context.Context, arg ListStocksParams) ([]Stock
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -840,7 +844,7 @@ func (q *Queries) SetStockShares(ctx context.Context, arg SetStockSharesParams) 
 }
 
 const stockBySymbol = `-- name: StockBySymbol :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND symbol = $2 LIMIT 1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND symbol = $2 LIMIT 1
 `
 
 type StockBySymbolParams struct {
@@ -871,6 +875,7 @@ func (q *Queries) StockBySymbol(ctx context.Context, arg StockBySymbolParams) ([
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -883,7 +888,7 @@ func (q *Queries) StockBySymbol(ctx context.Context, arg StockBySymbolParams) ([
 }
 
 const stockInList = `-- name: StockInList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 LIMIT 1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 LIMIT 1
 `
 
 type StockInListParams struct {
@@ -915,6 +920,7 @@ func (q *Queries) StockInList(ctx context.Context, arg StockInListParams) ([]Sto
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -927,7 +933,7 @@ func (q *Queries) StockInList(ctx context.Context, arg StockInListParams) ([]Sto
 }
 
 const stockInListByID = `-- name: StockInListByID :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND id = $3 LIMIT 1
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND id = $3 LIMIT 1
 `
 
 type StockInListByIDParams struct {
@@ -959,6 +965,7 @@ func (q *Queries) StockInListByID(ctx context.Context, arg StockInListByIDParams
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -995,7 +1002,7 @@ func (q *Queries) StockSymbolsByRecency(ctx context.Context, userID uuid.UUID) (
 }
 
 const stocksInList = `-- name: StocksInList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3
 `
 
 type StocksInListParams struct {
@@ -1027,6 +1034,7 @@ func (q *Queries) StocksInList(ctx context.Context, arg StocksInListParams) ([]S
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -1105,7 +1113,7 @@ UPDATE stocks SET
     symbol = $2, shares = $3, buy_price = $4, buy_date = $5, notes = $6,
     category = $7, portfolio_list_id = $8, updated_at = $9
 WHERE id = $1
-RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id
+RETURNING id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency
 `
 
 type UpdateStockParams struct {
@@ -1147,6 +1155,7 @@ func (q *Queries) UpdateStock(ctx context.Context, arg UpdateStockParams) (Stock
 		&i.SourceProvider,
 		&i.SourceAccountID,
 		&i.PortfolioListID,
+		&i.Currency,
 	)
 	return i, err
 }

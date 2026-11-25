@@ -21,8 +21,8 @@ import (
 type Feature struct {
 	// Quotes overrides the environment-built market data service (tests).
 	Quotes QuoteSource
-	// Fx overrides the FX source of the realized P&L (tests). Nil uses
-	// Quotes when it is one (the market data service is).
+	// Fx overrides the FX source of the flag-off realized P&L (tests). Nil
+	// uses Quotes when it is one (the market data service is).
 	Fx FxSource
 }
 
@@ -46,8 +46,8 @@ func (f Feature) Register(d *server.Deps, r *server.Routes) error {
 	h := &handlers{
 		d:            d,
 		filters:      FilterResolver{Access: portfolios.NewAccess(d.DB)},
-		valuation:    ValuationService{Quotes: quotes, Logger: d.Logger},
 		fx:           fx,
+		valuation:    ValuationService{Quotes: quotes, Logger: d.Logger},
 		entitlements: entitlements.NewFromEnv(d.DB),
 	}
 

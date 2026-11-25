@@ -6,7 +6,6 @@ realized P&L is converted. Everything that changes a total is behind `FX_VALUATI
 (`true` or `1`; default off). Owner decision numbers refer to the ADR and the plan's
 "Deliberate refinement of the ADR" section:
 
-- Q1: the source and depth of the FX history backfill.
 - Q3: the owner's decision on when to flip production.
 - R25: the owner accepts or rejects the two NULL-currency valuation behaviours (checks 2 and 3).
 
@@ -99,7 +98,8 @@ Check (5) feeds pre-flip step 4 below.
 Do these before the flip. Production must not be flipped until every one is done and the
 read-only checks above are recorded.
 
-1. ECB history (ADR Q1). There is no load mechanism for ECB history yet. The daily job
+1. ECB history. There is no load mechanism for ECB history yet (`fx.FetchECB` already takes a
+   date range, so it is a small engineering task, not an owner decision). The daily job
    fetches only the last 10 days, and nothing in the code reads days older than that window
    today (`HistoricalSeries` has no production caller). Loading history therefore becomes
    required before any consumer of historical conversion ships; until then older days would

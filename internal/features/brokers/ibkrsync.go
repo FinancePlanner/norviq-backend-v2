@@ -12,6 +12,7 @@ import (
 	"norviq-api/internal/apijson"
 	"norviq-api/internal/features/stocks"
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/fx"
 	"norviq-api/internal/platform/portfolios"
 	"norviq-api/internal/store/brokersdb"
 
@@ -238,8 +239,13 @@ func (x ibkrSyncService) upsertPosition(ctx context.Context, symbol string, p ib
 		if listID == nil {
 			return nil
 		}
+		var currency *string
+		if iso, _, ok := fx.Normalize(p.Currency); ok {
+			currency = &iso
+		}
 		_, err = q.InsertStock(ctx, brokersdb.InsertStockParams{
-			ID: uuid.New(), UserID: userID, PortfolioListID: *listID, Symbol: symbol,
+			Currency: currency,
+			ID:       uuid.New(), UserID: userID, PortfolioListID: *listID, Symbol: symbol,
 			Shares: quantity, BuyPrice: averageCost, BuyDate: utcDay(now), Category: brokersdb.AssetCategoryStock,
 			SourceProvider: &provider, SourceAccountID: &accountID, Now: now,
 		})

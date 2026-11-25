@@ -117,6 +117,8 @@ type PortfolioValueSnapshot struct {
 	PricedSymbols   int64
 	MissingSymbols  int64
 	CreatedAt       time.Time
+	FxAsOf          *time.Time
+	FxMissing       []string
 }
 
 type ResearchNote struct {
@@ -146,4 +148,5 @@ type Stock struct {
 	SourceProvider  *string
 	SourceAccountID *uuid.UUID
 	PortfolioListID uuid.UUID
+	Currency        *string
 }

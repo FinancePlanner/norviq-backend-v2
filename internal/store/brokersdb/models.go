@@ -200,6 +200,7 @@ type Stock struct {
 	SourceProvider  *string
 	SourceAccountID *uuid.UUID
 	PortfolioListID uuid.UUID
+	Currency        *string
 }
 
 type TaxActionLeg struct {

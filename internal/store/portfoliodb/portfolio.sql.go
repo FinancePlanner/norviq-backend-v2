@@ -254,7 +254,7 @@ func (q *Queries) DeleteStock(ctx context.Context, id uuid.UUID) error {
 }
 
 const duplicateStockInList = `-- name: DuplicateStockInList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = $2 AND symbol = $3 AND id <> $4::uuid
 LIMIT 1
 `
@@ -294,6 +294,7 @@ func (q *Queries) DuplicateStockInList(ctx context.Context, arg DuplicateStockIn
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -779,7 +780,7 @@ func (q *Queries) SnapshotExists(ctx context.Context, arg SnapshotExistsParams) 
 
 const snapshotsForUserLists = `-- name: SnapshotsForUserLists :many
 
-SELECT id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at FROM portfolio_value_snapshots
+SELECT id, user_id, portfolio_list_id, captured_on, currency, market_value, cost_basis, cash_balance, position_count, source, priced_symbols, missing_symbols, created_at, fx_as_of, fx_missing FROM portfolio_value_snapshots
 WHERE user_id = $1 AND portfolio_list_id = ANY($2::uuid[])
 ORDER BY captured_on ASC
 `
@@ -813,6 +814,8 @@ func (q *Queries) SnapshotsForUserLists(ctx context.Context, arg SnapshotsForUse
 			&i.PricedSymbols,
 			&i.MissingSymbols,
 			&i.CreatedAt,
+			&i.FxAsOf,
+			&i.FxMissing,
 		); err != nil {
 			return nil, err
 		}
@@ -825,7 +828,7 @@ func (q *Queries) SnapshotsForUserLists(ctx context.Context, arg SnapshotsForUse
 }
 
 const stocksForUserList = `-- name: StocksForUserList :many
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks WHERE user_id = $1 AND portfolio_list_id = $2
 `
 
 type StocksForUserListParams struct {
@@ -856,6 +859,7 @@ func (q *Queries) StocksForUserList(ctx context.Context, arg StocksForUserListPa
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}
@@ -870,7 +874,7 @@ func (q *Queries) StocksForUserList(ctx context.Context, arg StocksForUserListPa
 const stocksForUserLists = `-- name: StocksForUserLists :many
 
 
-SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id FROM stocks
+SELECT id, user_id, symbol, shares, buy_price, buy_date, notes, created_at, updated_at, category, source_provider, source_account_id, portfolio_list_id, currency FROM stocks
 WHERE user_id = $1 AND portfolio_list_id = ANY($2::uuid[])
 `
 
@@ -908,6 +912,7 @@ func (q *Queries) StocksForUserLists(ctx context.Context, arg StocksForUserLists
 			&i.SourceProvider,
 			&i.SourceAccountID,
 			&i.PortfolioListID,
+			&i.Currency,
 		); err != nil {
 			return nil, err
 		}

@@ -490,7 +490,7 @@ func applyBuy(ctx context.Context, q *pilotsdb.Queries, t ledgerTrade, userID, p
 	}
 	return q.InsertStock(ctx, pilotsdb.InsertStockParams{
 		ID: uuid.New(), UserID: userID, PortfolioListID: portfolioID, Symbol: t.Symbol, Shares: t.Quantity,
-		BuyPrice: t.Price, BuyDate: dateOf(t.TradeDate), SourceProvider: &sourceProvider, CreatedAt: time.Now(),
+		BuyPrice: t.Price, BuyDate: dateOf(t.TradeDate), SourceProvider: &sourceProvider, Currency: ptr("USD"), CreatedAt: time.Now(),
 	})
 }
 

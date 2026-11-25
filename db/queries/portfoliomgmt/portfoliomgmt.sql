@@ -142,9 +142,9 @@ SELECT * FROM stocks WHERE portfolio_list_id = $1;
 -- name: InsertStock :exec
 INSERT INTO stocks (
     id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, notes,
-    category, source_provider, source_account_id, created_at, updated_at
+    category, source_provider, source_account_id, currency, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, sqlc.narg(currency), $11, $11
 );
 
 -- name: CashPositionsToCopy :many

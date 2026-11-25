@@ -270,3 +270,21 @@ func TestSyncSkipsHoldingsForFollowedList(t *testing.T) {
 		t.Fatalf("position not kept current")
 	}
 }
+
+func TestSyncWritesStockCurrency(t *testing.T) {
+	h := newHarness(t, nil)
+	userID, _ := h.user(t)
+	symbol := strings.ToUpper("LDC" + uuid.NewString()[:4])
+	h.instrument(t, symbol)
+	h.connection(t, userID)
+	h.gateway.positions = []stubPosition{{ticker: symbol, quantity: 2, avgCost: 10}}
+	h.sync(t, userID)
+
+	var currency *string
+	if err := h.app.Deps.DB.QueryRow(bg, `SELECT currency FROM stocks WHERE user_id = $1 AND symbol = $2`, userID, symbol).Scan(&currency); err != nil {
+		t.Fatal(err)
+	}
+	if currency == nil || *currency != "USD" {
+		t.Fatalf("stocks.currency = %v, want USD", currency)
+	}
+}

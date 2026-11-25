@@ -17,6 +17,8 @@ SELECT currency::text AS currency FROM (
     SELECT currency FROM quote_cache
     UNION
     SELECT currency FROM positions
+    UNION
+    SELECT currency FROM stocks
 ) c
 WHERE currency IS NOT NULL AND currency <> ''
 ORDER BY currency

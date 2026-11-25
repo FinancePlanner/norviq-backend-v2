@@ -160,3 +160,28 @@ func TestRunECBTickUnsupportedAndFailure(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestCurrenciesInUseIncludesStocks(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	seed(t, app)
+	ctx := context.Background()
+	uid := app.CreateUser("fx-stock@example.com")
+	var listID uuid.UUID
+	if err := app.Deps.DB.QueryRow(ctx, `SELECT id FROM portfolio_lists WHERE name = 'fx' LIMIT 1`).Scan(&listID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Deps.DB.Exec(ctx,
+		`INSERT INTO stocks (id, user_id, portfolio_list_id, symbol, shares, buy_price, buy_date, currency, created_at)
+		 VALUES ($1,$2,$3,'NESN',1,1,'2026-01-02','CHF',now())`, uuid.New(), uid, listID); err != nil {
+		t.Fatal(err)
+	}
+	stub := newECBStub(t)
+	logger, _ := logs()
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	if _, err := fxrates.RunECBTick(ctx, app.Deps.DB, stub.srv.Client(), stub.srv.URL, now, logger); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(stub.quotes(), ","); !strings.Contains(got, "CHF") {
+		t.Fatalf("CHF not requested: %s", got)
+	}
+}

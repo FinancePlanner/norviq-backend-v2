@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+const currenciesInUse = `-- name: CurrenciesInUse :many
+SELECT currency::text AS currency FROM (
+    SELECT base_currency AS currency FROM portfolio_lists
+    UNION
+    SELECT currency FROM quote_cache
+    UNION
+    SELECT currency FROM positions
+) c
+WHERE currency IS NOT NULL AND currency <> ''
+ORDER BY currency
+`
+
+func (q *Queries) CurrenciesInUse(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, currenciesInUse)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var currency string
+		if err := rows.Scan(&currency); err != nil {
+			return nil, err
+		}
+		items = append(items, currency)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertECBRate = `-- name: InsertECBRate :execrows
 INSERT INTO fx_daily_rates (id, date, base, quote, rate)
 VALUES (gen_random_uuid(), $1, 'EUR', $2, CAST($3::text AS numeric))

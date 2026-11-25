@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CurrenciesInUse(ctx context.Context) ([]string, error)
 	InsertECBRate(ctx context.Context, arg InsertECBRateParams) (int64, error)
 	RatesOnOrBefore(ctx context.Context, arg RatesOnOrBeforeParams) ([]RatesOnOrBeforeRow, error)
 }

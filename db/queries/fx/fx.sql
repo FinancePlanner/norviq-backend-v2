@@ -8,3 +8,14 @@ ORDER BY quote, date DESC;
 INSERT INTO fx_daily_rates (id, date, base, quote, rate)
 VALUES (gen_random_uuid(), @date, 'EUR', @quote, CAST(@rate::text AS numeric))
 ON CONFLICT DO NOTHING;
+
+-- name: CurrenciesInUse :many
+SELECT currency::text AS currency FROM (
+    SELECT base_currency AS currency FROM portfolio_lists
+    UNION
+    SELECT currency FROM quote_cache
+    UNION
+    SELECT currency FROM positions
+) c
+WHERE currency IS NOT NULL AND currency <> ''
+ORDER BY currency;

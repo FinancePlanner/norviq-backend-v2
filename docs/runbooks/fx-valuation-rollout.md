@@ -23,9 +23,12 @@ account identifiers. Record the counts in the rollout ticket.
 ```sql
 SET default_transaction_read_only = on;
 
--- (1) Minor-unit codes in positions.currency. Expect zero or a small count.
---     A raw GBX/ZAC/ILA code is not copied by the 00009 backfill (R23).
-SELECT currency, count(*) FROM positions GROUP BY 1 ORDER BY 2 DESC;
+-- (1) Minor-unit codes (GBX, GBp, ZAc, ZAC, ILA) in positions.currency. Expect zero or a
+--     small count. These are not copied by the 00009 backfill (R23); ZAC is listed because
+--     the backfill excludes it while fx.Normalize handles only ZAc.
+SELECT currency, count(*) FROM positions
+WHERE currency IN ('GBX', 'GBp', 'ZAc', 'ILA', 'ZAC')
+GROUP BY 1 ORDER BY 2 DESC;
 
 -- (2) R25b: stocks with no stored currency whose latest quote is in a minor-unit code.
 --     With the flag on these get price x0.01 but an unscaled cost.

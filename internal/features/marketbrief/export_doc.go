@@ -92,6 +92,7 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 	if e != nil {
 		doc.Chart = docChart(e, open, lang, str)
 		doc.CrossAsset = docCrossAsset(e, lang, str)
+		doc.Sessions = docSessions(e, str)
 		doc.Missing = docMissing(e, str)
 	}
 	if len(narrative) > 0 {
@@ -497,14 +498,21 @@ func docCrossAsset(e *Edition, lang string, str docStrings) []export.Row {
 	return rows
 }
 
-// docMissing names what did not arrive, instead of inventing it. A market
-// closed or on a shortened session gets one line of its own; the items
-// missing because of that holiday fold into it. Market lines come first.
-func docMissing(e *Edition, str docStrings) []string {
+// docSessions gives each market closed or on a shortened session today one
+// line of its own, in the edition's order. nil on a regular day.
+func docSessions(e *Edition, str docStrings) []string {
 	var out []string
 	for _, s := range e.MarketSessions {
 		out = append(out, drawable(sessionLine(s, str)))
 	}
+	return out
+}
+
+// docMissing names what did not arrive, instead of inventing it. The items
+// missing because their market is closed are left out: that market's
+// docSessions line already says why.
+func docMissing(e *Edition, str docStrings) []string {
+	var out []string
 	for _, m := range e.Quality.Missing {
 		if e.Quality.MissingReasons[m] == ReasonHoliday {
 			continue
@@ -521,7 +529,9 @@ func docMissing(e *Edition, str docStrings) []string {
 }
 
 // sessionLine words one market session. The holiday's English name is
-// printed only in English: no translated name exists to print.
+// printed only in English, after a colon ("US stocks — closed: Thanksgiving
+// Day"), since a name may carry its own parentheses: no translated name
+// exists to print.
 func sessionLine(s MarketSession, str docStrings) string {
 	label, ok := str.markets[s.Market]
 	if !ok {
@@ -535,7 +545,7 @@ func sessionLine(s MarketSession, str docStrings) string {
 		return line
 	}
 	if str.holidayName && s.Name != "" {
-		return label + " — " + str.closed + " (" + s.Name + ")"
+		return label + " — " + str.closed + ": " + s.Name
 	}
 	return label + " — " + str.closed
 }

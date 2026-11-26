@@ -4,7 +4,8 @@ package export
 // that also appears on the web page is copied verbatim from the web's
 // edition strings (norviq-web-v2 src/lib/features/public/brief/edition/
 // strings.ts), so the printed brief says exactly what the page says. Only
-// index, changePct, inThisEdition and page are the report's own.
+// index, changePct, inThisEdition, page and marketSessions are the report's
+// own.
 type reportStrings struct {
 	marketIntelligence, published, marketDataAsOf, lisbonTime string
 	edition, revision, limitedSources                         string
@@ -15,6 +16,7 @@ type reportStrings struct {
 	sourcesAndMethodology, citedSources, marketData           string
 	marketDataMethod, howWritten, howWrittenBody              string
 	degradedBody, notAvailable, legacyNote, disclaimer        string
+	marketSessions                                            string
 
 	index, changePct, inThisEdition string
 	page                            string // "Page %d of %d"
@@ -52,10 +54,11 @@ var reportEN = reportStrings{
 		"names its source. Levels, prices and percentages in a sentence without a source were checked against the " +
 		"figures the model was given (market data, headlines and earnings), and sentences that failed the check were " +
 		"removed. The check does not prove a sentence true, only that its figures were in the data.",
-	degradedBody: "Web sources were unavailable for this edition, so it was written from in-house data only.",
-	notAvailable: "Not available in this edition",
-	legacyNote:   "This edition predates detailed market data, so it shows only the published levels.",
-	disclaimer:   "AI-written from market data. Not financial advice.",
+	degradedBody:   "Web sources were unavailable for this edition, so it was written from in-house data only.",
+	marketSessions: "Market sessions today",
+	notAvailable:   "Not available in this edition",
+	legacyNote:     "This edition predates detailed market data, so it shows only the published levels.",
+	disclaimer:     "AI-written from market data. Not financial advice.",
 
 	index:         "Index",
 	changePct:     "Change %",
@@ -96,10 +99,11 @@ var reportPT = reportStrings{
 		"números dados ao modelo (dados de mercado, títulos de notícias e resultados), e as frases que falharam a " +
 		"verificação foram removidas. A verificação não prova que a frase é verdadeira, apenas que os seus números " +
 		"estavam nos dados.",
-	degradedBody: "As fontes web não estavam disponíveis para esta edição, por isso foi escrita apenas com dados internos.",
-	notAvailable: "Indisponível nesta edição",
-	legacyNote:   "Esta edição é anterior aos dados de mercado detalhados, por isso mostra apenas os níveis publicados.",
-	disclaimer:   "Escrito por IA a partir de dados de mercado. Não constitui aconselhamento financeiro.",
+	degradedBody:   "As fontes web não estavam disponíveis para esta edição, por isso foi escrita apenas com dados internos.",
+	marketSessions: "Sessões de mercado hoje",
+	notAvailable:   "Indisponível nesta edição",
+	legacyNote:     "Esta edição é anterior aos dados de mercado detalhados, por isso mostra apenas os níveis publicados.",
+	disclaimer:     "Escrito por IA a partir de dados de mercado. Não constitui aconselhamento financeiro.",
 
 	index:         "Índice",
 	changePct:     "Variação %",

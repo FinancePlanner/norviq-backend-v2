@@ -689,3 +689,233 @@ func TestReportMarketSessions(t *testing.T) {
 		})
 	}
 }
+
+// snapshotDoc is the fixture with every S3 field: ranges and a session tag
+// on the cards, the morning's earnings and how the edition was written.
+func snapshotDoc(lang string) Doc {
+	d := fixtureDoc(lang)
+	ranges := []string{
+		"Day 24,950.10–26,540.00 · 52w 19,100.25–26,800.75 · Vol 812,345,678",
+		"Day 6,890.00–7,180.20 · 52w 5,600.10–7,210.00",
+		"52w 41,200.00–49,600.30",
+		"",
+	}
+	session, written := "Shortened session", []string{
+		"Written by backup model in 41 s",
+		"1 sentence removed by the number check",
+		"Earlier attempt claude-haiku-5-5: unusable reply",
+	}
+	ers := []Story{
+		{Rank: 1, Text: "Walmart reports before the bell, with guidance in focus after a strong holiday quarter.", Tickers: []string{"WMT"}, SourceHost: "reuters.com"},
+		{Rank: 2, Text: "Deere reports later in the day.", Tickers: []string{"DE"}},
+	}
+	if lang == "pt-PT" {
+		ranges[0] = "Dia 24.950,10–26.540,00 · 52 sem. 19.100,25–26.800,75 · Vol. 812.345.678"
+		ranges[1] = "Dia 6.890,00–7.180,20 · 52 sem. 5.600,10–7.210,00"
+		ranges[2] = "52 sem. 41.200,00–49.600,30"
+		session, written = "Sessão reduzida", []string{
+			"Escrito por modelo de reserva em 41 s",
+			"2 frases removidas pela verificação de números",
+			"Tentativa anterior claude-haiku-5-5: resposta inutilizável",
+		}
+		ers[0].Text = "A Walmart apresenta resultados antes da abertura."
+		ers[1].Text = "A Deere apresenta mais tarde."
+	}
+	for i := range d.Cards {
+		d.Cards[i].Ranges = ranges[i]
+	}
+	d.Cards[0].Session = session
+	d.Earnings = ers
+	d.Written = written
+	return d
+}
+
+func shownContains(shown []string, want string) bool {
+	for _, s := range shown {
+		if strings.Contains(s, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReportSnapshotMetadata(t *testing.T) {
+	for _, lang := range []string{"en", "pt-PT"} {
+		t.Run(lang, func(t *testing.T) {
+			earnings, written, day := "Earnings today", "Written by", "Day "
+			if lang == "pt-PT" {
+				earnings, written, day = "Resultados hoje", "Escrito por", "Dia "
+			}
+			d := snapshotDoc(lang)
+			b, _, err := Render(FormatPDF, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shown := pdfShownText(t, b)
+			// Section headings are tracked caps, shown a glyph at a time.
+			heading := strings.ToUpper(strings.ReplaceAll(earnings, " ", ""))
+			if !strings.Contains(strings.Join(shown, ""), heading) {
+				t.Errorf("the PDF does not show the %q heading", earnings)
+			}
+			for _, want := range []string{d.Cards[0].Ranges, d.Cards[2].Ranges, d.Written[0], d.Written[2], d.Earnings[0].Text[:20]} {
+				if !shownContains(shown, want) {
+					t.Errorf("the PDF does not show %q", want)
+				}
+			}
+
+			plain, _, err := Render(FormatPDF, fixtureDoc(lang))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plainShown := pdfShownText(t, plain)
+			if strings.Contains(strings.Join(plainShown, ""), heading) {
+				t.Errorf("a plain edition shows the %q heading", earnings)
+			}
+			for _, s := range plainShown {
+				// The disclaimer is "Escrito por IA…": the AI, not a model's name.
+				if strings.Contains(s, earnings) || strings.HasPrefix(s, day) || strings.HasPrefix(s, "52") ||
+					(strings.Contains(s, written) && !strings.HasPrefix(s, "Escrito por IA")) {
+					t.Errorf("a plain edition shows %q", s)
+				}
+			}
+			// Empty, not nil, draws nothing either.
+			empty := fixtureDoc(lang)
+			empty.Earnings, empty.Written = []Story{}, []string{}
+			recPlain, _ := recordReport(fixtureDoc(lang))
+			if recEmpty, _ := recordReport(empty); !reflect.DeepEqual(recEmpty.Ops, recPlain.Ops) {
+				t.Error("empty Earnings and Written changed the drawing")
+			}
+		})
+	}
+}
+
+// A row's ranges sit under its meta line, inside the row; the session tag
+// follows the name without touching it.
+func TestReportCardRangesAndSession(t *testing.T) {
+	d := snapshotDoc("en")
+	rec, _ := recordReport(d)
+	runs := textRuns(rec)
+	find := func(text string, size float64) (Op, bool) {
+		for _, op := range runs {
+			if op.Text == text && op.Size == size {
+				return op, true
+			}
+		}
+		return Op{}, false
+	}
+	for i, c := range d.Cards {
+		name, ok := find(c.Name, nameSize)
+		if !ok {
+			t.Fatalf("no name for %s", c.Name)
+		}
+		meta, ok := find(c.Meta, metaSize)
+		if !ok {
+			t.Fatalf("no meta for %s", c.Name)
+		}
+		if c.Ranges == "" {
+			continue
+		}
+		rg, ok := find(c.Ranges, metaSize)
+		if !ok {
+			t.Fatalf("no ranges line for %s", c.Name)
+		}
+		if rg.Y <= meta.Y+metaSize || rg.X != meta.X || rg.Page != meta.Page {
+			t.Errorf("%s: ranges at (%.1f, %.1f) not under meta at (%.1f, %.1f)", c.Name, rg.X, rg.Y, meta.X, meta.Y)
+		}
+		if i+1 < len(d.Cards) {
+			next, _ := find(d.Cards[i+1].Name, nameSize)
+			if rg.Y+metaSize*descent >= next.Y-nameSize {
+				t.Errorf("%s: ranges at y %.1f run into the next row's name at %.1f", c.Name, rg.Y, next.Y)
+			}
+		}
+		_, nameRight := textExtent(rec, name)
+		if c.Session != "" {
+			tag, ok := find(strings.ToUpper(strings.ReplaceAll(c.Session, " ", "")), labelSize)
+			if !ok {
+				t.Fatalf("no session tag for %s", c.Name)
+			}
+			if tag.X <= nameRight || tag.Page != name.Page {
+				t.Errorf("%s: tag at x %.1f overlaps the name ending at %.1f", c.Name, tag.X, nameRight)
+			}
+		}
+	}
+}
+
+// The earnings follow the developments, before sources and methodology, and
+// start page 2 like any other section when they are its first.
+func TestReportEarningsSection(t *testing.T) {
+	for name, d := range map[string]Doc{
+		"with stories": snapshotDoc("en"),
+		"alone": func() Doc {
+			d := snapshotDoc("en")
+			d.Chart, d.CrossAsset, d.Stories = nil, nil, nil
+			return d
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, _ := recordReport(d)
+			head, ok := methodologyHeadingAny(rec, "Earnings today")
+			if !ok {
+				t.Fatal("no earnings heading")
+			}
+			if head.Page == 0 {
+				t.Error("the earnings start on the cover")
+			}
+			method, ok := methodologyHeadingAny(rec, "Sources and methodology")
+			if !ok {
+				t.Fatal("no methodology heading")
+			}
+			if method.Page < head.Page || (method.Page == head.Page && method.Y <= head.Y) {
+				t.Errorf("earnings at p%d y%.1f are not before methodology at p%d y%.1f", head.Page, head.Y, method.Page, method.Y)
+			}
+			if dev, ok := methodologyHeadingAny(rec, "Market-moving developments"); ok && (dev.Page > head.Page || (dev.Page == head.Page && dev.Y >= head.Y)) {
+				t.Errorf("developments at p%d y%.1f are not before the earnings", dev.Page, dev.Y)
+			}
+			for _, st := range d.Earnings {
+				var drawn bool
+				for _, op := range textRuns(rec) {
+					drawn = drawn || (op.Page >= head.Page && strings.HasPrefix(st.Text, op.Text) && len(op.Text) > 10)
+				}
+				if !drawn {
+					t.Errorf("earnings item %q not drawn after its heading", st.Text)
+				}
+			}
+		})
+	}
+}
+
+// methodologyHeadingAny is a section heading: tracked Brygada caps.
+func methodologyHeadingAny(rec *RecordingSurface, heading string) (Op, bool) {
+	want := strings.ReplaceAll(strings.ToUpper(heading), " ", "")
+	for _, op := range textRuns(rec) {
+		if op.Font == SerifSemiBold && op.Size == sectionSize && op.Text == want {
+			return op, true
+		}
+	}
+	return Op{}, false
+}
+
+// A name the tag would cut keeps its whole width: the tag moves to the
+// symbol's line instead.
+func TestReportSessionTagNeverCutsTheName(t *testing.T) {
+	d := snapshotDoc("pt-PT")
+	d.Cards[0].Name, d.Cards[0].Meta = "Futuros do Nasdaq 100", "NQ · US"
+	rec, _ := recordReport(d)
+	var name, meta, tag Op
+	for _, op := range textRuns(rec) {
+		switch {
+		case op.Text == d.Cards[0].Name && op.Size == nameSize:
+			name = op
+		case op.Text == d.Cards[0].Meta && op.Size == metaSize:
+			meta = op
+		case op.Text == "SESSÃOREDUZIDA" && op.Size == labelSize && tag.Text == "":
+			tag = op
+		}
+	}
+	if name.Text == "" || meta.Text == "" || tag.Text == "" {
+		t.Fatalf("name %+v, meta %+v, tag %+v", name, meta, tag)
+	}
+	if _, right := textExtent(rec, meta); tag.Y != meta.Y || tag.X <= right {
+		t.Errorf("tag at (%.1f, %.1f), not after the meta ending at (%.1f, %.1f)", tag.X, tag.Y, right, meta.Y)
+	}
+}

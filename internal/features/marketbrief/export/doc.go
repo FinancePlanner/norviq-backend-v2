@@ -33,6 +33,13 @@ type Doc struct {
 	// Missing names what did not arrive. Rows missing because their market
 	// is closed are folded into that market's Sessions line instead.
 	Missing []string
+	// Earnings are the morning's earnings items, ranked from 1 like the
+	// stories. Empty in the evening, and the report then has no section.
+	Earnings []Story
+	// Written says how the narrative was written, one line each, e.g.
+	// "Written by claude-haiku-5-5 in 41 s". Empty for an edition saved
+	// before its provenance was recorded.
+	Written []string
 }
 
 // Card is one instrument's scorecard.
@@ -43,6 +50,13 @@ type Card struct {
 	// Spark holds the instrument's intraday values, nil when it has none.
 	Spark     []float64
 	PrevClose float64
+	// Ranges is the day and 52-week ranges and the volume on one line, e.g.
+	// "Day 8,093.24–8,144.54 · 52w 7,120.10–8,755.03 · Vol 8,281"; "" when
+	// none is known, and the row then has no second line.
+	Ranges string
+	// Session tags a row whose market is closed or shortened today
+	// ("Closed", "Shortened session"); "" on a regular day.
+	Session string
 }
 
 // ChartData is the comparative intraday chart, in percent from the

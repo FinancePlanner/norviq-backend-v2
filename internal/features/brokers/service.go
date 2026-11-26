@@ -50,6 +50,7 @@ type service struct {
 	gateway      gatewayClient // the configured gateway client
 	oauth        *oauthClient  // nil when IBKR OAuth2 is not configured
 	oauthOn      bool          // ibkrConnectMode == .oauth2
+	liveDisabled bool          // no OAuth and no explicit IBKR_CONNECT_MODE=gateway
 	http         *http.Client
 	search       symbolSearch
 	env          func(string) string
@@ -241,8 +242,20 @@ func (s *service) resolveListForConnect(ctx context.Context, requested *string, 
 	return id, nil
 }
 
+// requireLiveConnect is the single place that refuses a live IBKR connection
+// when the shared gateway account has not been opted into (C12).
+func (s *service) requireLiveConnect() error {
+	if s.liveDisabled {
+		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
+	}
+	return nil
+}
+
 // startIBKRConnect is DefaultBrokersService.startIBKRConnect.
 func (s *service) startIBKRConnect(ctx context.Context, r *http.Request, redirectURI string, portfolioListID *string, userID uuid.UUID) (ConnectStartResponse, error) {
+	if err := s.requireLiveConnect(); err != nil {
+		return ConnectStartResponse{}, err
+	}
 	normalized, err := normalizeRedirectURI(redirectURI)
 	if err != nil {
 		return ConnectStartResponse{}, err
@@ -365,6 +378,9 @@ func (s *service) handleIBKRCallback(ctx context.Context, r *http.Request, flowI
 }
 
 func (s *service) connectFromCallback(ctx context.Context, r *http.Request, flow brokersdb.BrokerOauthFlow, code, providerError *string, now time.Time) error {
+	if err := s.requireLiveConnect(); err != nil {
+		return err
+	}
 	if providerError != nil {
 		if e := portfolios.TrimSwift(*providerError); e != "" {
 			return httpx.BadRequest("IBKR authorization failed: " + e)
@@ -469,6 +485,9 @@ func (s *service) syncDataClient(ctx context.Context, c *conn) (gatewayClient, e
 			"IBKR statement sync is not available yet. Your Web Service token and query ID are saved.")
 	}
 	if c.AccessToken == nil || portfolios.TrimSwift(*c.AccessToken) == "" || s.oauth == nil {
+		if err := s.requireLiveConnect(); err != nil {
+			return gatewayClient{}, err
+		}
 		return s.gateway, nil
 	}
 	storedAccess := portfolios.TrimSwift(*c.AccessToken)

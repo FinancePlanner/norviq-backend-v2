@@ -93,6 +93,13 @@ type stubGateway struct {
 	calls     []string
 }
 
+// requests is how many requests the stub has served.
+func (g *stubGateway) requests() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.calls)
+}
+
 func dayAgo(n int) time.Time {
 	d := time.Now().UTC().AddDate(0, 0, -n)
 	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
@@ -180,6 +187,7 @@ func newHarness(t *testing.T, env map[string]string) *harness {
 	t.Cleanup(gw.Close)
 	h.gwURL = gw.URL + "/v1/api"
 	h.env["IBKR_API_BASE_URL"] = h.gwURL
+	h.env["IBKR_CONNECT_MODE"] = "gateway" // gateway mode is explicit opt-in
 	for k, v := range env {
 		h.env[k] = v
 	}

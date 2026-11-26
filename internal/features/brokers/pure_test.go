@@ -118,6 +118,29 @@ func TestHTParsers(t *testing.T) {
 	}
 }
 
+func TestConnectModeFromEnvDisabledWithoutOAuth(t *testing.T) {
+	cases := []struct {
+		raw      string
+		hasOAuth bool
+		want     string
+	}{
+		{"", false, connectDisabled},
+		{"auto", false, connectDisabled},
+		{"", true, connectOAuth2},
+		{"gateway", false, connectGateway},
+		{"client-portal", false, connectGateway},
+		{"oauth2", false, connectOAuth2},
+	}
+	for _, c := range cases {
+		if got, err := connectModeFromEnv(c.raw, c.hasOAuth); err != nil || got != c.want {
+			t.Errorf("%q/%v -> %q %v, want %q", c.raw, c.hasOAuth, got, err, c.want)
+		}
+	}
+	if _, err := connectModeFromEnv("bogus", false); err == nil {
+		t.Error("unknown mode accepted")
+	}
+}
+
 func TestConnectModeAndScopeGuard(t *testing.T) {
 	cases := []struct {
 		raw      string
@@ -125,7 +148,6 @@ func TestConnectModeAndScopeGuard(t *testing.T) {
 		want     string
 	}{
 		{"", true, connectOAuth2},
-		{"", false, connectGateway},
 		{" AUTO ", true, connectOAuth2},
 		{"client-portal", true, connectGateway},
 		{"web_api", false, connectOAuth2},

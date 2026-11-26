@@ -106,11 +106,13 @@ func (f Feature) service(d *server.Deps) (*service, error) {
 		vault:   vault,
 		gateway: gatewayClient{BaseURL: baseURL, DefaultCurrency: currency, HTTP: client, Sleep: sleep},
 		oauthOn: mode == connectOAuth2,
-		http:    client,
-		search:  f.Market,
-		env:     env,
-		now:     now,
-		sleep:   sleep,
+
+		liveDisabled: mode == connectDisabled,
+		http:         client,
+		search:       f.Market,
+		env:          env,
+		now:          now,
+		sleep:        sleep,
 
 		entitlements: f.Entitlements,
 		extractor:    f.Extractor,

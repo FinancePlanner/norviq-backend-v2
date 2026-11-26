@@ -287,6 +287,7 @@ func TestOAuthCallbackUsesTokenResponse(t *testing.T) {
 	defer token.Close()
 	h := newHarness(t, map[string]string{
 		"OAUTH_ALLOWED_REDIRECT_URIS":  "norviq://brokers",
+		"IBKR_CONNECT_MODE":            "", // auto + OAuth config -> oauth2
 		"IBKR_OAUTH_CLIENT_ID":         "client-1",
 		"IBKR_OAUTH_AUTHORIZATION_URL": "https://ibkr.test/authorize?old=1",
 		"IBKR_OAUTH_TOKEN_URL":         token.URL + "/token",
@@ -571,5 +572,52 @@ func TestSODTransportErrorRedactsCredentials(t *testing.T) {
 	}
 	if status != "error" || !strings.Contains(detail, "/Reporting/IBRITService") {
 		t.Fatalf("connection = %s %q, want an error naming the endpoint", status, detail)
+	}
+}
+
+// Without IBKR_CONNECT_MODE=gateway (and without OAuth) the shared gateway
+// account must never be bound to a caller.
+func TestLiveConnectStartRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "", "OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	_, tok := h.user(t)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/start", tok, map[string]string{"redirectURI": "norviq://brokers"}),
+		http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_oauth_flows`); n != 0 {
+		t.Fatalf("flows = %d", n)
+	}
+}
+
+func TestLiveConnectCallbackRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "", "OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	userID, _ := h.user(t)
+	flowID := uuid.New()
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_oauth_flows (id, user_id, provider, state, redirect_uri, expires_at, created_at) VALUES ($1, $2, 'ibkr', $3, 'norviq://brokers', now() + interval '10 minutes', now())`,
+		flowID, userID, strings.Repeat("s", 32))
+	r := h.raw(t, http.MethodGet, "/v1/auth/brokers/ibkr/callback?flowId="+strings.ToUpper(flowID.String())+"&state="+strings.Repeat("s", 32), "", "", nil, nil)
+	loc := r.Header.Get("Location")
+	if r.Status != http.StatusSeeOther || !strings.HasPrefix(loc, "norviq://brokers?broker=ibkr&status=error&error=") || !strings.Contains(loc, "IBKR%20live%20connection%20is%20not%20available") {
+		t.Fatalf("callback = %d %q %s", r.Status, loc, r.Body)
+	}
+	// The handler records a failed attempt as an error row; nothing may be connected.
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections WHERE status = 'connected'`); n != 0 {
+		t.Fatalf("connected rows = %d", n)
+	}
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+func TestTokenlessSyncRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": ""})
+	userID, tok := h.user(t)
+	h.gateway.positions = []stubPosition{{ticker: "NOPE", quantity: 1, avgCost: 1}}
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM stocks`); n != 0 {
+		t.Fatalf("stocks = %d", n)
 	}
 }

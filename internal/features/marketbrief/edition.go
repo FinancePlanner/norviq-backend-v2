@@ -213,8 +213,8 @@ func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Tim
 	}
 	y, m, d := firstBar.In(loc).Date()
 	if ms, ok, _ := sessionOn(meta.market, firstBar.In(loc).Format(time.DateOnly)); ok && ms.CloseAt != nil {
-		if at, err := time.Parse(time.RFC3339, *ms.CloseAt); err == nil {
-			return at, true
+		if closeAt, err := time.Parse(time.RFC3339, *ms.CloseAt); err == nil {
+			return closeAt, true
 		}
 	}
 	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true

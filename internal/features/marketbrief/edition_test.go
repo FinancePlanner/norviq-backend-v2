@@ -660,8 +660,9 @@ func TestHalfDaySeriesEndsAtVerifiedClose(t *testing.T) {
 		t.Fatalf("last %v %v", last.Time.In(ny), last.Value)
 	}
 	// Without a verified time the static 16:00 close applies (and the gap rule drops it).
-	if _, ok := seriesSessionEnd("^GSPC", time.Time{}, time.Date(2026, 11, 25, 9, 30, 0, 0, ny), at); !ok {
-		t.Fatal("no end")
+	end, ok := seriesSessionEnd("^GSPC", time.Time{}, time.Date(2026, 11, 25, 9, 30, 0, 0, ny), at)
+	if !ok || !end.Equal(time.Date(2026, 11, 25, 16, 0, 0, 0, ny)) {
+		t.Fatalf("static end %v %v", end, ok)
 	}
 }
 

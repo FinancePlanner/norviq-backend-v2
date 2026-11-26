@@ -159,20 +159,6 @@ func (f Facts) GroundedNumbers() []float64 {
 			}
 		}
 	}
-	// An early close's time is written as 13:00 or 1 p.m.: ground its hour
-	// and minute in the market's own zone.
-	for _, ms := range f.Sessions {
-		if ms.CloseAt == nil {
-			continue
-		}
-		at, err := time.Parse(time.RFC3339, *ms.CloseAt)
-		loc, lerr := time.LoadLocation(sessionCalendars[ms.Market].zone)
-		if err != nil || lerr != nil {
-			continue
-		}
-		local := at.In(loc)
-		out = append(out, float64(local.Hour()), float64(local.Minute()))
-	}
 	for _, h := range f.Headlines {
 		for _, t := range numberTokens(h.Title) {
 			out = append(out, t.readings...)

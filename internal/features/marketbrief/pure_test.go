@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -647,20 +646,6 @@ func TestGeneratorClaudeWebFirstThenOnline(t *testing.T) {
 	g.ClaudeWebClient, g.ClaudeWebModel = claude, "claude-haiku-5-5+web_search"
 	if brief, err := g.Generate(context.Background(), testDue); err != nil || brief.Model != "claude-haiku-5-5+web_search" || len(web.calls) != 0 {
 		t.Fatalf("%+v %v", brief, err)
-	}
-}
-
-func TestGroundedNumbersIncludeEarlyCloseTimes(t *testing.T) {
-	s, ok, _ := sessionOn("nyse", "2026-11-27")
-	if !ok || s.CloseAt == nil {
-		t.Fatalf("%+v", s)
-	}
-	f := Facts{Sessions: []MarketSession{s}}
-	got := f.GroundedNumbers()
-	for _, want := range []float64{13, 0} {
-		if !slices.Contains(got, want) {
-			t.Errorf("%v not grounded in %v", want, got)
-		}
 	}
 }
 

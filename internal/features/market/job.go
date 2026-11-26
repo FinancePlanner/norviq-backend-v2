@@ -234,7 +234,7 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		return nil
 	}
 	if got.fallback != "" {
-		if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.fallback, got.bars); err != nil {
+		if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.fallback, false, got.bars); err != nil {
 			return err
 		}
 	}

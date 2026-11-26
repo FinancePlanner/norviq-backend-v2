@@ -424,7 +424,7 @@ func seedBars(t *testing.T, svc *marketdata.Service, closes map[string]float64) 
 	for d, c := range closes {
 		bars = append(bars, marketdata.PriceBarResponse{Date: d, Open: c, High: c, Low: c, Close: c})
 	}
-	if err := svc.UpsertMarketPriceBars(context.Background(), "NVDA", "USD", "market", bars); err != nil {
+	if err := svc.UpsertMarketPriceBars(context.Background(), "NVDA", "USD", "market", true, bars); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 }

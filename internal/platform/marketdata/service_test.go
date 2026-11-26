@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"norviq-api/internal/platform/cache"
 	"norviq-api/internal/platform/metrics"
 	"norviq-api/internal/store/marketdatadb"
@@ -68,6 +70,7 @@ type fixture struct {
 	stub  *stub
 	cache *cache.Memory
 	q     *marketdatadb.Queries
+	pool  *pgxpool.Pool
 }
 
 func newFixture(t *testing.T, withFinnhub, withFMP bool) *fixture {
@@ -89,7 +92,7 @@ func newFixture(t *testing.T, withFinnhub, withFMP bool) *fixture {
 	if svc.FMP != nil {
 		svc.FMP.Cache = mem
 	}
-	return &fixture{svc: svc, stub: st, cache: mem, q: q}
+	return &fixture{svc: svc, stub: st, cache: mem, q: q, pool: pool}
 }
 
 func TestQuoteFetchPersistAndCache(t *testing.T) {
@@ -471,5 +474,122 @@ func TestQuoteCountsProviderCallsNotCacheHits(t *testing.T) {
 	}
 	if got := providerCalls(t, "fmp") - fmpCalls; got != 1 {
 		t.Fatalf("fallback path counted %d fmp calls, want 1", got)
+	}
+}
+
+// profileOnce serves a profile2 body on the first call and a 429 afterwards.
+func (s *stub) profileOnce(body any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	s.routes["/stock/profile2"] = func(*http.Request) (int, any) {
+		n++
+		if n == 1 {
+			return 200, body
+		}
+		return 429, "rate limited"
+	}
+}
+
+func TestQuoteCacheKeepsKnownCurrencyWhenProfileFails(t *testing.T) {
+	fx := newFixture(t, true, false)
+	fx.stub.on("/quote", 200, map[string]any{"c": 650.0, "pc": 640, "t": float64(time.Now().Unix())})
+	fx.stub.profileOnce(map[string]any{"currency": "DKK"})
+	fx.svc.Config.QuoteTTL = -3600 // negative: every stored row is stale, so each call refetches
+	ctx := context.Background()
+
+	if got, err := fx.svc.Quote(ctx, "NOVO-B.CO"); err != nil || got.Currency != "DKK" {
+		t.Fatalf("first quote %+v %v", got, err)
+	}
+	fx.cache.RemoveAll()
+	fx.stub.on("/quote", 200, map[string]any{"c": 655.0, "pc": 650, "t": float64(time.Now().Unix())})
+	got, err := fx.svc.Quote(ctx, "NOVO-B.CO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fx.stub.count("/stock/profile2") != 2 {
+		t.Fatalf("profile calls = %d, want 2", fx.stub.count("/stock/profile2"))
+	}
+	if got.CurrentPrice != 655 || got.Currency != "DKK" {
+		t.Fatalf("second quote %+v, want price 655 currency DKK", got)
+	}
+	row, err := fx.q.GetQuoteCache(ctx, marketdatadb.GetQuoteCacheParams{Provider: "finnhub", Symbol: "NOVO-B.CO"})
+	if err != nil || row.Currency != "DKK" || row.Price != 655 {
+		t.Fatalf("row %+v %v", row, err)
+	}
+}
+
+func TestQuoteCacheStoresDefaultForNewSymbolWhenProfileFails(t *testing.T) {
+	fx := newFixture(t, true, false)
+	fx.stub.on("/quote", 200, map[string]any{"c": 12.5, "pc": 12, "t": float64(time.Now().Unix())})
+	fx.stub.on("/stock/profile2", 429, "rate limited")
+	ctx := context.Background()
+
+	got, err := fx.svc.Quote(ctx, "NEWCO")
+	if err != nil || got.Currency != "USD" {
+		t.Fatalf("quote %+v %v", got, err)
+	}
+	row, err := fx.q.GetQuoteCache(ctx, marketdatadb.GetQuoteCacheParams{Provider: "finnhub", Symbol: "NEWCO"})
+	if err != nil || row.Currency != "USD" {
+		t.Fatalf("row %+v %v", row, err)
+	}
+}
+
+func TestQuoteCacheOverwritesEmptyStoredCurrencyWithDefault(t *testing.T) {
+	fx := newFixture(t, true, false)
+	fx.stub.on("/quote", 200, map[string]any{"c": 12.5, "pc": 12, "t": float64(time.Now().Unix())})
+	fx.stub.on("/stock/profile2", 429, "rate limited")
+	fx.svc.Config.QuoteTTL = -3600
+	ctx := context.Background()
+	if _, err := fx.svc.Quote(ctx, "NEWCO"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.pool.Exec(ctx, `UPDATE quote_cache SET currency = '' WHERE symbol = 'NEWCO'`); err != nil {
+		t.Fatal(err)
+	}
+	fx.cache.RemoveAll()
+	if _, err := fx.svc.Quote(ctx, "NEWCO"); err != nil {
+		t.Fatal(err)
+	}
+	row, err := fx.q.GetQuoteCache(ctx, marketdatadb.GetQuoteCacheParams{Provider: "finnhub", Symbol: "NEWCO"})
+	if err != nil || row.Currency != "USD" {
+		t.Fatalf("row %+v %v", row, err)
+	}
+}
+
+func TestPriceBarsKeepKnownCurrencyWhenHistoryDefaulted(t *testing.T) {
+	fx := newFixture(t, true, false)
+	ctx := context.Background()
+	bars := func(c float64) []PriceBarResponse {
+		return []PriceBarResponse{
+			{Date: "2026-11-02", Open: c, High: c, Low: c, Close: c},
+			{Date: "2026-11-03", Open: c, High: c, Low: c, Close: c},
+		}
+	}
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NOVO-B.CO", "DKK", "finnhub", true, bars(600)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NOVO-B.CO", "USD", "finnhub", false, bars(610)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := fx.pool.Query(ctx, `SELECT currency, close FROM market_price_bars WHERE instrument_key = 'NOVO-B.CO'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var cur string
+		var closePx float64
+		if err := rows.Scan(&cur, &closePx); err != nil {
+			t.Fatal(err)
+		}
+		if cur != "DKK" || closePx != 610 {
+			t.Fatalf("row currency %q close %v, want DKK 610", cur, closePx)
+		}
+		n++
+	}
+	if n != 2 {
+		t.Fatalf("rows = %d", n)
 	}
 }

@@ -116,11 +116,14 @@ read-only checks above are recorded.
    goal planning and expenses overview stay unconverted until Plan B, so they disagree with
    `/v1/portfolio/summary` once it converts. Choose: flip together with Plan B, or accept
    both and document them.
-4. Provider quote currency. The quote currency from the provider drives the flag-on rules,
-   and Finnhub falls back to `USD` when its profile fetch fails and caches that value. Use
-   check (5): confirm what currency the provider reports for LSE pence quotes (GBp or GBX
-   against GBP). If a `USD` fallback shows up for `.L` symbols in production data this is a
-   flip blocker that needs a code change.
+4. Provider quote currency. The quote currency from the provider drives the flag-on rules.
+   When Finnhub's profile fetch fails it reports the default currency (`USD`), but a
+   defaulted currency no longer overwrites a known one: `quote_cache` and
+   `market_price_bars` keep the stored currency, and only a new row stores the default. The
+   remaining exposure is a symbol whose profile has never succeeded, which is stored as the
+   default currency; check (5) and the listing guard cannot detect that case. Production
+   had 0 London listings on 2026-11-25. Before the flip, for UK users, run check (5) and
+   confirm what currency the provider reports for LSE pence quotes (GBp or GBX against GBP).
 5. Deploy with the flag off, confirm `fx_daily_rates` has rows for every currency in use,
    then flip (below).
 

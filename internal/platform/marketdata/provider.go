@@ -17,6 +17,10 @@ type Quote struct {
 	Open          *float64
 	PreviousClose *float64
 	Currency      string
+	// CurrencyKnown is true only when the provider itself supplied a non-empty
+	// currency for this symbol. False means Currency is a default, which the
+	// cache must never write over a stored currency.
+	CurrencyKnown bool
 	AsOf          time.Time
 }
 
@@ -34,7 +38,9 @@ type PriceBar struct {
 type History struct {
 	Symbol   string
 	Currency string
-	Bars     []PriceBar
+	// CurrencyKnown: see Quote.CurrencyKnown.
+	CurrencyKnown bool
+	Bars          []PriceBar
 }
 
 // SearchResult is MarketProviderSearchResult.
@@ -101,7 +107,7 @@ type Disabled struct{}
 func (Disabled) Name() string { return "disabled" }
 
 func (Disabled) Quote(_ context.Context, symbol string) (Quote, error) {
-	return Quote{Symbol: symbol, Currency: "USD", AsOf: time.Now()}, nil
+	return Quote{Symbol: symbol, Currency: "USD", CurrencyKnown: false, AsOf: time.Now()}, nil
 }
 
 func (Disabled) History(context.Context, string, *time.Time, *time.Time) (History, error) {

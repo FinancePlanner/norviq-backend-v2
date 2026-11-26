@@ -86,7 +86,7 @@ func TestBuildEdition(t *testing.T) {
 			{Time: eveningAt.Add(-90 * time.Minute), Value: 25029.334},
 		}},
 	}
-	e := buildEdition(due, quotes, nil, series, nil, "claude+web_search", false, eveningAt)
+	e := buildEdition(due, quotes, nil, series, nil, "claude+web_search", false, nil, eveningAt)
 	if e.ID != "MI-2026-11-20-C" || e.Kind != EditionKindClose || e.SchemaVersion != 2 || e.Status != "published" || e.Timezone != "Europe/Lisbon" {
 		t.Fatalf("%+v", e)
 	}
@@ -130,7 +130,7 @@ func TestBuildEdition(t *testing.T) {
 }
 
 func TestEditionRoundTripAndLegacy(t *testing.T) {
-	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{eveningQuote("^NDX", 2, 1)}, nil, nil, nil, "m", true, eveningAt)
+	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{eveningQuote("^NDX", 2, 1)}, nil, nil, nil, "m", true, nil, eveningAt)
 	e.Revision = 3
 	raw, err := editionJSON(&e)
 	if err != nil {
@@ -558,7 +558,7 @@ func TestMissingReasons(t *testing.T) {
 		q("^STOXX50E", time.Date(2026, 11, 25, 16, 30, 0, 0, time.UTC)),
 	}
 	kept, dropped := currentQuotes(provided, due)
-	e := buildEdition(due, kept, dropped, nil, nil, "m", false, at)
+	e := buildEdition(due, kept, dropped, nil, nil, "m", false, nil, at)
 	want := map[string]string{
 		"quote:^GDAXI":    ReasonPreOpen,
 		"quote:^FCHI":     ReasonUnavailable,
@@ -579,7 +579,7 @@ func TestMissingReasons(t *testing.T) {
 		}
 	}
 	// A series that arrived without points has no bars either.
-	empty := buildEdition(due, kept, dropped, map[string]*yahoochart.Intraday{"ES=F": {Symbol: "ES=F", Interval: "5m"}}, nil, "m", false, at)
+	empty := buildEdition(due, kept, dropped, map[string]*yahoochart.Intraday{"ES=F": {Symbol: "ES=F", Interval: "5m"}}, nil, "m", false, nil, at)
 	if r := empty.Quality.MissingReasons["series:ES=F"]; r != ReasonNoBars {
 		t.Errorf("empty series: %q", r)
 	}
@@ -605,7 +605,7 @@ func TestThanksgivingOpen(t *testing.T) {
 	}
 	kept, dropped := currentQuotes(provided, due)
 	sessions := sessionsFor(due.Slot, due.TradingDate)
-	e := buildEdition(due, kept, dropped, nil, sessions, "m", false, at)
+	e := buildEdition(due, kept, dropped, nil, sessions, "m", false, nil, at)
 	want := []MarketSession{
 		{Market: "nyse", Status: SessionClosed, Name: "Thanksgiving Day"},
 		{Market: "sifma", Status: SessionClosed, Name: "Thanksgiving Day"},
@@ -647,7 +647,7 @@ func TestThanksgivingClose(t *testing.T) {
 	if dropped["^NDX"] != ReasonPreviousSession {
 		t.Fatalf("dropped %v", dropped)
 	}
-	e := buildEdition(due, kept, dropped, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, at)
+	e := buildEdition(due, kept, dropped, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, nil, at)
 	for _, symbol := range []string{"^NDX", "^GSPC", "^DJI"} {
 		for _, key := range []string{"quote:" + symbol, "series:" + symbol} {
 			if r := e.Quality.MissingReasons[key]; r != ReasonHoliday {
@@ -698,7 +698,7 @@ func TestRegularDayHasNoSessions(t *testing.T) {
 	if got := sessionsFor(SlotEvening, "2026-11-25"); got != nil {
 		t.Fatalf("%+v", got)
 	}
-	e := buildEdition(Due{TradingDate: "2026-11-25", Slot: SlotEvening}, nil, nil, nil, nil, "m", false, eveningAt)
+	e := buildEdition(Due{TradingDate: "2026-11-25", Slot: SlotEvening}, nil, nil, nil, nil, "m", false, nil, eveningAt)
 	raw, _ := json.Marshal(e)
 	f, _ := json.Marshal(buildFacts(SlotEvening, "2026-11-25", nil, nil, nil, nil, eveningAt))
 	if strings.Contains(string(raw), "marketSessions") || strings.Contains(string(f), "sessions") {
@@ -730,7 +730,7 @@ func ptrF(v float64) *float64 { return &v }
 
 func rangeRow(t *testing.T, q yahoochart.Quote) EditionInstrument {
 	t.Helper()
-	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{q}, nil, nil, nil, "m", false, eveningAt)
+	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{q}, nil, nil, nil, "m", false, nil, eveningAt)
 	if len(e.Instruments) != 1 {
 		t.Fatalf("rows %+v", e.Instruments)
 	}
@@ -816,7 +816,7 @@ func TestInstrumentSessionTag(t *testing.T) {
 
 	at := time.Date(2026, 11, 27, 22, 0, 0, 0, time.UTC)
 	due := Due{TradingDate: "2026-11-27", Slot: SlotEvening}
-	e := buildEdition(due, quotes(at, "^GSPC", "^GDAXI"), nil, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, at)
+	e := buildEdition(due, quotes(at, "^GSPC", "^GDAXI"), nil, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, nil, at)
 	got := byRow(e)
 	if got["^GSPC"] == nil || *got["^GSPC"] != SessionEarlyClose {
 		t.Errorf("^GSPC: %v", got["^GSPC"])
@@ -828,13 +828,13 @@ func TestInstrumentSessionTag(t *testing.T) {
 	// NQ=F has only a contextMarket (nyse), which never tags a row.
 	at = time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
 	due = Due{TradingDate: "2026-11-26", Slot: SlotMorning}
-	e = buildEdition(due, quotes(at, "NQ=F"), nil, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, at)
+	e = buildEdition(due, quotes(at, "NQ=F"), nil, nil, sessionsFor(due.Slot, due.TradingDate), "m", false, nil, at)
 	if got = byRow(e); got["NQ=F"] != nil {
 		t.Errorf("NQ=F: %v", *got["NQ=F"])
 	}
 
 	// a regular day tags nothing
-	e = buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, quotes(eveningAt, "^GSPC"), nil, nil, nil, "m", false, eveningAt)
+	e = buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, quotes(eveningAt, "^GSPC"), nil, nil, nil, "m", false, nil, eveningAt)
 	if got = byRow(e); got["^GSPC"] != nil {
 		t.Errorf("regular day: %v", *got["^GSPC"])
 	}

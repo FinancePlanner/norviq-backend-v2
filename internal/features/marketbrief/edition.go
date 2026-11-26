@@ -58,6 +58,42 @@ type Edition struct {
 	// MarketSessions lists the markets closed or on a shortened session on
 	// the trading date; absent on a regular day.
 	MarketSessions []MarketSession `json:"marketSessions,omitempty"`
+	// Provenance says how the narrative was written: every attempt in
+	// order, the winner's searches, the items the validator dropped and how
+	// long it all took. Absent on editions saved before it existed.
+	Provenance *EditionProvenance `json:"provenance,omitempty"`
+}
+
+// Outcomes of a ProvenanceAttempt.
+const (
+	AttemptOK     = "ok"
+	AttemptFailed = "failed"
+)
+
+// EditionProvenance records how an edition's narrative was written.
+type EditionProvenance struct {
+	// Attempts lists every writer tried, in order; the last is the one
+	// that wrote the brief.
+	Attempts []ProvenanceAttempt `json:"attempts"`
+	// WebSearches is the winning attempt's billed searches, when its
+	// provider reports a count.
+	WebSearches *int `json:"webSearches,omitempty"`
+	// DroppedItems counts, per language, the drafted items the validator
+	// rejected; only languages with at least one are listed.
+	DroppedItems map[string]int `json:"droppedItems,omitempty"`
+	DurationMs   int64          `json:"durationMs"`
+}
+
+// ProvenanceAttempt is one writer's try.
+type ProvenanceAttempt struct {
+	// Model is the attempt's label: ClaudeWebModel, WebModel or
+	// "fallback-chain".
+	Model string `json:"model"`
+	// Outcome is "ok" or "failed".
+	Outcome string `json:"outcome"`
+	// Error is a failure's class, never its message (see attemptErrorClass).
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"durationMs"`
 }
 
 // EditionInstrument is one quote with its raw numbers and provenance.
@@ -301,7 +337,7 @@ func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousC
 
 // buildEdition assembles the edition from the quotes the brief was written
 // from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, at time.Time) Edition {
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, prov *EditionProvenance, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -340,6 +376,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		Instruments:   []EditionInstrument{},
 		Series:        []EditionSeries{},
 		Quality:       EditionQuality{Degraded: degraded, Model: model, Missing: []string{}},
+		Provenance:    prov,
 	}
 	if len(sessions) > 0 {
 		e.MarketSessions = sessions

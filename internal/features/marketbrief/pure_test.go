@@ -2,6 +2,7 @@ package marketbrief
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -418,12 +419,33 @@ func (s stubCalendar) Fetch(context.Context, earnings.Query) ([]earnings.ItemRes
 	return s.items, nil
 }
 
-// scriptedClient replies in order and records every message list.
+// fakeClock is a clock that moves only when told to.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// scriptedClient replies in order and records every message list. With a
+// clock, each call moves it on by took.
 type scriptedClient struct {
 	mu      sync.Mutex
-	replies []any // string content or error
+	replies []any // string content, a whole ai.Message, or error
 	calls   [][]ai.Message
 	formats []string
+	clock   *fakeClock
+	took    time.Duration
 }
 
 func (s *scriptedClient) Chat(_ context.Context, messages []ai.Message, _ []ai.Tool, responseFormat string) (ai.Message, error) {
@@ -431,6 +453,9 @@ func (s *scriptedClient) Chat(_ context.Context, messages []ai.Message, _ []ai.T
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, messages)
 	s.formats = append(s.formats, responseFormat)
+	if s.clock != nil {
+		s.clock.advance(s.took)
+	}
 	if len(s.replies) == 0 {
 		return ai.Message{}, errors.New("bad gateway")
 	}
@@ -438,6 +463,9 @@ func (s *scriptedClient) Chat(_ context.Context, messages []ai.Message, _ []ai.T
 	s.replies = s.replies[1:]
 	if err, ok := r.(error); ok {
 		return ai.Message{}, err
+	}
+	if m, ok := r.(ai.Message); ok {
+		return m, nil
 	}
 	return ai.Text("assistant", r.(string)), nil
 }
@@ -663,5 +691,129 @@ func TestSystemPromptSessionsRule(t *testing.T) {
 	}
 	if strings.Contains(systemPrompt, "15 minutes after the European open") {
 		t.Error("stale slot wording")
+	}
+}
+
+const claudeWebLabel = "claude-haiku-5-5+web_search"
+
+// draftDroppingOneEnglishItem is a valid draft whose English section also
+// carries one item with a number no fact grounds.
+func draftDroppingOneEnglishItem() string {
+	items := make([]string, 5)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"kind":"highlight","text":"Line %d of the brief.","tickers":[],"sourceUrl":null}`, i+1)
+	}
+	list := strings.Join(items, ",")
+	invented := `{"kind":"highlight","text":"Brent trades near $104.50.","tickers":[],"sourceUrl":null}`
+	return `{"en":{"greeting":"Good morning,","items":[` + invented + `,` + list + `]},"pt-PT":{"greeting":"Bom dia,","items":[` + list + `]}}`
+}
+
+// provenanceOf fails the test unless the brief has an edition with
+// provenance.
+func provenanceOf(t *testing.T, brief GeneratedBrief) *EditionProvenance {
+	t.Helper()
+	if brief.Edition == nil {
+		t.Fatal("no edition")
+	}
+	if brief.Edition.Provenance == nil {
+		t.Fatal("edition has no provenance")
+	}
+	return brief.Edition.Provenance
+}
+
+func TestProvenanceRecordsFallback(t *testing.T) {
+	clock := &fakeClock{now: testNow}
+	// The provider's text rides along on the error; it must never be stored.
+	rateLimited := fmt.Errorf("upstream said sk-ant-secret quota detail: %w", &ai.UpstreamError{Status: 429})
+	claude := &scriptedClient{replies: []any{rateLimited}, clock: clock, took: 1200 * time.Millisecond}
+	fallback := &scriptedClient{replies: []any{draftDroppingOneEnglishItem()}, clock: clock, took: 800 * time.Millisecond}
+	g := newGenerator([]yahoochart.Quote{daxQuote}, nil, fallback)
+	g.ClaudeWebClient, g.ClaudeWebModel = claude, claudeWebLabel
+	g.Now = clock.Now
+	brief, err := g.Generate(context.Background(), testDue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := provenanceOf(t, brief)
+	want := []ProvenanceAttempt{
+		{Model: claudeWebLabel, Outcome: AttemptFailed, Error: "429_rate_limited", DurationMs: 1200},
+		{Model: fallbackModelLabel, Outcome: AttemptOK, DurationMs: 800},
+	}
+	if !reflect.DeepEqual(prov.Attempts, want) {
+		t.Fatalf("attempts %+v", prov.Attempts)
+	}
+	if prov.WebSearches != nil {
+		t.Fatalf("web searches %d", *prov.WebSearches)
+	}
+	if !reflect.DeepEqual(prov.DroppedItems, map[string]int{"en": 1}) {
+		t.Fatalf("dropped %v", prov.DroppedItems)
+	}
+	if prov.DurationMs != 2000 {
+		t.Fatalf("duration %d", prov.DurationMs)
+	}
+	raw, err := json.Marshal(brief.Edition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret") || strings.Contains(string(raw), "upstream said") {
+		t.Fatalf("raw error text stored: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"provenance":{"attempts":[{"model":"`+claudeWebLabel+`","outcome":"failed","error":"429_rate_limited","durationMs":1200}`) {
+		t.Fatalf("wire shape: %s", raw)
+	}
+}
+
+func TestProvenanceWebSearchCount(t *testing.T) {
+	reply := ai.Text("assistant", draftJSON(5))
+	reply.Usage = &ai.Usage{InputTokens: 9000, OutputTokens: 700, WebSearches: ptr(4)}
+	claude := &scriptedClient{replies: []any{reply}}
+	g := newGenerator([]yahoochart.Quote{daxQuote}, &scriptedClient{}, &scriptedClient{})
+	g.ClaudeWebClient, g.ClaudeWebModel = claude, claudeWebLabel
+	brief, err := g.Generate(context.Background(), testDue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := provenanceOf(t, brief)
+	if prov.WebSearches == nil || *prov.WebSearches != 4 {
+		t.Fatalf("web searches %v", prov.WebSearches)
+	}
+	if !reflect.DeepEqual(prov.Attempts, []ProvenanceAttempt{{Model: claudeWebLabel, Outcome: AttemptOK}}) {
+		t.Fatalf("attempts %+v", prov.Attempts)
+	}
+	if prov.DroppedItems != nil {
+		t.Fatalf("dropped %v", prov.DroppedItems)
+	}
+}
+
+// A draft the generator rejects is classed by why, in marketbrief's own
+// terms; anything unrecognized is plain "error".
+func TestProvenanceClassifiesDraftFailures(t *testing.T) {
+	claude := &scriptedClient{replies: []any{"no json here"}}
+	web := &scriptedClient{replies: []any{draftJSON(2)}}
+	fallback := &scriptedClient{replies: []any{draftJSON(5)}}
+	g := newGenerator([]yahoochart.Quote{daxQuote}, web, fallback)
+	g.ClaudeWebClient, g.ClaudeWebModel = claude, claudeWebLabel
+	brief, err := g.Generate(context.Background(), testDue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ProvenanceAttempt{
+		{Model: claudeWebLabel, Outcome: AttemptFailed, Error: "unparseable_draft"},
+		{Model: DefaultModel, Outcome: AttemptFailed, Error: "too_few_items"},
+		{Model: fallbackModelLabel, Outcome: AttemptOK},
+	}
+	if prov := provenanceOf(t, brief); !reflect.DeepEqual(prov.Attempts, want) {
+		t.Fatalf("attempts %+v", prov.Attempts)
+	}
+	for err, want := range map[error]string{
+		errUnparseableDraft:                      "unparseable_draft",
+		&tooFewItemsError{Language: "en"}:        "too_few_items",
+		fmt.Errorf("x: %w", &tooFewItemsError{}): "too_few_items",
+		errors.New("payment required"):           "error",
+		&ai.UpstreamError{Status: 402}:           "402_out_of_credits",
+	} {
+		if got := attemptErrorClass(err); got != want {
+			t.Errorf("attemptErrorClass(%v) = %q, want %q", err, got, want)
+		}
 	}
 }

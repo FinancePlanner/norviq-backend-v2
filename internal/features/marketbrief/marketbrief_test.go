@@ -699,6 +699,14 @@ func TestLiveGeneratorAgainstStubs(t *testing.T) {
 		len(e.Instruments) != 0 || len(e.Series) != 0 || len(e.Quality.Missing) == 0 {
 		t.Fatalf("edition %+v", brief.Edition)
 	}
+	// Both web attempts failed (Claude found nothing searched, :online had
+	// no credit) before the chain wrote it.
+	if p := brief.Edition.Provenance; p == nil || len(p.Attempts) != 3 ||
+		p.Attempts[0] != (marketbrief.ProvenanceAttempt{Model: g.ClaudeWebModel, Outcome: "failed", Error: "200_no_usable_output"}) ||
+		p.Attempts[1] != (marketbrief.ProvenanceAttempt{Model: marketbrief.DefaultModel, Outcome: "failed", Error: "402_out_of_credits"}) ||
+		p.Attempts[2] != (marketbrief.ProvenanceAttempt{Model: "fallback-chain", Outcome: "ok"}) || p.WebSearches != nil {
+		t.Fatalf("provenance %+v", brief.Edition.Provenance)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if webModel != marketbrief.DefaultModel {

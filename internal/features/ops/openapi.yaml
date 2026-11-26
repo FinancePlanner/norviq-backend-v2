@@ -15688,6 +15688,40 @@ components:
                 type: string
                 enum: [unavailable, pre_open, previous_session, no_bars, holiday]
           required: [degraded, model, missing]
+        provenance:
+          type: object
+          description: >-
+            How the narrative was written. Absent on editions saved before it
+            was recorded.
+          properties:
+            attempts:
+              type: array
+              description: Every writer tried, in order; the last one wrote the brief.
+              items:
+                type: object
+                properties:
+                  model: { type: string, example: claude-haiku-5-5+web_search, description: 'The attempt''s label, as in `quality.model`; `fallback-chain` for the app''s ordinary chain' }
+                  outcome: { type: string, enum: [ok, failed] }
+                  error:
+                    type: string
+                    example: 429_rate_limited
+                    description: >-
+                      Why a failed attempt failed, as a class and never the
+                      provider's message: `200_no_usable_output`,
+                      `402_out_of_credits`, `401_auth`, `403_auth`,
+                      `429_rate_limited`, another HTTP status code, `cancelled`,
+                      `unparseable_draft`, `too_few_items` or `error`. Absent
+                      when the attempt succeeded.
+                  durationMs: { type: integer, format: int64, minimum: 0 }
+                required: [model, outcome, durationMs]
+            webSearches: { type: integer, minimum: 0, description: 'Billed web searches of the winning attempt; absent when its provider reports no count' }
+            droppedItems:
+              type: object
+              description: Drafted items the validator rejected, per language; only languages with at least one are listed.
+              additionalProperties: { type: integer, minimum: 1 }
+              example: { en: 1 }
+            durationMs: { type: integer, format: int64, minimum: 0, description: Time from the start of generation to the winning draft }
+          required: [attempts, durationMs]
       required: [schemaVersion, id, kind, revision, status, publishedAt, timezone, instruments, series, quality]
     MarketBriefEditionInstrument:
       type: object

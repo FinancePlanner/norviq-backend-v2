@@ -2,6 +2,7 @@ package marketbrief
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -24,6 +25,12 @@ type GeneratedBrief struct {
 	// Edition is the language-neutral market data behind Responses; nil
 	// from generators that predate it (test fakes).
 	Edition *Edition
+
+	// dropped counts, per language, the items the validator rejected, and
+	// usage is the writing reply's (nil when its client reports none). Both
+	// feed Edition.Provenance.
+	dropped map[string]int
+	usage   *ai.Usage
 }
 
 // Model labels (MarketBriefGenerator).
@@ -63,8 +70,10 @@ type LLMGenerator struct {
 	WebModel  string
 	// Fallback is app.openAIChatClient, read lazily.
 	Fallback func() ai.ChatClient
-	Now      func() time.Time
-	Logger   *slog.Logger
+	// Now is the clock: the edition's time, and every duration in its
+	// provenance.
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Generate implements Generator.
@@ -81,11 +90,27 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	}
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), sessions, at)
 	series := g.series(ctx, due, at, quotes)
-	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
+	attempts := []ProvenanceAttempt{}
+	// try runs one attempt, records it, and on success builds the edition.
+	try := func(client ai.ChatClient, webSearch bool, model string, degraded bool, allowed map[string]bool) (GeneratedBrief, error) {
+		began := g.Now()
+		b, err := g.attempt(ctx, client, webSearch, model, degraded, allowed, due, facts, quotes, at)
+		record := ProvenanceAttempt{Model: model, Outcome: AttemptOK, DurationMs: millisSince(began, g.Now())}
+		if err != nil {
+			record.Outcome, record.Error = AttemptFailed, attemptErrorClass(err)
+		}
+		attempts = append(attempts, record)
 		if err != nil {
 			return b, err
 		}
-		e := buildEdition(due, quotes, dropped, series, sessions, b.Model, b.Responses[0].Degraded, at)
+		prov := &EditionProvenance{Attempts: attempts, DurationMs: millisSince(at, g.Now())}
+		if b.usage != nil {
+			prov.WebSearches = b.usage.WebSearches
+		}
+		if len(b.dropped) > 0 {
+			prov.DroppedItems = b.dropped
+		}
+		e := buildEdition(due, quotes, dropped, series, sessions, b.Model, b.Responses[0].Degraded, prov, at)
 		b.Edition = &e
 		return b, nil
 	}
@@ -97,7 +122,7 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 		if web.client == nil {
 			continue
 		}
-		brief, err := withEdition(g.attempt(ctx, web.client, true, web.model, false, nil, due, facts, quotes, at))
+		brief, err := try(web.client, true, web.model, false, nil)
 		if err == nil {
 			return brief, nil
 		}
@@ -109,7 +134,12 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 			allowed[*h.URL] = true
 		}
 	}
-	return withEdition(g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at))
+	return try(g.Fallback(), false, fallbackModelLabel, true, allowed)
+}
+
+// millisSince is end - start in whole milliseconds, never negative.
+func millisSince(start, end time.Time) int64 {
+	return max(end.Sub(start).Milliseconds(), 0)
 }
 
 // series fetches the intraday bars charted for the slot: the symbol's own
@@ -237,12 +267,14 @@ func (g *LLMGenerator) attempt(
 	generatedAt := formatISOSeconds(at)
 	grounded := facts.GroundedNumbers()
 	responses := make([]Response, 0, len(languages))
+	dropped := map[string]int{}
 	for _, language := range languages {
 		out, err := validateSection(d.section(language), due.Slot, language, grounded, allowedSources)
 		if err != nil {
 			return GeneratedBrief{}, err
 		}
 		if out.Dropped > 0 {
+			dropped[language] = out.Dropped
 			g.Logger.Info("market_brief_items_dropped", "language", language, "dropped", out.Dropped)
 		}
 		tradingDate, slot, ga := due.TradingDate, due.Slot, generatedAt
@@ -258,7 +290,7 @@ func (g *LLMGenerator) attempt(
 			Degraded:    degraded,
 		})
 	}
-	return GeneratedBrief{Responses: responses, Model: model}, nil
+	return GeneratedBrief{Responses: responses, Model: model, dropped: dropped, usage: reply.Usage}, nil
 }
 
 func (g *LLMGenerator) headlines(ctx context.Context) []newsprovider.Item {
@@ -284,4 +316,17 @@ func (g *LLMGenerator) calendar(ctx context.Context, date string) []earnings.Ite
 		return nil
 	}
 	return items
+}
+
+// attemptErrorClass is why an attempt failed, as a class and never as the
+// error's text.
+func attemptErrorClass(err error) string {
+	var tooFew *tooFewItemsError
+	switch {
+	case errors.Is(err, errUnparseableDraft):
+		return "unparseable_draft"
+	case errors.As(err, &tooFew):
+		return "too_few_items"
+	}
+	return ai.ErrorClass(err)
 }

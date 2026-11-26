@@ -333,3 +333,51 @@ func TestDrawableMapsHyphenVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestDocMissingHoliday(t *testing.T) {
+	mixed := &Edition{
+		Quality: EditionQuality{
+			Missing: []string{"quote:^NDX", "series:^NDX", "quote:^FCHI"},
+			MissingReasons: map[string]string{
+				"quote:^NDX": ReasonHoliday, "series:^NDX": ReasonHoliday,
+				"quote:^FCHI": ReasonUnavailable,
+			},
+		},
+		MarketSessions: []MarketSession{{Market: "nyse", Status: SessionClosed, Name: "Thanksgiving Day"}},
+	}
+	cases := []struct {
+		name string
+		e    *Edition
+		lang string
+		want []string
+	}{
+		{"en folded", mixed, LanguageEn, []string{"US stocks — closed (Thanksgiving Day)", "CAC 40 — quote"}},
+		{"pt folded", mixed, LanguagePtPT, []string{"Ações dos EUA — encerrado (feriado)", "CAC 40 — cotação"}},
+		{"morning, nothing missing", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionClosed, Name: "Thanksgiving Day"},
+			{Market: "sifma", Status: SessionClosed, Name: "Thanksgiving Day"},
+		}}, LanguageEn, []string{"US stocks — closed (Thanksgiving Day)", "US bonds — closed (Thanksgiving Day)"}},
+		{"early close with time", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionEarlyClose, Name: "Day after Thanksgiving", CloseAt: strPtr("2026-11-27T18:00:00Z")},
+		}}, LanguageEn, []string{"US stocks — shortened session (closes 13:00 ET)"}},
+		{"early close pt with time", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionEarlyClose, Name: "x", CloseAt: strPtr("2026-11-27T18:00:00Z")},
+		}}, LanguagePtPT, []string{"Ações dos EUA — sessão reduzida (fecha às 13:00 ET)"}},
+		{"early close without time", &Edition{MarketSessions: []MarketSession{
+			{Market: "hkex", Status: SessionEarlyClose, Name: "Lunar New Year's Eve"},
+		}}, LanguagePtPT, []string{"Hong Kong — sessão reduzida"}},
+	}
+	for _, c := range cases {
+		got := docMissing(c.e, docStringsFor(c.lang))
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+		if c.lang == LanguagePtPT {
+			for _, g := range got {
+				if strings.Contains(g, "Thanksgiving") {
+					t.Errorf("%s: English holiday name leaked: %q", c.name, g)
+				}
+			}
+		}
+	}
+}

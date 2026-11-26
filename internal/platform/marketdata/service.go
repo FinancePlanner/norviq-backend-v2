@@ -534,9 +534,21 @@ func (s *Service) upsertPriceHistory(ctx context.Context, symbol string, bars []
 }
 
 // UpsertMarketPriceBars is MarketPriceBarRepository.upsert. When currencyKnown
-// is false the currency is a default: it is stored for a new bar but never
-// replaces the currency of an existing one.
+// is false the currency is a default: the instrument's newest known stored
+// currency is used instead when there is one, and an existing bar's currency
+// is never replaced by it.
 func (s *Service) UpsertMarketPriceBars(ctx context.Context, instrumentKey, currency, provider string, currencyKnown bool, bars []PriceBarResponse) error {
+	if !currencyKnown && len(bars) > 0 {
+		// A defaulted currency inherits the instrument's newest known bar
+		// currency, so a new date never lands with a mixed label.
+		stored, err := s.Q.LatestKnownBarCurrency(ctx, strings.ToUpper(instrumentKey))
+		switch {
+		case err == nil:
+			currency = stored
+		case !noRows(err):
+			return err
+		}
+	}
 	for _, b := range bars {
 		day, err := time.Parse("2006-01-02", b.Date)
 		if err != nil {

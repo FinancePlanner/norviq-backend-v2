@@ -27,6 +27,8 @@ type Querier interface {
 	// include_watchlist is set (Cadence on).
 	HistoryIngestionSymbols(ctx context.Context, includeWatchlist bool) ([]string, error)
 	LatestFxRate(ctx context.Context, arg LatestFxRateParams) (LatestFxRateRow, error)
+	// Currency of the newest stored bar with a non-empty currency; no rows when none.
+	LatestKnownBarCurrency(ctx context.Context, instrumentKey string) (string, error)
 	ListPriceHistory(ctx context.Context, arg ListPriceHistoryParams) ([]ListPriceHistoryRow, error)
 	// Zero rows means no anchor: the history has not been verified by the job.
 	MarketHistoryAnchor(ctx context.Context, instrumentKey string) ([]MarketHistoryAnchorRow, error)

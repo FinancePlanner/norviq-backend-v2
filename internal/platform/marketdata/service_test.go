@@ -593,3 +593,60 @@ func TestPriceBarsKeepKnownCurrencyWhenHistoryDefaulted(t *testing.T) {
 		t.Fatalf("rows = %d", n)
 	}
 }
+
+func (fx *fixture) barRows(t *testing.T, key string) map[string]string {
+	t.Helper()
+	rows, err := fx.pool.Query(context.Background(), `SELECT to_char(date,'YYYY-MM-DD'), currency FROM market_price_bars WHERE instrument_key = $1`, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var d, c string
+		if err := rows.Scan(&d, &c); err != nil {
+			t.Fatal(err)
+		}
+		out[d] = c
+	}
+	return out
+}
+
+func TestPriceBarsNewDateKeepsKnownCurrencyWhenHistoryDefaulted(t *testing.T) {
+	fx := newFixture(t, true, false)
+	ctx := context.Background()
+	bar := func(d string) PriceBarResponse { return PriceBarResponse{Date: d, Open: 1, High: 1, Low: 1, Close: 1} }
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NOVO-B.CO", "DKK", "finnhub", true, []PriceBarResponse{bar("2026-11-02"), bar("2026-11-03")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NOVO-B.CO", "USD", "finnhub", false, []PriceBarResponse{bar("2026-11-02"), bar("2026-11-03"), bar("2026-11-04")}); err != nil {
+		t.Fatal(err)
+	}
+	got := fx.barRows(t, "NOVO-B.CO")
+	if len(got) != 3 {
+		t.Fatalf("rows %v", got)
+	}
+	for d, c := range got {
+		if c != "DKK" {
+			t.Fatalf("%s currency %q, want DKK", d, c)
+		}
+	}
+}
+
+func TestPriceBarsOverwriteEmptyStoredCurrency(t *testing.T) {
+	fx := newFixture(t, true, false)
+	ctx := context.Background()
+	b := []PriceBarResponse{{Date: "2026-11-02", Open: 1, High: 1, Low: 1, Close: 1}}
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NEWCO", "USD", "finnhub", true, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.pool.Exec(ctx, `UPDATE market_price_bars SET currency = '' WHERE instrument_key = 'NEWCO'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.UpsertMarketPriceBars(ctx, "NEWCO", "USD", "finnhub", false, b); err != nil {
+		t.Fatal(err)
+	}
+	if got := fx.barRows(t, "NEWCO")["2026-11-02"]; got != "USD" {
+		t.Fatalf("currency %q, want USD", got)
+	}
+}

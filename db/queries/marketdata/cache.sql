@@ -131,6 +131,12 @@ ON CONFLICT (instrument_key, date) DO UPDATE SET
                     THEN EXCLUDED.currency ELSE market_price_bars.currency END,
     provider = EXCLUDED.provider, updated_at = NOW();
 
+-- name: LatestKnownBarCurrency :one
+-- Currency of the newest stored bar with a non-empty currency; no rows when none.
+SELECT currency FROM market_price_bars
+WHERE instrument_key = $1 AND currency <> ''
+ORDER BY date DESC LIMIT 1;
+
 -- name: MarketPriceBarLastDate :many
 -- Zero rows means no coverage (Swift's coverage.lastDate == nil).
 SELECT date FROM market_price_bars

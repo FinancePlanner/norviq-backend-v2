@@ -341,6 +341,20 @@ func (q *Queries) LatestFxRate(ctx context.Context, arg LatestFxRateParams) (Lat
 	return i, err
 }
 
+const latestKnownBarCurrency = `-- name: LatestKnownBarCurrency :one
+SELECT currency FROM market_price_bars
+WHERE instrument_key = $1 AND currency <> ''
+ORDER BY date DESC LIMIT 1
+`
+
+// Currency of the newest stored bar with a non-empty currency; no rows when none.
+func (q *Queries) LatestKnownBarCurrency(ctx context.Context, instrumentKey string) (string, error) {
+	row := q.db.QueryRow(ctx, latestKnownBarCurrency, instrumentKey)
+	var currency string
+	err := row.Scan(&currency)
+	return currency, err
+}
+
 const listPriceHistory = `-- name: ListPriceHistory :many
 SELECT symbol, date, open, high, low, close, volume FROM price_history
 WHERE symbol = $1

@@ -1,10 +1,15 @@
 package marketbrief
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"norviq-api/internal/features/marketbrief/export"
 )
 
 func strPtr(s string) *string   { return &s }
@@ -427,5 +432,362 @@ func TestDocHalfDayCloseSessionsAreNotMissing(t *testing.T) {
 		if !reflect.DeepEqual(d.Missing, want.missing) {
 			t.Errorf("%s: missing %q, want %q", lang, d.Missing, want.missing)
 		}
+	}
+}
+
+func i64Ptr(v int64) *int64 { return &v }
+func intPtr(v int) *int     { return &v }
+
+// docCard is the card named name, failing the test when there is none.
+func docCard(t *testing.T, d export.Doc, name string) export.Card {
+	t.Helper()
+	for i := range d.Cards {
+		if d.Cards[i].Name == name {
+			return d.Cards[i]
+		}
+	}
+	t.Fatalf("no %q card in %+v", name, d.Cards)
+	return export.Card{}
+}
+
+func TestDocCardRanges(t *testing.T) {
+	ranged := func(volume *int64) *Edition {
+		e := docEdition()
+		dax := &e.Instruments[0]
+		dax.DayLow, dax.DayHigh = f64Ptr(8093.24), f64Ptr(8144.54)
+		dax.YearLow, dax.YearHigh = f64Ptr(7120.1), f64Ptr(8755.03)
+		dax.Volume = volume
+		return e
+	}
+	for _, tc := range []struct {
+		name, lang string
+		e          *Edition
+		want       string
+	}{
+		{"en", LanguageEn, ranged(i64Ptr(8281)), "Day 8,093.24–8,144.54 · 52w 7,120.10–8,755.03 · Vol 8,281"},
+		{"pt-PT", LanguagePtPT, ranged(i64Ptr(8281)), "Dia 8.093,24–8.144,54 · 52 sem. 7.120,10–8.755,03 · Vol. 8.281"},
+		{"en large volume", LanguageEn, ranged(i64Ptr(1234567)), "Day 8,093.24–8,144.54 · 52w 7,120.10–8,755.03 · Vol 1,234,567"},
+		{"pt-PT large volume", LanguagePtPT, ranged(i64Ptr(1234567)), "Dia 8.093,24–8.144,54 · 52 sem. 7.120,10–8.755,03 · Vol. 1.234.567"},
+		{"no volume", LanguageEn, ranged(nil), "Day 8,093.24–8,144.54 · 52w 7,120.10–8,755.03"},
+		{"year only", LanguageEn, func() *Edition {
+			e := ranged(nil)
+			e.Instruments[0].DayLow, e.Instruments[0].DayHigh = nil, nil
+			return e
+		}(), "52w 7,120.10–8,755.03"},
+		{"volume only", LanguagePtPT, func() *Edition {
+			e := docEdition()
+			e.Instruments[0].Volume = i64Ptr(8281)
+			return e
+		}(), "Vol. 8.281"},
+		{"nothing", LanguageEn, docEdition(), ""},
+		{"legacy", LanguageEn, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := BuildDoc(docBrief(tc.lang), tc.e, "https://www.norviq.org")
+			if got := docCard(t, d, "DAX").Ranges; got != tc.want {
+				t.Errorf("DAX ranges %q, want %q", got, tc.want)
+			}
+			for _, c := range d.Cards {
+				if c.Name != "DAX" && c.Ranges != "" {
+					t.Errorf("%s has ranges %q it was never given", c.Name, c.Ranges)
+				}
+			}
+		})
+	}
+}
+
+func TestDocCardSession(t *testing.T) {
+	for _, tc := range []struct {
+		lang, session, want string
+	}{
+		{LanguageEn, SessionClosed, "Closed"},
+		{LanguageEn, SessionEarlyClose, "Shortened session"},
+		{LanguagePtPT, SessionClosed, "Encerrado"},
+		{LanguagePtPT, SessionEarlyClose, "Sessão reduzida"},
+	} {
+		e := docEdition()
+		e.Instruments[1].Session = strPtr(tc.session) // ^NDX
+		d := BuildDoc(docBrief(tc.lang), e, "https://www.norviq.org")
+		if got := docCard(t, d, "Nasdaq 100").Session; got != tc.want {
+			t.Errorf("%s %s: session %q, want %q", tc.lang, tc.session, got, tc.want)
+		}
+		if got := docCard(t, d, "S&P 500").Session; got != "" {
+			t.Errorf("%s: a regular row is tagged %q", tc.lang, got)
+		}
+	}
+}
+
+func TestDocEarnings(t *testing.T) {
+	items := []Item{
+		{Kind: KindHighlight, Text: "Asia rose.", Tickers: []string{}},
+		{Kind: KindEarnings, Text: "Walmart reports before the bell.", Tickers: []string{"WMT"}, SourceURL: strPtr("https://www.reuters.com/e")},
+		{Kind: KindHighlight, Text: "Oil steady.", Tickers: []string{}},
+		{Kind: KindEarnings, Text: "Deere reports later.", Tickers: []string{"DE"}},
+	}
+	r := docBrief("en")
+	r.Slot = strPtr(SlotMorning)
+	r.Items = items
+	e := docEdition()
+	e.ID = "MI-2026-11-20-O"
+	d := BuildDoc(r, e, "https://x")
+	want := []export.Story{
+		{Rank: 1, Text: "Walmart reports before the bell.", Tickers: []string{"WMT"}, SourceHost: "reuters.com"},
+		{Rank: 2, Text: "Deere reports later.", Tickers: []string{"DE"}},
+	}
+	if !reflect.DeepEqual(d.Earnings, want) {
+		t.Fatalf("earnings %+v, want %+v", d.Earnings, want)
+	}
+	if d.Lead == nil || d.Lead.Text != "Asia rose." || len(d.Stories) != 1 || d.Stories[0].Text != "Oil steady." || d.Stories[0].Rank != 2 {
+		t.Fatalf("highlights changed: %+v %+v", d.Lead, d.Stories)
+	}
+
+	evening := docBrief("en")
+	evening.Items = append(evening.Items, Item{Kind: KindEarnings, Text: "Stray.", Tickers: []string{"X"}})
+	if d := BuildDoc(evening, docEdition(), "https://x"); len(d.Earnings) != 0 {
+		t.Fatalf("evening earnings %+v", d.Earnings)
+	}
+}
+
+// fallbackProvenance is Task 2's fallback edition: both web attempts
+// failed before the chain wrote the brief.
+func fallbackProvenance() *EditionProvenance {
+	return &EditionProvenance{
+		Attempts: []ProvenanceAttempt{
+			{Model: "claude-haiku-5-5+web_search", Outcome: AttemptFailed, Error: "200_no_usable_output", DurationMs: 30120},
+			{Model: DefaultModel, Outcome: AttemptFailed, Error: "provider_unavailable", DurationMs: 1210},
+			{Model: "fallback-chain", Outcome: AttemptOK, DurationMs: 9050},
+		},
+		DroppedItems: map[string]int{LanguageEn: 1, LanguagePtPT: 2},
+		DurationMs:   41400,
+	}
+}
+
+func TestDocWrittenLines(t *testing.T) {
+	claude := &EditionProvenance{
+		Attempts:    []ProvenanceAttempt{{Model: "claude-haiku-5-5+web_search", Outcome: AttemptOK, DurationMs: 12100}},
+		WebSearches: intPtr(3),
+		DurationMs:  12600,
+	}
+	one := &EditionProvenance{
+		Attempts:     []ProvenanceAttempt{{Model: "claude-haiku-5-5+web_search", Outcome: AttemptOK}},
+		WebSearches:  intPtr(1),
+		DroppedItems: map[string]int{LanguageEn: 1, LanguagePtPT: 1},
+		DurationMs:   900,
+	}
+	classes := &EditionProvenance{
+		Attempts: []ProvenanceAttempt{
+			{Model: "m1", Outcome: AttemptFailed, Error: "429_rate_limited"},
+			{Model: "m2", Outcome: AttemptFailed, Error: "timeout"},
+			{Model: "m3", Outcome: AttemptFailed, Error: "unparseable_draft"},
+			{Model: "m4", Outcome: AttemptFailed, Error: "too_few_items"},
+			{Model: "m5", Outcome: AttemptFailed, Error: "cancelled"}, //nolint:misspell // ai.ErrorClass's label
+			{Model: "m6", Outcome: AttemptFailed, Error: "error"},
+			{Model: "m7", Outcome: AttemptFailed, Error: "500_server"},
+			{Model: "fallback-chain", Outcome: AttemptOK},
+		},
+		DurationMs: 61499,
+	}
+	for _, tc := range []struct {
+		name, lang string
+		p          *EditionProvenance
+		want       []string
+	}{
+		{"fallback en", LanguageEn, fallbackProvenance(), []string{
+			"Written by backup model · generated in 41 s",
+			"1 sentence removed by the number check",
+			"Earlier attempt claude-haiku-5-5: unusable reply",
+			"Earlier attempt anthropic/claude-haiku-4.5: provider unavailable",
+		}},
+		{"fallback pt-PT", LanguagePtPT, fallbackProvenance(), []string{
+			"Escrito por modelo de reserva · gerado em 41 s",
+			"2 frases removidas pela verificação de números",
+			"Tentativa anterior claude-haiku-5-5: resposta inutilizável",
+			"Tentativa anterior anthropic/claude-haiku-4.5: fornecedor indisponível",
+		}},
+		{"claude en", LanguageEn, claude, []string{"Written by claude-haiku-5-5 · generated in 13 s", "3 web searches"}},
+		{"claude pt-PT", LanguagePtPT, claude, []string{"Escrito por claude-haiku-5-5 · gerado em 13 s", "3 pesquisas na web"}},
+		{"singular en", LanguageEn, one, []string{"Written by claude-haiku-5-5 · generated in 1 s", "1 web search", "1 sentence removed by the number check"}},
+		{"singular pt-PT", LanguagePtPT, one, []string{"Escrito por claude-haiku-5-5 · gerado em 1 s", "1 pesquisa na web", "1 frase removida pela verificação de números"}},
+		{"classes en", LanguageEn, classes, []string{
+			"Written by backup model · generated in 61 s",
+			"Earlier attempt m1: rate limited",
+			"Earlier attempt m2: timed out",
+			"Earlier attempt m3: unusable reply",
+			"Earlier attempt m4: unusable reply",
+			"Earlier attempt m5: error",
+			"Earlier attempt m6: error",
+			"Earlier attempt m7: error",
+		}},
+		{"classes pt-PT", LanguagePtPT, classes, []string{
+			"Escrito por modelo de reserva · gerado em 61 s",
+			"Tentativa anterior m1: limite de pedidos",
+			"Tentativa anterior m2: tempo esgotado",
+			"Tentativa anterior m3: resposta inutilizável",
+			"Tentativa anterior m4: resposta inutilizável",
+			"Tentativa anterior m5: erro",
+			"Tentativa anterior m6: erro",
+			"Tentativa anterior m7: erro",
+		}},
+		{"none", LanguageEn, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := docEdition()
+			e.Provenance = tc.p
+			d := BuildDoc(docBrief(tc.lang), e, "https://www.norviq.org")
+			if !reflect.DeepEqual(d.Written, tc.want) {
+				t.Fatalf("written %q, want %q", d.Written, tc.want)
+			}
+			for _, l := range d.Written {
+				if strings.Contains(l, "+web_search") || strings.Contains(l, "fallback-chain") {
+					t.Errorf("raw model label in %q", l)
+				}
+			}
+		})
+	}
+	if d := BuildDoc(docBrief(LanguageEn), nil, "https://x"); d.Written != nil {
+		t.Fatalf("legacy written %q", d.Written)
+	}
+}
+
+// snapshotMorning is The Open on the day after Thanksgiving, with every S3
+// field it can carry: ranges and volume, the US half-day sessions, two
+// earnings items and Task 2's fallback provenance. No row is tagged: a
+// row's tag follows its own market, and futures and the DAX trade a full
+// day.
+func snapshotMorning(lang string) (Response, *Edition) {
+	grp := func(s string) *string { return &s }
+	r := Response{
+		Enabled:     true,
+		TradingDate: strPtr("2026-11-27"),
+		Slot:        strPtr(SlotMorning),
+		Language:    lang,
+		Greeting:    strPtr("Good morning. US futures are steady ahead of a shortened session."),
+		GeneratedAt: strPtr("2026-11-27T08:15:00Z"),
+		Groups: []QuoteGroup{
+			{ID: "us_futures", Rows: []QuoteRow{
+				{Symbol: "NQ=F", Name: "Nasdaq 100", Level: "25,180", ChangePercent: "0.60%", Direction: "up"},
+				{Symbol: "ES=F", Name: "S&P 500", Level: "6,942", ChangePercent: "0.40%", Direction: "up"},
+			}},
+			{ID: "eu_open", Rows: []QuoteRow{
+				{Symbol: "^GDAXI", Name: "DAX", Level: "24,655", ChangePercent: "0.60%", Direction: "down"},
+			}},
+		},
+		Items: []Item{
+			{Kind: KindHighlight, Text: "US futures are steady before a half-day session that closes at 13:00 New York time.", Tickers: []string{}, SourceURL: strPtr("https://www.reuters.com/a")},
+			{Kind: KindHighlight, Text: "European shares open lower, with the DAX down 0.60%.", Tickers: []string{}},
+			{Kind: KindEarnings, Text: "Walmart reports before the bell, with holiday guidance in focus.", Tickers: []string{"WMT"}, SourceURL: strPtr("https://www.cnbc.com/e")},
+			{Kind: KindHighlight, Text: "Oil holds near $89 a barrel.", Tickers: []string{}},
+			{Kind: KindEarnings, Text: "Deere reports later in the morning.", Tickers: []string{"DE"}},
+		},
+	}
+	if lang == LanguagePtPT {
+		r.Greeting = strPtr("Bom dia. Os futuros dos EUA estão estáveis antes de uma sessão reduzida.")
+		r.Items[0].Text = "Os futuros dos EUA estão estáveis antes de uma sessão reduzida que fecha às 13:00 de Nova Iorque."
+		r.Items[1].Text = "As ações europeias abrem em queda, com o DAX a recuar 0,60%."
+		r.Items[2].Text = "A Walmart apresenta resultados antes da abertura, com as previsões para as festas em foco."
+		r.Items[3].Text = "O petróleo mantém-se perto dos 89 dólares por barril."
+		r.Items[4].Text = "A Deere apresenta resultados mais tarde, durante a manhã."
+	}
+	t0 := float64(1796252400) // 2026-11-26 23:00 UTC
+	pts := func(prev, end float64) [][2]float64 {
+		out := make([][2]float64, 30)
+		for i := range out {
+			f := float64(i) / 29
+			out[i] = [2]float64{t0 + f*9*3600, prev + (end-prev)*f}
+		}
+		return out
+	}
+	e := &Edition{
+		SchemaVersion: 2, ID: "MI-2026-11-27-O", Kind: "open", Revision: 1, Status: "published",
+		PublishedAt: "2026-11-27T08:15:00Z", MarketDataAsOf: strPtr("2026-11-27T08:10:00Z"), Timezone: "Europe/Lisbon",
+		Instruments: []EditionInstrument{
+			{
+				Symbol: "NQ=F", Name: "Nasdaq 100 futures", AssetClass: AssetFuture, Region: "US", Group: grp("us_futures"), Unit: "points", Precision: 2,
+				Last: 25180.5, PreviousClose: 25030.25, Change: 150.25, ChangePct: 0.6,
+				DayLow: f64Ptr(24950.1), DayHigh: f64Ptr(25210), YearLow: f64Ptr(19100.25), YearHigh: f64Ptr(26800.75), Volume: i64Ptr(412345),
+			},
+			{
+				Symbol: "ES=F", Name: "S&P 500 futures", AssetClass: AssetFuture, Region: "US", Group: grp("us_futures"), Unit: "points", Precision: 2,
+				Last: 6941.75, PreviousClose: 6914.25, Change: 27.5, ChangePct: 0.4,
+				DayLow: f64Ptr(6890), DayHigh: f64Ptr(6950.2), YearLow: f64Ptr(5600.1), YearHigh: f64Ptr(7210), Volume: i64Ptr(1283004),
+			},
+			{
+				Symbol: "^GDAXI", Name: "DAX", AssetClass: "index", Region: "DE", Group: grp("eu_open"), Unit: "points", Precision: 2,
+				Last: 24655.3, PreviousClose: 24803.2, Change: -147.9, ChangePct: -0.6,
+				DayLow: f64Ptr(24610.4), DayHigh: f64Ptr(24790), YearLow: f64Ptr(18820.6), YearHigh: f64Ptr(25507.79),
+			},
+			{Symbol: "BZ=F", Name: "Brent crude", AssetClass: "commodity", Unit: "usd_bbl", Precision: 2, Last: 89.12, PreviousClose: 89.44, Change: -0.32, ChangePct: -0.36},
+		},
+		Series: []EditionSeries{
+			{Symbol: "NQ=F", Interval: "5m", Timezone: "America/New_York", Points: pts(25030.25, 25180.5)},
+			{Symbol: "ES=F", Interval: "5m", Timezone: "America/New_York", Points: pts(6914.25, 6941.75)},
+		},
+		MarketSessions: sessionsFor(SlotMorning, "2026-11-27"),
+		Provenance:     fallbackProvenance(),
+	}
+	return r, e
+}
+
+// The S3 fields reach the PDF through BuildDoc, and the image formats draw
+// exactly what they drew without them. MARKET_BRIEF_EXPORT_OUT=<dir> writes
+// the renders for a look.
+func TestExportSnapshotMetadataRenders(t *testing.T) {
+	out := os.Getenv("MARKET_BRIEF_EXPORT_OUT")
+	for _, lang := range []string{LanguageEn, LanguagePtPT} {
+		t.Run(lang, func(t *testing.T) {
+			r, e := snapshotMorning(lang)
+			d := BuildDoc(r, e, "https://www.norviq.org")
+			if len(d.Earnings) != 2 || len(d.Written) != 4 || len(d.Sessions) == 0 {
+				t.Fatalf("premise: earnings %d, written %q, sessions %q", len(d.Earnings), d.Written, d.Sessions)
+			}
+			ranged, tagged := 0, 0
+			for _, c := range d.Cards {
+				if c.Ranges != "" {
+					ranged++
+				}
+				if c.Session != "" {
+					tagged++
+				}
+			}
+			if ranged != 3 || tagged != 0 {
+				t.Fatalf("premise: %d ranged and %d tagged cards in %+v", ranged, tagged, d.Cards)
+			}
+			bare := d
+			bare.Earnings, bare.Written = nil, nil
+			bare.Cards = append([]export.Card(nil), d.Cards...)
+			for i := range bare.Cards {
+				bare.Cards[i].Ranges, bare.Cards[i].Session = "", ""
+			}
+			for _, f := range []export.Format{export.FormatPDF, export.FormatOG, export.FormatSocial, export.FormatStory} {
+				b, _, err := export.Render(f, d)
+				if err != nil {
+					t.Fatal(err)
+				}
+				again, _, err := export.Render(f, d)
+				if err != nil || !bytes.Equal(b, again) {
+					t.Errorf("%s: two renders differ (err %v)", f, err)
+				}
+				plain, _, err := export.Render(f, bare)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if same := bytes.Equal(b, plain); same == (f == export.FormatPDF) {
+					t.Errorf("%s: renders the S3 fields the same as without them: %v", f, same)
+				}
+				if out == "" {
+					continue
+				}
+				if err := os.MkdirAll(out, 0o750); err != nil {
+					t.Fatal(err)
+				}
+				name := "snapshot-open-" + string(f) + "-" + lang + ".png"
+				if f == export.FormatPDF {
+					name = "snapshot-open-report-" + lang + ".pdf"
+				}
+				if err := os.WriteFile(filepath.Join(out, name), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

@@ -4,8 +4,8 @@ package export
 // that also appears on the web page is copied verbatim from the web's
 // edition strings (norviq-web-v2 src/lib/features/public/brief/edition/
 // strings.ts), so the printed brief says exactly what the page says. Only
-// index, changePct, inThisEdition, page and marketSessions are the report's
-// own.
+// index, changePct, inThisEdition, page, marketSessions and earningsToday
+// are the report's own.
 type reportStrings struct {
 	marketIntelligence, published, marketDataAsOf, lisbonTime string
 	edition, revision, limitedSources                         string
@@ -16,7 +16,7 @@ type reportStrings struct {
 	sourcesAndMethodology, citedSources, marketData           string
 	marketDataMethod, howWritten, howWrittenBody              string
 	degradedBody, notAvailable, legacyNote, disclaimer        string
-	marketSessions                                            string
+	marketSessions, earningsToday                             string
 
 	index, changePct, inThisEdition string
 	page                            string // "Page %d of %d"
@@ -56,6 +56,7 @@ var reportEN = reportStrings{
 		"removed. The check does not prove a sentence true, only that its figures were in the data.",
 	degradedBody:   "Web sources were unavailable for this edition, so it was written from in-house data only.",
 	marketSessions: "Market sessions today",
+	earningsToday:  "Earnings today",
 	notAvailable:   "Not available in this edition",
 	legacyNote:     "This edition predates detailed market data, so it shows only the published levels.",
 	disclaimer:     "AI-written from market data. Not financial advice.",
@@ -101,6 +102,7 @@ var reportPT = reportStrings{
 		"estavam nos dados.",
 	degradedBody:   "As fontes web não estavam disponíveis para esta edição, por isso foi escrita apenas com dados internos.",
 	marketSessions: "Sessões de mercado hoje",
+	earningsToday:  "Resultados hoje",
 	notAvailable:   "Indisponível nesta edição",
 	legacyNote:     "Esta edição é anterior aos dados de mercado detalhados, por isso mostra apenas os níveis publicados.",
 	disclaimer:     "Escrito por IA a partir de dados de mercado. Não constitui aconselhamento financeiro.",

@@ -58,6 +58,44 @@ type Edition struct {
 	// MarketSessions lists the markets closed or on a shortened session on
 	// the trading date; absent on a regular day.
 	MarketSessions []MarketSession `json:"marketSessions,omitempty"`
+	// Provenance says how the narrative was written: every attempt in
+	// order, the winner's searches, the items the validator dropped and how
+	// long it all took. Absent on editions saved before it existed.
+	Provenance *EditionProvenance `json:"provenance,omitempty"`
+}
+
+// Outcomes of a ProvenanceAttempt.
+const (
+	AttemptOK     = "ok"
+	AttemptFailed = "failed"
+)
+
+// EditionProvenance records how an edition's narrative was written.
+type EditionProvenance struct {
+	// Attempts lists every writer tried, in order; the last is the one
+	// that wrote the brief.
+	Attempts []ProvenanceAttempt `json:"attempts"`
+	// WebSearches is the web searches the winning attempt's model ran
+	// (billed, or returned with results, whichever is higher), when its
+	// provider reports a count.
+	WebSearches *int `json:"webSearches,omitempty"`
+	// DroppedItems counts, per language, the drafted items removed because
+	// a figure was not in the data the model was given; only languages with
+	// at least one are listed.
+	DroppedItems map[string]int `json:"droppedItems,omitempty"`
+	DurationMs   int64          `json:"durationMs"`
+}
+
+// ProvenanceAttempt is one writer's try.
+type ProvenanceAttempt struct {
+	// Model is the attempt's label: ClaudeWebModel, WebModel or
+	// "fallback-chain".
+	Model string `json:"model"`
+	// Outcome is "ok" or "failed".
+	Outcome string `json:"outcome"`
+	// Error is a failure's class, never its message (see attemptErrorClass).
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"durationMs"`
 }
 
 // EditionInstrument is one quote with its raw numbers and provenance.
@@ -86,6 +124,23 @@ type EditionInstrument struct {
 	ChangeBps *float64 `json:"changeBps,omitempty"`
 	AsOf      string   `json:"asOf"`
 	Source    string   `json:"source"`
+	// DayLow and DayHigh are the session's range, YearLow and YearHigh the
+	// 52-week range, rounded to Precision. Each pair is kept only when both
+	// ends are present, low <= high and Last lies inside. The day range is
+	// also kept only for a quote from the edition's trading date, so a
+	// context row still carrying the previous session (^TNX on an Open, or
+	// on a US holiday) never shows that session's range.
+	DayLow   *float64 `json:"dayLow,omitempty"`
+	DayHigh  *float64 `json:"dayHigh,omitempty"`
+	YearLow  *float64 `json:"yearLow,omitempty"`
+	YearHigh *float64 `json:"yearHigh,omitempty"`
+	// Volume is contracts traded, for futures and commodities only, from a
+	// quote on the edition's trading date; nil otherwise or when the
+	// provider reported none.
+	Volume *int64 `json:"volume,omitempty"`
+	// Session is the row's own market status on the trading date, "closed"
+	// or "early_close"; nil on a regular day or when no calendar is sourced.
+	Session *string `json:"session,omitempty"`
 }
 
 // EditionSeries is one instrument's intraday bars, oldest first. Points are
@@ -288,7 +343,7 @@ func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousC
 
 // buildEdition assembles the edition from the quotes the brief was written
 // from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, at time.Time) Edition {
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, prov *EditionProvenance, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -296,7 +351,9 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		}
 	}
 	closed := map[string]bool{}
+	sessionStatus := map[string]string{}
 	for _, s := range sessions {
+		sessionStatus[s.Market] = s.Status
 		if s.Status == SessionClosed {
 			closed[s.Market] = true
 		}
@@ -325,6 +382,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		Instruments:   []EditionInstrument{},
 		Series:        []EditionSeries{},
 		Quality:       EditionQuality{Degraded: degraded, Model: model, Missing: []string{}},
+		Provenance:    prov,
 	}
 	if len(sessions) > 0 {
 		e.MarketSessions = sessions
@@ -363,6 +421,19 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 			bps := changeBps(q)
 			row.ChangeBps = &bps
 		}
+		// The day fields belong to the quote's session: shown only when that
+		// is the edition's trading date. The 52-week range is not
+		// session-bound.
+		if LocalDate(q.MarketTime) == due.TradingDate {
+			row.DayLow, row.DayHigh = consistentRange(q.DayLow, q.DayHigh, q.Price, meta.precision)
+			if meta.assetClass == AssetFuture || meta.assetClass == AssetCommodity {
+				row.Volume = q.Volume
+			}
+		}
+		row.YearLow, row.YearHigh = consistentRange(q.YearLow, q.YearHigh, q.Price, meta.precision)
+		if status, ok := sessionStatus[marketOf(in.Symbol)]; ok {
+			row.Session = &status
+		}
 		e.Instruments = append(e.Instruments, row)
 	}
 	if !asOf.IsZero() {
@@ -387,6 +458,18 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 	}
 	return e
 }
+
+// consistentRange rounds a low/high pair to precision, or returns nils unless
+// both ends are present, positive, low <= high and last lies inside.
+func consistentRange(low, high *float64, last float64, precision int) (*float64, *float64) {
+	if low == nil || high == nil || !finitePositiveF(*low) || !finitePositiveF(*high) || *low > *high || last < *low || last > *high {
+		return nil, nil
+	}
+	l, h := roundTo(*low, precision), roundTo(*high, precision)
+	return &l, &h
+}
+
+func finitePositiveF(v float64) bool { return !math.IsInf(v, 0) && !math.IsNaN(v) && v > 0 }
 
 // missing records one instrument or series that did not arrive, with why.
 func (e *Edition) missing(key, reason string) {

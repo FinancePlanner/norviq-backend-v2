@@ -23,7 +23,7 @@ const (
 
 // RendererVersion is part of every export's cache key: bump it whenever a
 // layout change alters the bytes for the same Doc.
-const RendererVersion = 1
+const RendererVersion = 2
 
 // Shared composition values. Every layout uses the same side margin, rule
 // weights and tracking, so the formats read as one publication.

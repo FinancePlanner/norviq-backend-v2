@@ -50,6 +50,9 @@ const (
 	footSize    = 7.0
 
 	rowH       = 31.0 // markets table row
+	rangesLead = 9.0  // meta baseline to the ranges line's; a row with one grows by rangesRow
+	rangesRow  = 9.0
+	tagGap     = 8.0 // name to its session tag
 	nameSize   = 10.0
 	metaSize   = 7.0
 	figureSize = 10.0
@@ -279,6 +282,14 @@ func (r *report) blocks() []reportBlock {
 			add(r.storyBlock(&d.Stories[i], false, i == 0))
 		}
 	}
+	// The earnings are not listed on the cover: a fourth entry cuts every
+	// name in the Portuguese panel.
+	if len(d.Earnings) > 0 {
+		add(r.heading(str.earningsToday, "", open()))
+		for i := range d.Earnings {
+			add(r.storyBlock(&d.Earnings[i], false, i == 0))
+		}
+	}
 
 	// Sources and methodology: on the page the developments end on when
 	// the whole section fits there, else on a page of its own.
@@ -407,20 +418,53 @@ func (r *report) cardHeader() reportBlock {
 }
 
 // cardRow is one instrument: name over its symbol, a sparkline of its
-// session against the previous close, then the figures, right-aligned.
+// session against the previous close, then the figures, right-aligned. A
+// session tag follows the name, or the symbol when the name would have to
+// be cut to make room, and the ranges, when known, take a line of their own
+// under the symbol across the whole row, which grows to hold it.
 func (r *report) cardRow(c *Card, last bool) reportBlock {
 	nameW := r.right - colSpark - sparkW - 14 - r.left
+	tag := strings.ToUpper(c.Session)
+	tagOnMeta := false
+	if tag != "" {
+		tagW := trackedWidth(r.s, SansSemiBold, labelSize, labelSize*labelTrack, tag) + tagGap
+		switch {
+		case r.s.Measure(SansMedium, nameSize, c.Name)+tagW <= nameW:
+		case c.Meta != "" && r.s.Measure(SansRegular, metaSize, c.Meta)+tagW <= nameW:
+			tagOnMeta = true
+		default:
+			nameW -= tagW
+		}
+	}
 	name := fitLine(r.s, nameSize, nameW, c.Name)
+	h := rowH
+	ranges := ""
+	if c.Ranges != "" {
+		if ls := Wrap(r.s, SansRegular, metaSize, r.right-r.left, c.Ranges, 1); len(ls) > 0 {
+			ranges, h = ls[0], rowH+rangesRow
+		}
+	}
 	return reportBlock{
-		h: rowH,
+		h: h,
 		draw: func(s Surface, top float64, first bool) {
 			if first {
 				s.Line(r.left, top, r.right, top, rHair, paperRule, 0) // the header's rule is on the page before
 			}
 			mid := top + rowH/2
 			s.Text(r.left, mid-1, SansMedium, nameSize, Light.Text, name, AlignLeft)
+			switch {
+			case tagOnMeta:
+				x := r.left + s.Measure(SansRegular, metaSize, c.Meta) + tagGap
+				trackedText(s, x, mid+metaSize+2, SansSemiBold, labelSize, Light.Gold, tag, AlignLeft)
+			case tag != "":
+				x := r.left + s.Measure(SansMedium, nameSize, name) + tagGap
+				trackedText(s, x, mid-1, SansSemiBold, labelSize, Light.Gold, tag, AlignLeft)
+			}
 			if c.Meta != "" {
 				s.Text(r.left, mid+metaSize+2, SansRegular, metaSize, Light.Muted, c.Meta, AlignLeft)
+			}
+			if ranges != "" {
+				s.Text(r.left, mid+metaSize+2+rangesLead, SansRegular, metaSize, Light.Muted, ranges, AlignLeft)
 			}
 			col := Light.move(c.Dir)
 			if len(c.Spark) >= 2 {
@@ -433,7 +477,7 @@ func (r *report) cardRow(c *Card, last bool) reportBlock {
 			}
 			drawMoveRight(s, r.right-colPct, base, SansSemiBold, figureSize, col, c.Dir, c.ChangePct)
 			if !last {
-				s.Line(r.left, top+rowH, r.right, top+rowH, rHair, paperRule, 0)
+				s.Line(r.left, top+h, r.right, top+h, rHair, paperRule, 0)
 			}
 		},
 	}
@@ -667,6 +711,9 @@ func (r *report) methodBlocks() []reportBlock {
 	how := []textRun{body(str.howWrittenBody)}
 	if d.Degraded {
 		how = append(how, body(str.degradedBody))
+	}
+	for _, l := range d.Written {
+		how = append(how, credit(l))
 	}
 	item(str.howWritten, how...)
 	lines := func(ls []string) []textRun {

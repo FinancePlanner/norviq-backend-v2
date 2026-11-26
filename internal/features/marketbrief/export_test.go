@@ -146,7 +146,7 @@ func TestExportCachingHeaders(t *testing.T) {
 		t.Fatal(r.Header)
 	}
 	etag := r.Header.Get("ETag")
-	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `-pdf-en-v1"`) {
+	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `-pdf-en-v2"`) {
 		t.Fatal(etag)
 	}
 	png := h.Do(http.MethodGet, exportPath("story", ""), pat, nil)
@@ -192,7 +192,7 @@ func TestExportsManifest(t *testing.T) {
 	}
 	r := h.Do(http.MethodGet, path, pat, nil)
 	r.JSON(t, &m)
-	if m.EditionID != "MI-2026-11-20-C" || m.Revision != 1 || len(m.ContentHash) != 16 || m.RendererVersion != 1 || len(m.Formats) != 4 {
+	if m.EditionID != "MI-2026-11-20-C" || m.Revision != 1 || len(m.ContentHash) != 16 || m.RendererVersion != 2 || len(m.Formats) != 4 {
 		t.Fatalf("%s", r.Body)
 	}
 	if m.Formats[0].ID != "og" || m.Formats[0].Width != 1200 || m.Formats[0].Height != 630 || m.Formats[0].Mime != "image/png" ||

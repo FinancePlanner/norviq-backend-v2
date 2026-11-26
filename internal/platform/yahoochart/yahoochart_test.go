@@ -306,3 +306,51 @@ func TestSeriesAgainstStub(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 }
+
+func TestParseQuoteRangesAndVolume(t *testing.T) {
+	load := func(file string) *Quote {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join("testdata", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := ParseQuote(raw)
+		if err != nil || q == nil {
+			t.Fatalf("%v %v", q, err)
+		}
+		return q
+	}
+	val := func(p *float64) float64 {
+		if p == nil {
+			return math.NaN()
+		}
+		return *p
+	}
+	hsi := load("quote_1d_HSI.json")
+	if val(hsi.DayHigh) != 22543.75 || val(hsi.DayLow) != 22217.01 || val(hsi.YearHigh) != 28056.1 || val(hsi.YearLow) != 21915.88 {
+		t.Fatalf("hsi ranges %+v", hsi)
+	}
+	if hsi.Volume != nil {
+		t.Fatalf("hsi volume %v: Yahoo zero-fills indices", *hsi.Volume)
+	}
+	bz := load("quote_1d_BZ.json")
+	if val(bz.DayHigh) != 92.04 || val(bz.DayLow) != 89.77 || val(bz.YearHigh) != 126.1 || val(bz.YearLow) != 58.72 {
+		t.Fatalf("bz ranges %+v", bz)
+	}
+	if bz.Volume == nil || *bz.Volume != 8281 {
+		t.Fatalf("bz volume %v", bz.Volume)
+	}
+	for name, meta := range map[string]string{
+		"zero":   `"regularMarketDayHigh":0,"regularMarketDayLow":-1,"fiftyTwoWeekHigh":0,"regularMarketVolume":0`,
+		"absent": `"currency":"EUR"`,
+	} {
+		json := `{"chart":{"result":[{"meta":{"symbol":"^X","regularMarketPrice":10,"chartPreviousClose":9,"regularMarketTime":1791475200,` + meta + `}}],"error":null}}`
+		q, err := ParseQuote([]byte(json))
+		if err != nil || q == nil {
+			t.Fatalf("%s: %v %v", name, q, err)
+		}
+		if q.DayHigh != nil || q.DayLow != nil || q.YearHigh != nil || q.YearLow != nil || q.Volume != nil {
+			t.Errorf("%s: %+v", name, q)
+		}
+	}
+}

@@ -87,7 +87,7 @@ func TestExportRendersOneSnapshot(t *testing.T) {
 	}
 
 	a := h.Do(http.MethodGet, exportPath("og", "&rev=2"), pat, nil)
-	if a.Status != http.StatusOK || a.Header.Get("ETag") != `"hash-rev2-og-en-v1"` {
+	if a.Status != http.StatusOK || a.Header.Get("ETag") != `"hash-rev2-og-en-v2"` {
 		t.Fatalf("%d %v", a.Status, a.Header)
 	}
 	if b := h.Do(http.MethodGet, exportPath("og", "&rev=1"), pat, nil); b.Status != http.StatusNotFound {

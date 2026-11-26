@@ -224,3 +224,46 @@ func TestWebSearchClientWithTrialOnLeadsWithClaude(t *testing.T) {
 		t.Fatalf("trial on, no fallback: want the bare Anthropic client, got %#v", alone)
 	}
 }
+
+// The reply carries the billed search count the provider reported (3 here,
+// though only one search came back with results), next to the tokens.
+func TestAnthropicReplyCarriesUsage(t *testing.T) {
+	content := `[` + searchUse + `,` + searchResult + `,{"type":"text","text":"{\"sharesOutstanding\": 1}"}]`
+	stub := newStub(t, stubReply{200, webSearchReply(content, "", 3)})
+	msg, err := webClient(stub.srv.URL).Chat(context.Background(), []Message{Text("user", "AAPL")}, nil, ResponseFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil {
+		t.Fatal("reply has no usage")
+	}
+	if msg.Usage.WebSearches == nil {
+		t.Fatalf("no search count: %+v", *msg.Usage)
+	}
+	eq(t, *msg.Usage.WebSearches, 3)
+	eq(t, msg.Usage.InputTokens, 1200)
+	eq(t, msg.Usage.OutputTokens, 300)
+
+	// A reply without server_tool_use still ran the search Chat insists
+	// on, so the count is never below the searches that came back.
+	unbilled := newStub(t, stubReply{200, anthropicReply(content, "")})
+	msg, err = webClient(unbilled.srv.URL).Chat(context.Background(), []Message{Text("user", "AAPL")}, nil, ResponseFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil || msg.Usage.WebSearches == nil || *msg.Usage.WebSearches != 1 {
+		t.Fatalf("usage without server_tool_use: %+v", msg.Usage)
+	}
+
+	// Without the search tool in the request there is no count to report.
+	plain := newStub(t, stubReply{200, anthropicReply(`[{"type":"text","text":"Hello"}]`, "")})
+	client := webClient(plain.srv.URL)
+	client.Options.WebSearch = nil
+	msg, err = client.Chat(context.Background(), []Message{Text("user", "Hi")}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil || msg.Usage.WebSearches != nil || msg.Usage.InputTokens != 1200 {
+		t.Fatalf("usage %+v", msg.Usage)
+	}
+}

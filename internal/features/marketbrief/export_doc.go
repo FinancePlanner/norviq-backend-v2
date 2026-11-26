@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"norviq-api/internal/features/marketbrief/export"
+	"norviq-api/internal/platform/ai"
 )
 
 // BuildDoc turns a stored brief and its language-neutral edition into the
@@ -72,7 +73,11 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 		dek = drawable(g)
 	}
 
-	narrative := narrativeStories(r.Items, open)
+	want := KindStory
+	if open {
+		want = KindHighlight
+	}
+	narrative := rankedItems(r.Items, want)
 	doc := export.Doc{
 		Lang:        lang,
 		EditionName: editionName,
@@ -83,7 +88,7 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 		Revision:    revision,
 		Published:   published,
 		DataAsOf:    dataAsOf,
-		Cards:       docCards(r, e, lang),
+		Cards:       docCards(r, e, lang, str),
 		Sources:     docSources(r.Items),
 		Provenance:  drawable(provenance(str, published, id, revision)),
 		URL:         docURL(baseURL, date, slot, lang),
@@ -94,6 +99,10 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 		doc.CrossAsset = docCrossAsset(e, lang, str)
 		doc.Sessions = docSessions(e, str)
 		doc.Missing = docMissing(e, str)
+		doc.Written = docWritten(e.Provenance, lang, str)
+	}
+	if open {
+		doc.Earnings = rankedItems(r.Items, KindEarnings)
 	}
 	if len(narrative) > 0 {
 		lead := narrative[0]
@@ -110,6 +119,58 @@ type docStrings struct {
 	holidayName                                                       bool   // closed lines name the holiday (English only)
 	markets                                                           map[string]string
 	names                                                             map[string]string
+
+	// A card's ranges line and its session tag.
+	day, week52, volume string
+	tagClosed, tagShort string
+	written             writtenStrings
+}
+
+// writtenStrings word how an edition was written (docWritten). Each has a
+// %s for the model or the class, or a %d for the count; a count of one
+// takes the singular.
+type writtenStrings struct {
+	writtenBy           string // model, then the whole edition's seconds
+	searches, search    string
+	dropped, droppedOne string
+	earlier             string // model, class label
+	backupModel         string
+	classes             map[string]string
+	otherClass          string
+}
+
+var writtenEN = writtenStrings{
+	writtenBy: "Written by %s · generated in %d s",
+	searches:  "%d web searches", search: "%d web search",
+	dropped: "%d sentences removed by the number check", droppedOne: "%d sentence removed by the number check",
+	earlier:     "Earlier attempt %s: %s",
+	backupModel: "backup model",
+	classes: map[string]string{
+		"429_rate_limited":     "rate limited",
+		"provider_unavailable": "provider unavailable",
+		"timeout":              "timed out",
+		"200_no_usable_output": "unusable reply",
+		"unparseable_draft":    "unusable reply",
+		"too_few_items":        "unusable reply",
+	},
+	otherClass: "error",
+}
+
+var writtenPT = writtenStrings{
+	writtenBy: "Escrito por %s · gerado em %d s",
+	searches:  "%d pesquisas na web", search: "%d pesquisa na web",
+	dropped: "%d frases removidas pela verificação de números", droppedOne: "%d frase removida pela verificação de números",
+	earlier:     "Tentativa anterior %s: %s",
+	backupModel: "modelo de reserva",
+	classes: map[string]string{
+		"429_rate_limited":     "limite de pedidos",
+		"provider_unavailable": "fornecedor indisponível",
+		"timeout":              "tempo esgotado",
+		"200_no_usable_output": "resposta inutilizável",
+		"unparseable_draft":    "resposta inutilizável",
+		"too_few_items":        "resposta inutilizável",
+	},
+	otherClass: "erro",
 }
 
 var docMarketsEN = map[string]string{
@@ -158,6 +219,9 @@ func docStringsFor(lang string) docStrings {
 			marketData: "Dados de mercado", published: "Publicado", lisbon: "Lisboa",
 			closed: "encerrado (feriado)", shortened: "sessão reduzida", closesAt: "fecha às %s",
 			markets: docMarketsPT, names: docNamesPT,
+			day: "Dia", week52: "52 sem.", volume: "Vol.",
+			tagClosed: "Encerrado", tagShort: "Sessão reduzida",
+			written: writtenPT,
 		}
 	}
 	return docStrings{
@@ -167,6 +231,9 @@ func docStringsFor(lang string) docStrings {
 		marketData: "Market data", published: "Published", lisbon: "Lisbon",
 		closed: "closed", holidayName: true, shortened: "shortened session", closesAt: "closes %s",
 		markets: docMarketsEN, names: docNamesEN,
+		day: "Day", week52: "52w", volume: "Vol",
+		tagClosed: "Closed", tagShort: "Shortened session",
+		written: writtenEN,
 	}
 }
 
@@ -325,7 +392,7 @@ func shortSymbol(symbol string) string {
 }
 
 // docCards lists the lead group first, then the rest in stored order.
-func docCards(r Response, e *Edition, lang string) []export.Card {
+func docCards(r Response, e *Edition, lang string, str docStrings) []export.Card {
 	groups := append([]QuoteGroup(nil), r.Groups...)
 	order := []string{"us_close", "eu_close"}
 	if r.Slot != nil && *r.Slot == SlotMorning {
@@ -374,6 +441,8 @@ func docCards(r Response, e *Edition, lang string) []export.Card {
 				ChangePct: formatSignedPercent(in.ChangePct, lang),
 				Dir:       dirOf(in.ChangePct, 2),
 				PrevClose: in.PreviousClose,
+				Ranges:    drawable(cardRanges(&in, lang, str)),
+				Session:   drawable(cardSession(in.Session, str)),
 			}
 			if s, ok := series[in.Symbol]; ok && len(s.Points) >= 2 {
 				for _, p := range s.Points {
@@ -384,6 +453,93 @@ func docCards(r Response, e *Edition, lang string) []export.Card {
 		}
 	}
 	return cards
+}
+
+// cardRanges is "Day 8,093.24–8,144.54 · 52w 7,120.10–8,755.03 · Vol 8,281"
+// at the instrument's precision, each part only when its numbers are there:
+// "" when none is.
+func cardRanges(in *EditionInstrument, lang string, str docStrings) string {
+	var parts []string
+	pair := func(label string, lo, hi *float64) {
+		if lo != nil && hi != nil {
+			parts = append(parts, label+" "+formatPrecise(*lo, in.Precision, lang)+"–"+formatPrecise(*hi, in.Precision, lang))
+		}
+	}
+	pair(str.day, in.DayLow, in.DayHigh)
+	pair(str.week52, in.YearLow, in.YearHigh)
+	if in.Volume != nil {
+		parts = append(parts, str.volume+" "+formatNumber(float64(*in.Volume), 0, lang))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// cardSession tags a row whose own market is closed or shortened today.
+func cardSession(session *string, str docStrings) string {
+	switch derefString(session) {
+	case SessionClosed:
+		return str.tagClosed
+	case SessionEarlyClose:
+		return str.tagShort
+	}
+	return ""
+}
+
+// docWritten says how the narrative was written: the writer (the last
+// attempt that succeeded) and, as a separate clause, the edition's whole
+// generation time, never credited to the writer alone; then its web
+// searches when the provider counted them, the sentences the number check
+// removed from this language, then each attempt that failed before it. nil
+// without a provenance or a writer.
+func docWritten(p *EditionProvenance, lang string, str docStrings) []string {
+	if p == nil {
+		return nil
+	}
+	w := str.written
+	writer := -1
+	for i, a := range p.Attempts {
+		if a.Outcome == AttemptOK {
+			writer = i
+		}
+	}
+	if writer < 0 {
+		return nil
+	}
+	model := func(label string) string {
+		if label == fallbackModelLabel {
+			return w.backupModel
+		}
+		// The web-search switches are how the model was called, not its
+		// name: Claude's "+web_search" and OpenRouter's ":online".
+		return strings.TrimSuffix(strings.TrimSuffix(label, "+"+ai.WebSearchToolName), ":online")
+	}
+	count := func(n int, many, one string) string {
+		if n == 1 {
+			return fmt.Sprintf(one, n)
+		}
+		return fmt.Sprintf(many, n)
+	}
+	seconds := max((p.DurationMs+500)/1000, 1)
+	out := []string{fmt.Sprintf(w.writtenBy, model(p.Attempts[writer].Model), seconds)}
+	if p.WebSearches != nil {
+		out = append(out, count(*p.WebSearches, w.searches, w.search))
+	}
+	if n := p.DroppedItems[lang]; n > 0 {
+		out = append(out, count(n, w.dropped, w.droppedOne))
+	}
+	for _, a := range p.Attempts[:writer] {
+		if a.Outcome != AttemptFailed {
+			continue
+		}
+		label, ok := w.classes[a.Error]
+		if !ok {
+			label = w.otherClass
+		}
+		out = append(out, fmt.Sprintf(w.earlier, model(a.Model), label))
+	}
+	for i := range out {
+		out[i] = drawable(out[i])
+	}
+	return out
 }
 
 func firstNonEmpty(a, b string) string {
@@ -575,13 +731,10 @@ func sessionCloseClock(s MarketSession) string {
 	return at.In(loc).Format("15:04 MST")
 }
 
-// narrativeStories are the evening's stories or the morning's highlights,
-// ranked from 1; earnings never appear among them.
-func narrativeStories(items []Item, open bool) []export.Story {
-	want := KindStory
-	if open {
-		want = KindHighlight
-	}
+// rankedItems are the items of one kind, ranked from 1: the evening's
+// stories or the morning's highlights for the narrative, and the morning's
+// earnings for their own section, never among the highlights.
+func rankedItems(items []Item, want string) []export.Story {
 	var out []export.Story
 	for _, it := range items {
 		if it.Kind != want {

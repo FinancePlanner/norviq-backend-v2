@@ -500,3 +500,41 @@ func TestOpenAIClientKeepsAnthropicThinkingOffItsWire(t *testing.T) {
 		t.Fatalf("wire: %s", raw)
 	}
 }
+
+// An OpenAI-shaped reply carries its tokens; `:online` reports no search
+// count, so WebSearches stays nil.
+func TestOpenAIReplyCarriesUsage(t *testing.T) {
+	stub := newStub(t, stubReply{200, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],` +
+		`"usage":{"prompt_tokens":812,"completion_tokens":95,"total_tokens":907}}`})
+	client := &OpenAIClient{APIKey: "k", Model: "m:online", BaseURL: stub.srv.URL, MaxTokens: 700, Logger: quiet}
+	msg, err := client.Chat(context.Background(), []Message{Text("user", "Hi")}, nil, ResponseFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil {
+		t.Fatal("reply has no usage")
+	}
+	eq(t, *msg.Usage, Usage{InputTokens: 812, OutputTokens: 95})
+}
+
+// A truncated answer resumed in a second request costs both requests.
+func TestResumedReplySumsUsage(t *testing.T) {
+	stub := newStub(t,
+		stubReply{200, `{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"Part one"}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`},
+		stubReply{200, `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":", part two."}}],"usage":{"prompt_tokens":20,"completion_tokens":3}}`})
+	client := &OpenAIClient{APIKey: "k", Model: "m", BaseURL: stub.srv.URL, MaxTokens: 700, Logger: quiet}
+	msg, err := client.Chat(context.Background(), []Message{Text("user", "Hi")}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, msg.ContentString(), "Part one, part two.")
+	if msg.Usage == nil {
+		t.Fatal("reply has no usage")
+	}
+	eq(t, *msg.Usage, Usage{InputTokens: 30, OutputTokens: 8})
+	// The second request sends the first reply back, Usage and all; the
+	// cost must stay off the wire.
+	if strings.Contains(string(stub.requests()[1].body), `"usage"`) {
+		t.Fatalf("usage marshaled onto the wire: %s", stub.requests()[1].body)
+	}
+}

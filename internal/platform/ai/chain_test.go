@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -538,5 +540,50 @@ func (blockingHandler) ServeHTTP(_ http.ResponseWriter, r *http.Request) {
 	select {
 	case <-r.Context().Done():
 	case <-time.After(2 * time.Second):
+	}
+}
+
+// timeoutError is a net.Error that timed out.
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+// ErrorClass is log-safe and public-safe: a class, never the error's own
+// text, and no word on the provider account's funding or key state.
+func TestErrorClass(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// A real deadline, hit while the provider is still answering.
+	slow := newStub(t, stubReply{200, `{}`})
+	slow.srv.Config.Handler = blockingHandler{}
+	_, deadline := (&OpenAIClient{APIKey: "k", Model: "m", BaseURL: slow.srv.URL, Timeout: 50 * time.Millisecond, Logger: quiet}).
+		Chat(context.Background(), []Message{Text("user", "Hi")}, nil, "")
+	if deadline == nil {
+		t.Fatal("want a deadline error")
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&UpstreamError{Status: 429}, "429_rate_limited"},
+		{&UpstreamError{Status: 402}, "provider_unavailable"},
+		{&UpstreamError{Status: 401}, "provider_unavailable"},
+		{&UpstreamError{Status: 403}, "provider_unavailable"},
+		{&UpstreamError{Status: 503}, "503"},
+		{deadline, "timeout"},
+		{&url.Error{Op: "Post", URL: "https://example.com", Err: context.DeadlineExceeded}, "timeout"},
+		{fmt.Errorf("dial: %w", timeoutError{}), "timeout"},
+		{&UnusableResponseError{Model: "m"}, "200_no_usable_output"},
+		{fmt.Errorf("rung: %w", ctx.Err()), "cancelled"}, //nolint:misspell // Vapor's log label
+		{errors.New("provider said: secret detail"), "error"},
+	} {
+		if got := ErrorClass(c.err); got != c.want {
+			t.Errorf("ErrorClass(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+	if got := ErrorClass(nil); got != "" {
+		t.Errorf("ErrorClass(nil) = %q", got)
 	}
 }

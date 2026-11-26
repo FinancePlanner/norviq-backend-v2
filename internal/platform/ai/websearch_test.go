@@ -244,6 +244,17 @@ func TestAnthropicReplyCarriesUsage(t *testing.T) {
 	eq(t, msg.Usage.InputTokens, 1200)
 	eq(t, msg.Usage.OutputTokens, 300)
 
+	// A reply without server_tool_use still ran the search Chat insists
+	// on, so the count is never below the searches that came back.
+	unbilled := newStub(t, stubReply{200, anthropicReply(content, "")})
+	msg, err = webClient(unbilled.srv.URL).Chat(context.Background(), []Message{Text("user", "AAPL")}, nil, ResponseFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Usage == nil || msg.Usage.WebSearches == nil || *msg.Usage.WebSearches != 1 {
+		t.Fatalf("usage without server_tool_use: %+v", msg.Usage)
+	}
+
 	// Without the search tool in the request there is no count to report.
 	plain := newStub(t, stubReply{200, anthropicReply(`[{"type":"text","text":"Hello"}]`, "")})
 	client := webClient(plain.srv.URL)

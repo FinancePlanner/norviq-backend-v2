@@ -515,9 +515,6 @@ func TestOpenAIReplyCarriesUsage(t *testing.T) {
 		t.Fatal("reply has no usage")
 	}
 	eq(t, *msg.Usage, Usage{InputTokens: 812, OutputTokens: 95})
-	if strings.Contains(string(stub.requests()[0].body), `"usage"`) {
-		t.Fatal("usage marshaled onto the wire")
-	}
 }
 
 // A truncated answer resumed in a second request costs both requests.
@@ -535,4 +532,9 @@ func TestResumedReplySumsUsage(t *testing.T) {
 		t.Fatal("reply has no usage")
 	}
 	eq(t, *msg.Usage, Usage{InputTokens: 30, OutputTokens: 8})
+	// The second request sends the first reply back, Usage and all; the
+	// cost must stay off the wire.
+	if strings.Contains(string(stub.requests()[1].body), `"usage"`) {
+		t.Fatalf("usage marshaled onto the wire: %s", stub.requests()[1].body)
+	}
 }

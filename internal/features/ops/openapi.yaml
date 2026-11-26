@@ -15653,6 +15653,19 @@ components:
         series:
           type: array
           items: { $ref: '#/components/schemas/MarketBriefEditionSeries' }
+        marketSessions:
+          type: array
+          description: >-
+            Markets closed or on a shortened session on the trading date,
+            sorted by market id (absent on an ordinary day).
+          items:
+            type: object
+            properties:
+              market: { type: string, example: nyse }
+              status: { type: string, enum: [closed, early_close] }
+              name: { type: string, example: Thanksgiving Day }
+              closeAt: { type: string, format: date-time, description: The shortened close; present only when verified }
+            required: [market, status, name]
         quality:
           type: object
           properties:
@@ -15668,11 +15681,12 @@ components:
                 (absent when nothing is missing). One of `unavailable` (the provider
                 returned no fresh quote), `pre_open` (a European open row stamped
                 before 08:00 Lisbon), `previous_session` (a row from another Lisbon
-                date) or `no_bars` (no intraday bars in the window, or no quote to
-                anchor them).
+                date), `no_bars` (no intraday bars in the window, or no quote to
+                anchor them) or `holiday` (the instrument's own market is closed
+                that day; see `marketSessions`).
               additionalProperties:
                 type: string
-                enum: [unavailable, pre_open, previous_session, no_bars]
+                enum: [unavailable, pre_open, previous_session, no_bars, holiday]
           required: [degraded, model, missing]
       required: [schemaVersion, id, kind, revision, status, publishedAt, timezone, instruments, series, quality]
     MarketBriefEditionInstrument:

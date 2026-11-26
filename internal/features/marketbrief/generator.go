@@ -76,7 +76,7 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	}
 	quotes := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
-	series := g.series(ctx, due, at)
+	series := g.series(ctx, due, at, quotes)
 	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
 		if err != nil {
 			return b, err
@@ -108,20 +108,43 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	return withEdition(g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at))
 }
 
-// series fetches the intraday bars charted for the slot. Bars from another
-// Lisbon day than the brief's are dropped: a holiday's stale session must
-// not be charted as today's.
-func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time) map[string]*yahoochart.Intraday {
+// series fetches the intraday bars charted for the slot: the symbol's own
+// session, up to now, cut at the scorecard's quote and ended on it, so the
+// last point is the number the scorecard shows. A symbol without a quote has
+// no baseline to chart against; one whose bars stop more than maxSeriesGap
+// short of the quote (a holiday session, a stalled feed) is not charted.
+func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time, quotes []yahoochart.Quote) map[string]*yahoochart.Intraday {
 	out := map[string]*yahoochart.Intraday{}
 	if g.Intraday == nil {
 		return out
 	}
+	bySymbol := map[string]yahoochart.Quote{}
+	for _, q := range quotes {
+		bySymbol[q.Symbol] = q
+	}
 	for _, symbol := range seriesSymbols(due.Slot) {
-		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, at)
-		if d == nil || LocalDate(d.Last().Time) != due.TradingDate {
+		q, ok := bySymbol[symbol]
+		start, hasWindow := seriesWindowStart(symbol, at)
+		if !ok || !hasWindow {
 			continue
 		}
-		out[symbol] = d
+		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, start, at)
+		if d == nil {
+			continue
+		}
+		var kept []yahoochart.Point
+		for _, p := range d.Points {
+			if p.Time.Before(q.MarketTime) {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) == 0 || q.MarketTime.Sub(kept[len(kept)-1].Time) > maxSeriesGap {
+			continue
+		}
+		cut := *d
+		kept = append(kept, yahoochart.Point{Time: q.MarketTime, Value: q.Price})
+		cut.Points = kept
+		out[symbol] = &cut
 	}
 	return out
 }

@@ -109,22 +109,58 @@ type EditionQuality struct {
 type instrumentMeta struct {
 	assetClass, region, unit string
 	precision                int
+	// exchangeTZ is the IANA zone of the instrument's session, set only for
+	// the charted symbols.
+	exchangeTZ string
 }
 
 var instrumentMetas = map[string]instrumentMeta{
-	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2},
-	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2},
-	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2},
-	"NQ=F":      {AssetFuture, "US", UnitPoints, 2},
-	"ES=F":      {AssetFuture, "US", UnitPoints, 2},
-	"^NDX":      {AssetIndex, "US", UnitPoints, 2},
-	"^GSPC":     {AssetIndex, "US", UnitPoints, 2},
-	"^DJI":      {AssetIndex, "US", UnitPoints, 2},
-	"^N225":     {AssetIndex, "JP", UnitPoints, 2},
-	"^HSI":      {AssetIndex, "HK", UnitPoints, 2},
-	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2},
+	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin"},
+	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, ""},
+	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, ""},
+	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York"},
+	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York"},
+	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
+	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
+	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
+	"^N225":     {AssetIndex, "JP", UnitPoints, 2, ""},
+	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, ""},
+	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, ""},
 	// ^TNX's price is the yield in percent (4.91 means 4.91%).
-	"^TNX": {AssetRate, "US", UnitPercent, 3},
+	"^TNX": {AssetRate, "US", UnitPercent, 3, ""},
+}
+
+// futuresReopen is the hour (New York) CME equity futures reopen each day.
+const futuresReopen = 18
+
+// maxSeriesGap is how far the last intraday bar may trail the quote before
+// the series is dropped: a chart that stops hours short of the scorecard
+// would end somewhere the scorecard does not.
+const maxSeriesGap = 30 * time.Minute
+
+// seriesWindowStart is where a symbol's chart begins for a brief made at
+// `at`: a future's session opens at the latest 18:00 New York strictly
+// before `at`, a cash index's at midnight of `at`'s date in its own zone.
+// False for a symbol that is not charted.
+func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
+	meta := instrumentMetas[symbol]
+	if meta.exchangeTZ == "" {
+		return time.Time{}, false
+	}
+	loc, err := time.LoadLocation(meta.exchangeTZ)
+	if err != nil {
+		return time.Time{}, false
+	}
+	local := at.In(loc)
+	y, m, d := local.Date()
+	if meta.assetClass != AssetFuture {
+		return time.Date(y, m, d, 0, 0, 0, 0, loc), true
+	}
+	start := time.Date(y, m, d, futuresReopen, 0, 0, 0, loc)
+	if !start.Before(at) {
+		start = time.Date(y, m, d-1, futuresReopen, 0, 0, 0, loc)
+	}
+	return start, true
 }
 
 // seriesSymbols are the instruments charted intraday, lead index first.

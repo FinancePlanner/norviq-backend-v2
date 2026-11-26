@@ -2,6 +2,7 @@ package yahoochart
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -30,25 +31,27 @@ func (d Intraday) Last() *Point {
 	return &d.Points[len(d.Points)-1]
 }
 
-// IntradayProvider fetches the current or latest session's bars.
+// IntradayProvider fetches the bars of an explicit window.
 type IntradayProvider interface {
-	// Intraday never fails: nil when the symbol fails, has no bars, or its
-	// latest bar is older than MaxAge.
-	Intraday(ctx context.Context, symbol, interval string, now time.Time) *Intraday
+	// Intraday never fails: nil when the symbol fails or no bar falls in
+	// [from, to].
+	Intraday(ctx context.Context, symbol, interval string, from, to time.Time) *Intraday
 }
 
 // IntradayInterval is the bar width the market brief charts use: about 80
 // points for a US session, light enough to store with every brief.
 const IntradayInterval = "5m"
 
-// Intraday implements IntradayProvider over range=1d, regular hours only.
-func (c *Client) Intraday(ctx context.Context, symbol, interval string, now time.Time) *Intraday {
-	body, err := c.get(ctx, symbol, "range=1d&interval="+interval)
+// Intraday implements IntradayProvider over period1/period2, so the window is
+// the caller's and not whatever session Yahoo calls "1d".
+func (c *Client) Intraday(ctx context.Context, symbol, interval string, from, to time.Time) *Intraday {
+	query := "period1=" + strconv.FormatInt(from.Unix(), 10) + "&period2=" + strconv.FormatInt(to.Unix(), 10) + "&interval=" + interval
+	body, err := c.get(ctx, symbol, query)
 	if err == nil && body != nil {
 		var d *Intraday
 		if d, err = ParseIntraday(body, interval); err == nil {
-			if d != nil && IsFresh(Quote{MarketTime: d.Last().Time}, now) {
-				return d
+			if clipped := clipIntraday(d, from, to); clipped != nil {
+				return clipped
 			}
 			c.Logger.Info("market_brief_intraday_missing", "symbol", symbol)
 			return nil
@@ -58,6 +61,25 @@ func (c *Client) Intraday(ctx context.Context, symbol, interval string, now time
 		c.Logger.Warn("market_brief_intraday_failed", "symbol", symbol, "error", err)
 	}
 	return nil
+}
+
+// clipIntraday keeps the points with from <= Time <= to; nil when none are left.
+func clipIntraday(d *Intraday, from, to time.Time) *Intraday {
+	if d == nil {
+		return nil
+	}
+	kept := make([]Point, 0, len(d.Points))
+	for _, p := range d.Points {
+		if !p.Time.Before(from) && !p.Time.After(to) {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	out := *d
+	out.Points = kept
+	return &out
 }
 
 // ParseIntraday reads a chart response's timestamps and closes. Null and

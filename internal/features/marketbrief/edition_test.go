@@ -156,23 +156,138 @@ func TestContentHashIsStable(t *testing.T) {
 	}
 }
 
-type fakeIntraday map[string]*yahoochart.Intraday
+// fakeIntraday serves canned bars and records the window it was asked for.
+type fakeIntraday struct {
+	bars     map[string]*yahoochart.Intraday
+	from, to time.Time
+}
 
-func (f fakeIntraday) Intraday(_ context.Context, symbol, _ string, _ time.Time) *yahoochart.Intraday {
-	return f[symbol]
+func (f *fakeIntraday) Intraday(_ context.Context, symbol, _ string, from, to time.Time) *yahoochart.Intraday {
+	f.from, f.to = from, to
+	return f.bars[symbol]
+}
+
+func bars(symbol string, times ...time.Time) *yahoochart.Intraday {
+	d := &yahoochart.Intraday{Symbol: symbol, Interval: "5m"}
+	for i, at := range times {
+		d.Points = append(d.Points, yahoochart.Point{Time: at, Value: float64(100 + i)})
+	}
+	return d
 }
 
 func TestGeneratorSeriesKeepsTheTradingDayOnly(t *testing.T) {
-	today := &yahoochart.Intraday{Symbol: "^NDX", Points: []yahoochart.Point{{Time: eveningAt.Add(-2 * time.Hour), Value: 1}}}
-	yesterday := &yahoochart.Intraday{Symbol: "^GSPC", Points: []yahoochart.Point{{Time: eveningAt.Add(-26 * time.Hour), Value: 1}}}
-	g := &LLMGenerator{Intraday: fakeIntraday{"^NDX": today, "^GSPC": yesterday}}
-	got := g.series(context.Background(), Due{TradingDate: "2026-11-20", Slot: SlotEvening}, eveningAt)
-	if len(got) != 1 || got["^NDX"] != today {
+	due := Due{TradingDate: "2026-11-20", Slot: SlotEvening}
+	quote := eveningQuote("^NDX", 105, 100) // 21:10 Lisbon, 16:10 New York
+	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^NDX": bars("^NDX", quote.MarketTime.Add(-10*time.Minute))}}
+	g := &LLMGenerator{Intraday: f}
+	got := g.series(context.Background(), due, eveningAt, []yahoochart.Quote{quote})
+	if len(got) != 1 || got["^NDX"] == nil {
 		t.Fatalf("%+v", got)
 	}
-	if len((&LLMGenerator{}).series(context.Background(), Due{TradingDate: "2026-11-20", Slot: SlotEvening}, eveningAt)) != 0 {
+	ny, _ := time.LoadLocation("America/New_York")
+	if want := time.Date(2026, 11, 20, 0, 0, 0, 0, ny); !f.from.Equal(want) || !f.to.Equal(eveningAt) {
+		t.Fatalf("window %v..%v", f.from, f.to)
+	}
+	// An evening with no bars in the window is not charted.
+	g = &LLMGenerator{Intraday: &fakeIntraday{bars: map[string]*yahoochart.Intraday{}}}
+	if got := g.series(context.Background(), due, eveningAt, []yahoochart.Quote{quote}); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	if len((&LLMGenerator{}).series(context.Background(), due, eveningAt, nil)) != 0 {
 		t.Fatal("no provider, no series")
 	}
+}
+
+func TestFuturesSessionStart(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	for _, c := range []struct{ at, want string }{
+		{"2026-11-26T08:25:00Z", "2026-11-25T18:00"}, // Thanksgiving Thursday: Wednesday's reopen
+		{"2026-11-30T08:25:00Z", "2026-11-29T18:00"}, // Monday: Sunday's reopen, not Friday's
+		{"2026-03-10T08:25:00Z", "2026-03-09T18:00"}, // US on EDT, Lisbon still on WET
+		{"2026-11-25T23:30:00Z", "2026-11-25T18:00"}, // after the reopen, same ET day
+	} {
+		at, _ := time.Parse(time.RFC3339, c.at)
+		got, ok := seriesWindowStart("NQ=F", at)
+		if !ok || got.In(ny).Format("2006-01-02T15:04") != c.want {
+			t.Errorf("%s: %v", c.at, got.In(ny))
+		}
+	}
+	if _, ok := seriesWindowStart("^N225", time.Now()); ok {
+		t.Fatal("uncharted symbol has no window")
+	}
+	berlin, _ := time.LoadLocation("Europe/Berlin")
+	at, _ := time.Parse(time.RFC3339, "2026-11-26T08:25:00Z")
+	if got, ok := seriesWindowStart("^GDAXI", at); !ok || !got.Equal(time.Date(2026, 11, 26, 0, 0, 0, 0, berlin)) {
+		t.Fatalf("DAX window %v", got)
+	}
+}
+
+func TestSeriesEndsAtQuote(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	at := time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
+	start := time.Date(2026, 11, 25, 18, 0, 0, 0, ny)
+	nq := func(marketTime time.Time) yahoochart.Quote {
+		return yahoochart.Quote{Symbol: "NQ=F", Price: 25100, PreviousClose: 25000, MarketTime: marketTime}
+	}
+	due := Due{TradingDate: "2026-11-26", Slot: SlotMorning}
+	run := func(q []yahoochart.Quote, d *yahoochart.Intraday) (map[string]*yahoochart.Intraday, *fakeIntraday) {
+		f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"NQ=F": d}}
+		return (&LLMGenerator{Intraday: f}).series(context.Background(), due, at, q), f
+	}
+
+	t.Run("quote newer than last bar", func(t *testing.T) {
+		q := nq(at.Add(-3 * time.Minute))
+		got, f := run([]yahoochart.Quote{q}, bars("NQ=F", at.Add(-15*time.Minute), at.Add(-10*time.Minute), at.Add(-5*time.Minute)))
+		s := got["NQ=F"]
+		if s == nil || len(s.Points) != 4 {
+			t.Fatalf("%+v", s)
+		}
+		last := s.Points[3]
+		if !last.Time.Equal(q.MarketTime) || last.Value != q.Price {
+			t.Fatalf("last %+v", last)
+		}
+		if pct := (last.Value/q.PreviousClose - 1) * 100; pct != q.ChangePercent() {
+			t.Fatalf("legend %v scorecard %v", pct, q.ChangePercent())
+		}
+		if !f.from.Equal(start) || !f.to.Equal(at) {
+			t.Fatalf("window %v..%v", f.from, f.to)
+		}
+	})
+	t.Run("quote older than last bar", func(t *testing.T) {
+		q := nq(at.Add(-12 * time.Minute))
+		got, _ := run([]yahoochart.Quote{q}, bars("NQ=F", at.Add(-20*time.Minute), at.Add(-15*time.Minute), at.Add(-12*time.Minute), at.Add(-10*time.Minute)))
+		s := got["NQ=F"]
+		if s == nil || len(s.Points) != 3 {
+			t.Fatalf("%+v", s)
+		}
+		if last := s.Points[2]; !last.Time.Equal(q.MarketTime) || last.Value != q.Price || !s.Points[1].Time.Equal(at.Add(-15*time.Minute)) {
+			t.Fatalf("%+v", s.Points)
+		}
+	})
+	t.Run("last bar 7h before quote", func(t *testing.T) {
+		got, _ := run([]yahoochart.Quote{nq(at)}, bars("NQ=F", at.Add(-8*time.Hour), at.Add(-7*time.Hour)))
+		if len(got) != 0 {
+			t.Fatalf("%+v", got)
+		}
+	})
+	t.Run("gap of exactly maxSeriesGap is kept", func(t *testing.T) {
+		got, _ := run([]yahoochart.Quote{nq(at)}, bars("NQ=F", at.Add(-maxSeriesGap)))
+		if got["NQ=F"] == nil {
+			t.Fatal("dropped")
+		}
+	})
+	t.Run("no bars before the quote", func(t *testing.T) {
+		got, _ := run([]yahoochart.Quote{nq(at.Add(-time.Hour))}, bars("NQ=F", at.Add(-time.Hour)))
+		if len(got) != 0 {
+			t.Fatalf("%+v", got)
+		}
+	})
+	t.Run("no quote for the symbol", func(t *testing.T) {
+		got, _ := run(nil, bars("NQ=F", at.Add(-5*time.Minute)))
+		if len(got) != 0 {
+			t.Fatalf("%+v", got)
+		}
+	})
 }
 
 func TestIncludes(t *testing.T) {

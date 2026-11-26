@@ -130,7 +130,7 @@ type docStrings struct {
 // %s for the model or the class, or a %d for the count; a count of one
 // takes the singular.
 type writtenStrings struct {
-	writtenBy           string // model, seconds
+	writtenBy           string // model, then the whole edition's seconds
 	searches, search    string
 	dropped, droppedOne string
 	earlier             string // model, class label
@@ -140,7 +140,7 @@ type writtenStrings struct {
 }
 
 var writtenEN = writtenStrings{
-	writtenBy: "Written by %s in %d s",
+	writtenBy: "Written by %s · generated in %d s",
 	searches:  "%d web searches", search: "%d web search",
 	dropped: "%d sentences removed by the number check", droppedOne: "%d sentence removed by the number check",
 	earlier:     "Earlier attempt %s: %s",
@@ -157,7 +157,7 @@ var writtenEN = writtenStrings{
 }
 
 var writtenPT = writtenStrings{
-	writtenBy: "Escrito por %s em %d s",
+	writtenBy: "Escrito por %s · gerado em %d s",
 	searches:  "%d pesquisas na web", search: "%d pesquisa na web",
 	dropped: "%d frases removidas pela verificação de números", droppedOne: "%d frase removida pela verificação de números",
 	earlier:     "Tentativa anterior %s: %s",
@@ -485,7 +485,8 @@ func cardSession(session *string, str docStrings) string {
 }
 
 // docWritten says how the narrative was written: the writer (the last
-// attempt that succeeded) and the edition's whole generation time, its web
+// attempt that succeeded) and, as a separate clause, the edition's whole
+// generation time, never credited to the writer alone; then its web
 // searches when the provider counted them, the sentences the number check
 // removed from this language, then each attempt that failed before it. nil
 // without a provenance or a writer.
@@ -507,7 +508,9 @@ func docWritten(p *EditionProvenance, lang string, str docStrings) []string {
 		if label == fallbackModelLabel {
 			return w.backupModel
 		}
-		return strings.TrimSuffix(label, "+"+ai.WebSearchToolName)
+		// The web-search switches are how the model was called, not its
+		// name: Claude's "+web_search" and OpenRouter's ":online".
+		return strings.TrimSuffix(strings.TrimSuffix(label, "+"+ai.WebSearchToolName), ":online")
 	}
 	count := func(n int, many, one string) string {
 		if n == 1 {

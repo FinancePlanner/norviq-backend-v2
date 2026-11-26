@@ -701,7 +701,7 @@ func snapshotDoc(lang string) Doc {
 		"",
 	}
 	session, written := "Shortened session", []string{
-		"Written by backup model in 41 s",
+		"Written by backup model · generated in 41 s",
 		"1 sentence removed by the number check",
 		"Earlier attempt claude-haiku-5-5: unusable reply",
 	}
@@ -714,7 +714,7 @@ func snapshotDoc(lang string) Doc {
 		ranges[1] = "Dia 6.890,00–7.180,20 · 52 sem. 5.600,10–7.210,00"
 		ranges[2] = "52 sem. 41.200,00–49.600,30"
 		session, written = "Sessão reduzida", []string{
-			"Escrito por modelo de reserva em 41 s",
+			"Escrito por modelo de reserva · gerado em 41 s",
 			"2 frases removidas pela verificação de números",
 			"Tentativa anterior claude-haiku-5-5: resposta inutilizável",
 		}
@@ -917,5 +917,72 @@ func TestReportSessionTagNeverCutsTheName(t *testing.T) {
 	}
 	if _, right := textExtent(rec, meta); tag.Y != meta.Y || tag.X <= right {
 		t.Errorf("tag at (%.1f, %.1f), not after the meta ending at (%.1f, %.1f)", tag.X, tag.Y, right, meta.Y)
+	}
+}
+
+// pdfMetricsSurface records like RecordingSurface but measures text with
+// the PDF's own font metrics, so pagination matches the rendered report.
+type pdfMetricsSurface struct {
+	*RecordingSurface
+	pdf Surface
+}
+
+func (p pdfMetricsSurface) Measure(f Font, size float64, s string) float64 {
+	return p.pdf.Measure(f, size, s)
+}
+
+// A full evening, every catalog row with its ranges and the US rows on the
+// 11-27 half day, still has its lead story on the cover.
+func TestReportSixRangedRowsKeepLeadOnCover(t *testing.T) {
+	out := os.Getenv("MARKET_BRIEF_EXPORT_OUT")
+	for _, lang := range []string{"en", "pt-PT"} {
+		t.Run(lang, func(t *testing.T) {
+			d := fixtureDoc(lang)
+			d.EditionID, d.DateLong, d.URL = "MI-2026-11-27-C", "27 November 2026", "https://www.norviq.org/brief/2026-11-27/evening"
+			if lang == "pt-PT" {
+				d.DateLong, d.URL = "27 de novembro de 2026", d.URL+"?lang=pt-PT"
+			}
+			d.Cards = append(d.Cards,
+				Card{Name: "CAC 40", Meta: "FCHI · FR", Level: "7,980.10", Change: "−80.20", ChangePct: "−1.00%", Dir: "down"},
+				Card{Name: "Euro Stoxx 50", Meta: "STOXX50E · EU", Level: "5,480.10", Change: "−50.20", ChangePct: "−0.90%", Dir: "down"},
+			)
+			ranges, tag := "Day 7,950.10–8,044.54 · 52w 7,120.10–8,755.03 · Vol 81,281,000", "Shortened session"
+			if lang == "pt-PT" {
+				ranges, tag = "Dia 7.950,10–8.044,54 · 52 sem. 7.120,10–8.755,03 · Vol. 81.281.000", "Sessão reduzida"
+			}
+			for i := range d.Cards {
+				d.Cards[i].Ranges = ranges
+				if d.Cards[i].Meta != "" && strings.HasSuffix(d.Cards[i].Meta, "· US") {
+					d.Cards[i].Session = tag
+				}
+			}
+			if premise := strings.Count(fmt.Sprint(d.Cards), tag); premise != 3 || len(d.Cards) != 6 {
+				t.Fatalf("premise: %d cards, %d tagged", len(d.Cards), premise)
+			}
+			rec := pdfMetricsSurface{&RecordingSurface{W: testA4W, H: testA4H}, NewPDFSurface()}
+			DrawReport(rec, d)
+			lead := -1
+			for _, op := range textOps(rec.RecordingSurface) {
+				if op.Size == leadSize && len(op.Text) > 10 && strings.HasPrefix(d.Lead.Text, op.Text) {
+					lead = op.Page
+					break
+				}
+			}
+			if lead != 0 {
+				t.Errorf("the lead story is on page %d, want the cover", lead+1)
+			}
+			if out != "" {
+				b, _, err := Render(FormatPDF, d)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(out, 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(out, "snapshot-close-six-rows-report-"+lang+".pdf"), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

@@ -593,23 +593,23 @@ func TestDocWrittenLines(t *testing.T) {
 		want       []string
 	}{
 		{"fallback en", LanguageEn, fallbackProvenance(), []string{
-			"Written by backup model in 41 s",
+			"Written by backup model · generated in 41 s",
 			"1 sentence removed by the number check",
 			"Earlier attempt claude-haiku-5-5: unusable reply",
-			"Earlier attempt anthropic/claude-haiku-4.5:online: provider unavailable",
+			"Earlier attempt anthropic/claude-haiku-4.5: provider unavailable",
 		}},
 		{"fallback pt-PT", LanguagePtPT, fallbackProvenance(), []string{
-			"Escrito por modelo de reserva em 41 s",
+			"Escrito por modelo de reserva · gerado em 41 s",
 			"2 frases removidas pela verificação de números",
 			"Tentativa anterior claude-haiku-5-5: resposta inutilizável",
-			"Tentativa anterior anthropic/claude-haiku-4.5:online: fornecedor indisponível",
+			"Tentativa anterior anthropic/claude-haiku-4.5: fornecedor indisponível",
 		}},
-		{"claude en", LanguageEn, claude, []string{"Written by claude-haiku-5-5 in 13 s", "3 web searches"}},
-		{"claude pt-PT", LanguagePtPT, claude, []string{"Escrito por claude-haiku-5-5 em 13 s", "3 pesquisas na web"}},
-		{"singular en", LanguageEn, one, []string{"Written by claude-haiku-5-5 in 1 s", "1 web search", "1 sentence removed by the number check"}},
-		{"singular pt-PT", LanguagePtPT, one, []string{"Escrito por claude-haiku-5-5 em 1 s", "1 pesquisa na web", "1 frase removida pela verificação de números"}},
+		{"claude en", LanguageEn, claude, []string{"Written by claude-haiku-5-5 · generated in 13 s", "3 web searches"}},
+		{"claude pt-PT", LanguagePtPT, claude, []string{"Escrito por claude-haiku-5-5 · gerado em 13 s", "3 pesquisas na web"}},
+		{"singular en", LanguageEn, one, []string{"Written by claude-haiku-5-5 · generated in 1 s", "1 web search", "1 sentence removed by the number check"}},
+		{"singular pt-PT", LanguagePtPT, one, []string{"Escrito por claude-haiku-5-5 · gerado em 1 s", "1 pesquisa na web", "1 frase removida pela verificação de números"}},
 		{"classes en", LanguageEn, classes, []string{
-			"Written by backup model in 61 s",
+			"Written by backup model · generated in 61 s",
 			"Earlier attempt m1: rate limited",
 			"Earlier attempt m2: timed out",
 			"Earlier attempt m3: unusable reply",
@@ -619,7 +619,7 @@ func TestDocWrittenLines(t *testing.T) {
 			"Earlier attempt m7: error",
 		}},
 		{"classes pt-PT", LanguagePtPT, classes, []string{
-			"Escrito por modelo de reserva em 61 s",
+			"Escrito por modelo de reserva · gerado em 61 s",
 			"Tentativa anterior m1: limite de pedidos",
 			"Tentativa anterior m2: tempo esgotado",
 			"Tentativa anterior m3: resposta inutilizável",
@@ -650,8 +650,10 @@ func TestDocWrittenLines(t *testing.T) {
 }
 
 // snapshotMorning is The Open on the day after Thanksgiving, with every S3
-// field: ranges and volume, the US futures' shortened session, two earnings
-// items and Task 2's fallback provenance.
+// field it can carry: ranges and volume, the US half-day sessions, two
+// earnings items and Task 2's fallback provenance. No row is tagged: a
+// row's tag follows its own market, and futures and the DAX trade a full
+// day.
 func snapshotMorning(lang string) (Response, *Edition) {
 	grp := func(s string) *string { return &s }
 	r := Response{
@@ -695,7 +697,6 @@ func snapshotMorning(lang string) (Response, *Edition) {
 		}
 		return out
 	}
-	early := strPtr(SessionEarlyClose)
 	e := &Edition{
 		SchemaVersion: 2, ID: "MI-2026-11-27-O", Kind: "open", Revision: 1, Status: "published",
 		PublishedAt: "2026-11-27T08:15:00Z", MarketDataAsOf: strPtr("2026-11-27T08:10:00Z"), Timezone: "Europe/Lisbon",
@@ -703,12 +704,12 @@ func snapshotMorning(lang string) (Response, *Edition) {
 			{
 				Symbol: "NQ=F", Name: "Nasdaq 100 futures", AssetClass: AssetFuture, Region: "US", Group: grp("us_futures"), Unit: "points", Precision: 2,
 				Last: 25180.5, PreviousClose: 25030.25, Change: 150.25, ChangePct: 0.6,
-				DayLow: f64Ptr(24950.1), DayHigh: f64Ptr(25210), YearLow: f64Ptr(19100.25), YearHigh: f64Ptr(26800.75), Volume: i64Ptr(412345), Session: early,
+				DayLow: f64Ptr(24950.1), DayHigh: f64Ptr(25210), YearLow: f64Ptr(19100.25), YearHigh: f64Ptr(26800.75), Volume: i64Ptr(412345),
 			},
 			{
 				Symbol: "ES=F", Name: "S&P 500 futures", AssetClass: AssetFuture, Region: "US", Group: grp("us_futures"), Unit: "points", Precision: 2,
 				Last: 6941.75, PreviousClose: 6914.25, Change: 27.5, ChangePct: 0.4,
-				DayLow: f64Ptr(6890), DayHigh: f64Ptr(6950.2), YearLow: f64Ptr(5600.1), YearHigh: f64Ptr(7210), Volume: i64Ptr(1283004), Session: early,
+				DayLow: f64Ptr(6890), DayHigh: f64Ptr(6950.2), YearLow: f64Ptr(5600.1), YearHigh: f64Ptr(7210), Volume: i64Ptr(1283004),
 			},
 			{
 				Symbol: "^GDAXI", Name: "DAX", AssetClass: "index", Region: "DE", Group: grp("eu_open"), Unit: "points", Precision: 2,
@@ -748,7 +749,7 @@ func TestExportSnapshotMetadataRenders(t *testing.T) {
 					tagged++
 				}
 			}
-			if ranged != 3 || tagged != 2 {
+			if ranged != 3 || tagged != 0 {
 				t.Fatalf("premise: %d ranged and %d tagged cards in %+v", ranged, tagged, d.Cards)
 			}
 			bare := d

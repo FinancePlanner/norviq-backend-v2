@@ -261,6 +261,13 @@ func (c *AnthropicClient) completion(ctx context.Context, messages []Message, to
 	}
 	searches := SuccessfulWebSearches(decoded.Content)
 	logAnthropicCompletion(logger, decoded, result, c.Model, body.ThinkingEnabled(), searches)
+	result.Message.Usage = &Usage{InputTokens: intOr(usage.InputTokens, 0), OutputTokens: intOr(usage.OutputTokens, 0)}
+	if c.Options.WebSearch != nil {
+		// The billed count, summed over pause_turn rounds; it can exceed
+		// the searches that came back with results.
+		billed := usage.WebSearchRequests()
+		result.Message.Usage.WebSearches = &billed
+	}
 	return result, searches, nil
 }
 

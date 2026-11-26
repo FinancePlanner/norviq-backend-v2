@@ -96,6 +96,23 @@ func statusLabel(err error) string {
 	return "transport"
 }
 
+// ErrorClass is a short, log-safe class for a failed call, from
+// statusLabel: "200_no_usable_output", "402_out_of_credits", "401_auth" or
+// "403_auth", "429_rate_limited", another status code, or Vapor's label for
+// a canceled context. Anything else is "error". It never carries the
+// error's text.
+func ErrorClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	// statusLabel's catch-all is "transport", which would also name errors
+	// that never reached a provider.
+	if label := statusLabel(err); label != "transport" {
+		return label
+	}
+	return "error"
+}
+
 func errNoResult() error {
 	return httpx.Abort(http.StatusBadGateway, "AI service returned no result.")
 }

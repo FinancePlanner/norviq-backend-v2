@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -538,5 +539,30 @@ func (blockingHandler) ServeHTTP(_ http.ResponseWriter, r *http.Request) {
 	select {
 	case <-r.Context().Done():
 	case <-time.After(2 * time.Second):
+	}
+}
+
+// ErrorClass is log-safe: a class, never the error's own text.
+func TestErrorClass(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&UpstreamError{Status: 429}, "429_rate_limited"},
+		{&UpstreamError{Status: 402}, "402_out_of_credits"},
+		{&UpstreamError{Status: 401}, "401_auth"},
+		{&UpstreamError{Status: 503}, "503"},
+		{&UnusableResponseError{Model: "m"}, "200_no_usable_output"},
+		{fmt.Errorf("rung: %w", ctx.Err()), "cancelled"}, //nolint:misspell // Vapor's log label
+		{errors.New("provider said: secret detail"), "error"},
+	} {
+		if got := ErrorClass(c.err); got != c.want {
+			t.Errorf("ErrorClass(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+	if got := ErrorClass(nil); got != "" {
+		t.Errorf("ErrorClass(nil) = %q", got)
 	}
 }

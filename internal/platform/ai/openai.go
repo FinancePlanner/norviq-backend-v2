@@ -216,6 +216,7 @@ func completeResumingTruncation(
 				ToolCalls:        next.Message.ToolCalls,
 				ReasoningDetails: next.Message.ReasoningDetails,
 				Reasoning:        next.Message.Reasoning,
+				Usage:            result.Message.Usage.plus(next.Message.Usage),
 			},
 			FinishReason: next.FinishReason,
 		}
@@ -351,6 +352,10 @@ func (c *OpenAIClient) completion(ctx context.Context, messages []Message, tools
 	)
 	if choice.Message.HasNoUsableOutput() {
 		logger.Warn(fmt.Sprintf("ai_completion_empty finish_reason=%s model=%s", finishReason, responseModel))
+	}
+	if u := decoded.Usage; u != nil {
+		// No search count: OpenRouter's `:online` does not report one.
+		choice.Message.Usage = &Usage{InputTokens: intOr(u.PromptTokens, 0), OutputTokens: intOr(u.CompletionTokens, 0)}
 	}
 	return Completion(choice), nil
 }

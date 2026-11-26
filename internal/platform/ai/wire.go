@@ -33,6 +33,35 @@ type Message struct {
 	Images []Image `json:"-"`
 	// Documents (PDFs) ride the same way, for one request only.
 	Documents []Document `json:"-"`
+	// Usage is what the reply cost, set by the adapter that made the call.
+	// It never marshals and is nil on a message built any other way.
+	Usage *Usage `json:"-"`
+}
+
+// Usage is a reply's token count and, from an adapter that ran a search
+// tool, its billed searches. WebSearches stays nil when no search tool was
+// in the request or the provider reports no count.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	WebSearches  *int
+}
+
+// plus is the cost of two requests that made one reply. Either may be nil;
+// WebSearches stays nil unless one of them reported a count.
+func (u *Usage) plus(other *Usage) *Usage {
+	if u == nil {
+		return other
+	}
+	if other == nil {
+		return u
+	}
+	sum := Usage{InputTokens: u.InputTokens + other.InputTokens, OutputTokens: u.OutputTokens + other.OutputTokens}
+	if u.WebSearches != nil || other.WebSearches != nil {
+		n := intOr(u.WebSearches, 0) + intOr(other.WebSearches, 0)
+		sum.WebSearches = &n
+	}
+	return &sum
 }
 
 // Document is one attached file (a PDF): raw bytes, the media type the

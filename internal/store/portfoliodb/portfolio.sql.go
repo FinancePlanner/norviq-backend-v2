@@ -133,6 +133,7 @@ SELECT id FROM broker_connections
 WHERE user_id = $1
   AND provider = 'ibkr'
   AND status IN ('connected', 'error')
+  AND external_id IS DISTINCT FROM 'sod-web-service'
   AND (
     portfolio_list_id = $2::uuid
     OR (portfolio_list_id IS NULL AND $3::boolean)

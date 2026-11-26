@@ -747,6 +747,26 @@ func TestConfirmRetiredSODPortfolioAllowed(t *testing.T) {
 	h.settledAs(action, statusCompleted)
 }
 
+// An old pod can still write a connected SOD row after the migration; it must
+// not make the portfolio broker-synced.
+func TestConfirmConnectedSODRowDoesNotBlock(t *testing.T) {
+	h := newTradesHarness(t)
+	stray := h.newList("Stray SOD")
+	h.exec(`INSERT INTO broker_connections (id, user_id, provider, external_id, status, portfolio_list_id, created_at)
+		VALUES ($1, $2, 'ibkr', 'sod-web-service', 'connected', $3, now())`, uuid.New(), h.user, stray)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	row := reviewed("AAPL", "buy", 1, 100, "2024-03-10")
+
+	r := h.confirm(action, map[string]any{"portfolioListId": stray.String(), "trades": []any{row}})
+	if r.Status != 200 {
+		t.Fatalf("confirm = %d %s", r.Status, r.Body)
+	}
+	if h.shares(stray, "AAPL") != 1 {
+		t.Fatal("trade not booked")
+	}
+	h.settledAs(action, statusCompleted)
+}
+
 func TestProposalOnSyncedPortfolioSaysSo(t *testing.T) {
 	h := newTradesHarness(t)
 	synced := h.newList("Synced")

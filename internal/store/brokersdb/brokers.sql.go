@@ -399,6 +399,7 @@ func (q *Queries) BuysInAccountsBetween(ctx context.Context, arg BuysInAccountsB
 
 const connectedConnections = `-- name: ConnectedConnections :many
 SELECT id, user_id, provider, external_id, access_token, refresh_token, expires_at, status, created_at, updated_at, display_name, status_detail, connected_at, last_synced_at, portfolio_list_id FROM broker_connections WHERE provider = $1 AND status = 'connected'
+  AND external_id IS DISTINCT FROM 'sod-web-service'
 `
 
 func (q *Queries) ConnectedConnections(ctx context.Context, provider string) ([]BrokerConnection, error) {

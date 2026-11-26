@@ -727,6 +727,26 @@ func TestConfirmSyncedPortfolioRefused(t *testing.T) {
 	h.settledAs(action, statusCompleted)
 }
 
+// The retired Web Service feed left disconnected rows behind; they no longer
+// make a portfolio broker-synced.
+func TestConfirmRetiredSODPortfolioAllowed(t *testing.T) {
+	h := newTradesHarness(t)
+	retired := h.newList("Retired SOD")
+	h.exec(`INSERT INTO broker_connections (id, user_id, provider, external_id, status, portfolio_list_id, created_at)
+		VALUES ($1, $2, 'ibkr', 'sod-web-service', 'disconnected', $3, now())`, uuid.New(), h.user, retired)
+	action := h.card(modelArgs(modelRow("AAPL", "buy", 1, 100)))
+	row := reviewed("AAPL", "buy", 1, 100, "2024-03-10")
+
+	r := h.confirm(action, map[string]any{"portfolioListId": retired.String(), "trades": []any{row}})
+	if r.Status != 200 {
+		t.Fatalf("confirm = %d %s", r.Status, r.Body)
+	}
+	if h.shares(retired, "AAPL") != 1 {
+		t.Fatal("trade not booked on the retired SOD portfolio")
+	}
+	h.settledAs(action, statusCompleted)
+}
+
 func TestProposalOnSyncedPortfolioSaysSo(t *testing.T) {
 	h := newTradesHarness(t)
 	synced := h.newList("Synced")

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/server"
 	"norviq-api/internal/testutil"
 
@@ -126,31 +127,42 @@ func TestNormalizeProvider(t *testing.T) {
 	}
 }
 
-func TestConnectCredentialsAndModeConflict(t *testing.T) {
-	h := newHarness(t, map[string]string{"OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
-	userID, tok := h.user(t)
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": " ", "queryId": "q"}),
-		http.StatusBadRequest, "IBKR Web Service token is required.")
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": "t", "queryId": ""}),
-		http.StatusBadRequest, "IBKR Web Service query ID is required.")
-
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": " tok ", "queryId": "qid"})
-	var conn ConnectionResponse
-	r.JSON(t, &conn)
-	if r.Status != http.StatusOK || conn.Status != "connected" || conn.DisplayName == nil || *conn.DisplayName != "IBKR Web Service" || conn.PortfolioListID == nil {
-		t.Fatalf("credentials = %d %s", r.Status, r.Body)
-	}
-	var access, external string
-	if err := h.app.Deps.DB.QueryRow(bg, `SELECT access_token, external_id FROM broker_connections WHERE user_id = $1`, userID).Scan(&access, &external); err != nil {
+// insertSODConnection seeds a retired Web Service connection the way the old
+// credentials route stored it: sealed token and query ID.
+func (h *harness) insertSODConnection(t *testing.T, userID uuid.UUID, token, queryID, status string) {
+	t.Helper()
+	access, err := h.svc.vault.Encrypt(token, crypto.ContextBroker)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(access, "nvq-enc:") || external != sodWebServiceMarker {
-		t.Fatalf("stored access=%q external=%q", access, external)
+	refresh, err := h.svc.vault.Encrypt(queryID, crypto.ContextBroker)
+	if err != nil {
+		t.Fatal(err)
 	}
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, external_id, display_name, status, access_token, refresh_token, created_at, updated_at)
+		VALUES ($1, $2, 'ibkr', $3, 'IBKR Web Service', $4, $5, $6, now(), now())`,
+		uuid.New(), userID, sodWebServiceMarker, status, access, refresh)
+}
 
-	// A gateway callback now conflicts with the Web Service connection.
+func TestSODCredentialsRetired(t *testing.T) {
+	h := newHarness(t, nil)
+	_, tok := h.user(t)
+	for _, body := range []map[string]string{{"token": " tok ", "queryId": "qid"}, {"token": " ", "queryId": ""}} {
+		expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, body), http.StatusGone, sodRetired)
+	}
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections`); n != 0 {
+		t.Fatalf("broker_connections = %d, want none", n)
+	}
+}
+
+func TestConnectModeConflictWithExistingSODConnection(t *testing.T) {
+	h := newHarness(t, map[string]string{"OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	userID, tok := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+
+	// A gateway callback conflicts with a Web Service connection.
 	start := h.startConnect(t, tok)
-	r = h.raw(t, http.MethodGet, start, "", "", nil, nil)
+	r := h.raw(t, http.MethodGet, start, "", "", nil, nil)
 	loc := r.Header.Get("Location")
 	if r.Status != http.StatusSeeOther || !strings.HasPrefix(loc, "norviq://brokers?broker=ibkr&status=error&error=Disconnect%20the%20existing%20IBKR%20Web%20Service%20connection") {
 		t.Fatalf("conflict redirect = %d %q", r.Status, loc)
@@ -328,6 +340,30 @@ func TestOAuthCallbackUsesTokenResponse(t *testing.T) {
 	}
 }
 
+func TestSODSyncRetired(t *testing.T) {
+	var requests int
+	sod := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer sod.Close()
+	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
+	userID, tok := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusGone, sodRetired)
+	var status string
+	var detail *string
+	if err := h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "connected" || detail != nil {
+		t.Fatalf("row changed: %s %v", status, detail)
+	}
+	if requests != 0 {
+		t.Fatalf("SOD stub got %d requests", requests)
+	}
+}
+
+// The SOD client and parser stay for the statement import; the sync itself is
+// no longer reachable from a route, so it is driven directly.
 func TestSODSync(t *testing.T) {
 	var reply string
 	var gotQuery url.Values
@@ -337,15 +373,17 @@ func TestSODSync(t *testing.T) {
 	}))
 	defer sod.Close()
 	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
-	userID, tok := h.user(t)
-	h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": "tok", "queryId": "qid"})
+	userID, _ := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+	c, err := h.svc.find(bg, h.svc.db, "ibkr", userID)
+	if err != nil || c == nil {
+		t.Fatalf("find = %v, %v", c, err)
+	}
 
 	reply = readFixture(t, "flex-style-sample.csv")
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil)
-	var sync SyncResponse
-	r.JSON(t, &sync)
-	if r.Status != http.StatusOK || sync.Status != "completed" || gotQuery.Get("t") != "tok" || gotQuery.Get("s") != "norviq -ws" {
-		t.Fatalf("sync = %d %s (query %v)", r.Status, r.Body, gotQuery)
+	sync, err := h.svc.sodSync(bg, c)
+	if err != nil || sync.Status != "completed" || gotQuery.Get("t") != "tok" || gotQuery.Get("s") != "norviq -ws" {
+		t.Fatalf("sync = %+v, %v (query %v)", sync, err, gotQuery)
 	}
 	rd := gotQuery.Get("rd")
 	var detail string
@@ -356,7 +394,9 @@ func TestSODSync(t *testing.T) {
 	}
 
 	reply = "1052"
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusUnauthorized, "IBKR token or query ID is invalid.")
+	if _, err := h.svc.sodSync(bg, c); err == nil {
+		t.Fatal("sodSync accepted error code 1052")
+	}
 	var status string
 	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail)
 	if status != "error" || detail != "IBKR token or query ID is invalid." {
@@ -556,22 +596,26 @@ func TestSODTransportErrorRedactsCredentials(t *testing.T) {
 	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
 	userID, tok := h.user(t)
 	const secretToken, secretQuery = "LEAKCHECKTOKEN123", "LEAKCHECKQID9"
-	h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": secretToken, "queryId": secretQuery})
-
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil)
-	if r.Status < 500 {
-		t.Fatalf("sync = %d %s, want a 5xx transport failure", r.Status, r.Body)
+	h.insertSODConnection(t, userID, secretToken, secretQuery, "connected")
+	c, err := h.svc.find(bg, h.svc.db, "ibkr", userID)
+	if err != nil || c == nil {
+		t.Fatalf("find = %v, %v", c, err)
 	}
-	var status, detail string
-	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail)
+
+	_, syncErr := h.svc.sodSync(bg, c)
+	if syncErr == nil {
+		t.Fatal("sodSync succeeded, want a transport failure")
+	}
+	var detail *string
+	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&detail)
 	list := h.app.Do(http.MethodGet, "/v1/brokers", tok, nil)
-	for where, s := range map[string]string{"status_detail": detail, "sync response": string(r.Body), "GET /v1/brokers": string(list.Body)} {
+	for where, s := range map[string]string{"status_detail": derefString(detail), "sync error": syncErr.Error(), "GET /v1/brokers": string(list.Body)} {
 		if strings.Contains(s, secretToken) || strings.Contains(s, secretQuery) {
 			t.Errorf("%s leaks SOD credentials: %q", where, s)
 		}
 	}
-	if status != "error" || !strings.Contains(detail, "/Reporting/IBRITService") {
-		t.Fatalf("connection = %s %q, want an error naming the endpoint", status, detail)
+	if !strings.Contains(syncErr.Error(), "/Reporting/IBRITService") {
+		t.Fatalf("error %q does not name the endpoint", syncErr)
 	}
 }
 
@@ -650,4 +694,11 @@ func TestTokenedSyncRefusedInOAuthModeWithoutConfig(t *testing.T) {
 	if n := h.gateway.requests(); n != 0 {
 		t.Fatalf("gateway requests = %d", n)
 	}
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

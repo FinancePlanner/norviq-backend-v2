@@ -73,13 +73,6 @@ type ConnectStartResponse struct {
 	ExpiresIn        int    `json:"expiresIn"`
 }
 
-// connectCredentialsRequest is StockPlanShared.BrokerConnectCredentialsRequest.
-type connectCredentialsRequest struct {
-	Token           string  `json:"token"`
-	QueryID         string  `json:"queryId"`
-	PortfolioListID *string `json:"portfolioListId"`
-}
-
 // Existing position kinds (CsvImportExistingPositionKind).
 const (
 	kindNone     = "none"

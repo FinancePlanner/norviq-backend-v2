@@ -153,20 +153,10 @@ func (h *handlers) startConnect(c *echo.Context) error {
 }
 
 func (h *handlers) connectCredentials(c *echo.Context) error {
-	s, err := auth.Require(c)
-	if err != nil {
+	if _, err := auth.Require(c); err != nil {
 		return err
 	}
-	var body connectCredentialsRequest
-	if err := swiftjson.DecodeRequest(c, &body); err != nil {
-		return err
-	}
-	resp, err := h.s.connectIBKRCredentials(c.Request().Context(), body.Token, body.QueryID, body.PortfolioListID, s.UserID)
-	if err != nil {
-		return err
-	}
-	achievementhooks.Schedule(s.UserID)
-	return httpx.OK(c, resp)
+	return h.s.connectIBKRCredentials()
 }
 
 func (h *handlers) disconnect(c *echo.Context) error {

@@ -599,9 +599,19 @@ func TestThanksgivingOpen(t *testing.T) {
 	at := time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
 	due := Due{TradingDate: "2026-11-26", Slot: SlotMorning}
 	today := func(symbol string) yahoochart.Quote { return usQuote(symbol, at.Add(-15*time.Minute)) }
+	// Context rows keep the 18 h rule, so ^TNX and Brent still carry
+	// Wednesday's session: its day range and volume must not ride along.
+	vol := int64(5000)
+	wednesday := func(symbol string) yahoochart.Quote {
+		q := usQuote(symbol, time.Date(2026, 11, 25, 19, 59, 0, 0, time.UTC))
+		q.DayLow, q.DayHigh, q.YearLow, q.YearHigh, q.Volume = ptrF(1.9), ptrF(2.1), ptrF(1), ptrF(5), &vol
+		return q
+	}
+	dax := today("^GDAXI")
+	dax.DayLow, dax.DayHigh = ptrF(1.9), ptrF(2.1)
 	provided := []yahoochart.Quote{
-		today("^GDAXI"), today("^FCHI"), today("NQ=F"), today("ES=F"), today("^N225"), today("^HSI"),
-		usQuote("^TNX", time.Date(2026, 11, 25, 19, 0, 0, 0, time.UTC)),
+		dax, today("^FCHI"), today("NQ=F"), today("ES=F"), today("^N225"), today("^HSI"),
+		wednesday("^TNX"), wednesday("BZ=F"),
 	}
 	kept, dropped := currentQuotes(provided, due)
 	sessions := sessionsFor(due.Slot, due.TradingDate)
@@ -613,12 +623,28 @@ func TestThanksgivingOpen(t *testing.T) {
 	if !reflect.DeepEqual(e.MarketSessions, want) {
 		t.Fatalf("sessions %+v", e.MarketSessions)
 	}
-	foundTNX := false
+	rows := map[string]EditionInstrument{}
 	for _, row := range e.Instruments {
-		foundTNX = foundTNX || row.Symbol == "^TNX"
+		rows[row.Symbol] = row
 	}
+	tnx, foundTNX := rows["^TNX"]
 	if !foundTNX {
-		t.Error("^TNX row dropped, the 18 h rule keeps it")
+		t.Fatal("^TNX row dropped, the 18 h rule keeps it")
+	}
+	if tnx.DayLow != nil || tnx.DayHigh != nil || tnx.Volume != nil {
+		t.Errorf("^TNX carries the previous session's day fields: %+v", tnx)
+	}
+	if tnx.YearLow == nil || tnx.YearHigh == nil {
+		t.Errorf("^TNX 52-week range is not session-bound: %+v", tnx)
+	}
+	if tnx.Session == nil || *tnx.Session != SessionClosed {
+		t.Errorf("^TNX session %v, want closed", tnx.Session)
+	}
+	if brent := rows["BZ=F"]; brent.Volume != nil || brent.DayLow != nil {
+		t.Errorf("BZ=F carries the previous session's day fields: %+v", brent)
+	}
+	if d := rows["^GDAXI"]; d.DayLow == nil || d.DayHigh == nil {
+		t.Errorf("same-day ^GDAXI keeps its day range: %+v", d)
 	}
 	for key, reason := range e.Quality.MissingReasons {
 		if reason == ReasonHoliday {
@@ -762,6 +788,13 @@ func TestInstrumentRangesDroppedWhenInconsistent(t *testing.T) {
 		t.Fatalf("year range must stay: %+v", row)
 	}
 
+	// last above the day range
+	q = base()
+	q.DayLow, q.DayHigh = ptrF(80), ptrF(95)
+	if row = rangeRow(t, q); row.DayLow != nil || row.DayHigh != nil {
+		t.Fatalf("last above the day range: %+v", row)
+	}
+
 	// low above high
 	q = base()
 	q.DayLow, q.DayHigh = ptrF(110), ptrF(90)
@@ -791,10 +824,34 @@ func TestInstrumentRangesDroppedWhenInconsistent(t *testing.T) {
 			t.Errorf("%s must be absent: %s", k, raw)
 		}
 	}
+	// An index's volume is opaque (and zero for EU indices): never shown.
 	vol := int64(8281)
 	q.Volume = &vol
-	if row = rangeRow(t, q); row.Volume == nil || *row.Volume != 8281 {
-		t.Fatalf("volume: %+v", row)
+	if row = rangeRow(t, q); row.Volume != nil {
+		t.Fatalf("index volume: %+v", row)
+	}
+	brent := eveningQuote("BZ=F", 100, 99)
+	brent.Volume = &vol
+	if row = rangeRow(t, brent); row.Volume == nil || *row.Volume != 8281 {
+		t.Fatalf("commodity volume: %+v", row)
+	}
+}
+
+// Volume is contracts traded: kept for futures and commodities only.
+func TestVolumeOnlyForFuturesAndCommodities(t *testing.T) {
+	vol := int64(3_465_619_000)
+	gspc := eveningQuote("^GSPC", 100, 99)
+	gspc.Volume = &vol
+	if r := rangeRow(t, gspc); r.Volume != nil {
+		t.Errorf("^GSPC volume: %+v", r)
+	}
+
+	at := time.Date(2026, 11, 20, 8, 25, 0, 0, time.UTC)
+	nq := usQuote("NQ=F", at.Add(-15*time.Minute))
+	nq.Volume = &vol
+	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotMorning}, []yahoochart.Quote{nq}, nil, nil, nil, "m", false, nil, at)
+	if len(e.Instruments) != 1 || e.Instruments[0].Volume == nil || *e.Instruments[0].Volume != vol {
+		t.Errorf("NQ=F volume: %+v", e.Instruments)
 	}
 }
 

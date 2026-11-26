@@ -160,7 +160,10 @@ func limitsFor(slot string) limits {
 type validatorOutput struct {
 	Greeting *string
 	Items    []Item
-	Dropped  int
+	// Dropped counts every rejected item; Ungrounded only those rejected
+	// because a figure was not in the data the model was given.
+	Dropped    int
+	Ungrounded int
 }
 
 // swiftCount is String.count, approximated by runes (grapheme clusters in
@@ -172,7 +175,7 @@ func swiftCount(s string) int { return utf8.RuneCountInString(s) }
 func validateSection(sec draftSection, slot, language string, grounded []float64, allowedSources map[string]bool) (validatorOutput, error) {
 	lim := limitsFor(slot)
 	kept := []Item{}
-	dropped := 0
+	dropped, ungrounded := 0, 0
 	for _, it := range sec.Items {
 		if len(kept) >= lim.maxItems {
 			break
@@ -190,6 +193,7 @@ func validateSection(sec draftSection, slot, language string, grounded []float64
 		}
 		if source == nil && !isGrounded(text, grounded) {
 			dropped++
+			ungrounded++
 			continue
 		}
 		raw := it.Tickers
@@ -208,7 +212,7 @@ func validateSection(sec draftSection, slot, language string, grounded []float64
 			greeting = &g
 		}
 	}
-	return validatorOutput{Greeting: greeting, Items: kept, Dropped: dropped}, nil
+	return validatorOutput{Greeting: greeting, Items: kept, Dropped: dropped, Ungrounded: ungrounded}, nil
 }
 
 // isGrounded is MarketBriefValidator.isGrounded: every checked number

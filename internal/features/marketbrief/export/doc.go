@@ -37,7 +37,7 @@ type Doc struct {
 	// stories. Empty in the evening, and the report then has no section.
 	Earnings []Story
 	// Written says how the narrative was written, one line each, e.g.
-	// "Written by claude-haiku-5-5 in 41 s". Empty for an edition saved
+	// "Written by claude-haiku-5-5 · generated in 41 s". Empty for an edition saved
 	// before its provenance was recorded.
 	Written []string
 }

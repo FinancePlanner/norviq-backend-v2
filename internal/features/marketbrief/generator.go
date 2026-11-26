@@ -274,8 +274,10 @@ func (g *LLMGenerator) attempt(
 			return GeneratedBrief{}, err
 		}
 		if out.Dropped > 0 {
-			dropped[language] = out.Dropped
-			g.Logger.Info("market_brief_items_dropped", "language", language, "dropped", out.Dropped)
+			g.Logger.Info("market_brief_items_dropped", "language", language, "dropped", out.Dropped, "ungrounded", out.Ungrounded)
+		}
+		if out.Ungrounded > 0 {
+			dropped[language] = out.Ungrounded
 		}
 		tradingDate, slot, ga := due.TradingDate, due.Slot, generatedAt
 		responses = append(responses, Response{

@@ -78,8 +78,9 @@ type EditionProvenance struct {
 	// WebSearches is the winning attempt's billed searches, when its
 	// provider reports a count.
 	WebSearches *int `json:"webSearches,omitempty"`
-	// DroppedItems counts, per language, the drafted items the validator
-	// rejected; only languages with at least one are listed.
+	// DroppedItems counts, per language, the drafted items removed because
+	// a figure was not in the data the model was given; only languages with
+	// at least one are listed.
 	DroppedItems map[string]int `json:"droppedItems,omitempty"`
 	DurationMs   int64          `json:"durationMs"`
 }
@@ -124,13 +125,17 @@ type EditionInstrument struct {
 	Source    string   `json:"source"`
 	// DayLow and DayHigh are the session's range, YearLow and YearHigh the
 	// 52-week range, rounded to Precision. Each pair is kept only when both
-	// ends are present, low <= high and Last lies inside, so a range from
-	// another session (a holiday) is never shown against this row.
+	// ends are present, low <= high and Last lies inside. The day range is
+	// also kept only for a quote from the edition's trading date, so a
+	// context row still carrying the previous session (^TNX on an Open, or
+	// on a US holiday) never shows that session's range.
 	DayLow   *float64 `json:"dayLow,omitempty"`
 	DayHigh  *float64 `json:"dayHigh,omitempty"`
 	YearLow  *float64 `json:"yearLow,omitempty"`
 	YearHigh *float64 `json:"yearHigh,omitempty"`
-	// Volume is set only when the provider reported more than zero.
+	// Volume is contracts traded, for futures and commodities only, from a
+	// quote on the edition's trading date; nil otherwise or when the
+	// provider reported none.
 	Volume *int64 `json:"volume,omitempty"`
 	// Session is the row's own market status on the trading date, "closed"
 	// or "early_close"; nil on a regular day or when no calendar is sourced.
@@ -415,9 +420,16 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 			bps := changeBps(q)
 			row.ChangeBps = &bps
 		}
-		row.DayLow, row.DayHigh = consistentRange(q.DayLow, q.DayHigh, q.Price, meta.precision)
+		// The day fields belong to the quote's session: shown only when that
+		// is the edition's trading date. The 52-week range is not
+		// session-bound.
+		if LocalDate(q.MarketTime) == due.TradingDate {
+			row.DayLow, row.DayHigh = consistentRange(q.DayLow, q.DayHigh, q.Price, meta.precision)
+			if meta.assetClass == AssetFuture || meta.assetClass == AssetCommodity {
+				row.Volume = q.Volume
+			}
+		}
 		row.YearLow, row.YearHigh = consistentRange(q.YearLow, q.YearHigh, q.Price, meta.precision)
-		row.Volume = q.Volume
 		if status, ok := sessionStatus[marketOf(in.Symbol)]; ok {
 			row.Session = &status
 		}

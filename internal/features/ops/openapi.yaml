@@ -15722,7 +15722,7 @@ components:
             webSearches: { type: integer, minimum: 0, description: 'Billed web searches of the winning attempt; absent when its provider reports no count' }
             droppedItems:
               type: object
-              description: Drafted items the validator rejected, per language; only languages with at least one are listed.
+              description: Drafted items removed because a figure was not in the data the model was given, per language; only languages with at least one are listed.
               additionalProperties: { type: integer, minimum: 1 }
               example: { en: 1 }
             durationMs: { type: integer, format: int64, minimum: 0, description: Time from the start of generation to the winning draft }
@@ -15746,11 +15746,11 @@ components:
         changeBps: { type: number, nullable: true, description: 'Yields only: the move in basis points, one decimal' }
         asOf: { type: string, format: date-time }
         source: { type: string, example: yahoo }
-        dayLow: { type: number, description: 'Session low, rounded to precision. Present only with dayHigh, and only when last lies inside the range.' }
+        dayLow: { type: number, description: 'Session low, rounded to precision. Present only for a quote from the edition''s trading date, only with dayHigh, and only when last lies inside the range.' }
         dayHigh: { type: number, description: 'Session high; see dayLow.' }
         yearLow: { type: number, description: '52-week low, rounded to precision. Present only with yearHigh, and only when last lies inside the range.' }
         yearHigh: { type: number, description: '52-week high; see yearLow.' }
-        volume: { type: integer, format: int64, description: 'Session volume; absent when the provider reports none (indices).' }
+        volume: { type: integer, format: int64, description: 'Contracts traded, futures and commodities only. Present only for a quote from the edition''s trading date and when the provider reports more than zero.' }
         session: { type: string, enum: [closed, early_close], description: 'The row''s own market status on the trading date (see marketSessions); absent on a regular day.' }
       required: [symbol, name, assetClass, region, unit, precision, last, previousClose, change, changePct, asOf, source]
     MarketBriefEditionSeries:

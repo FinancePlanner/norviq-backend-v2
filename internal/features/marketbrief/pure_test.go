@@ -785,6 +785,45 @@ func TestProvenanceWebSearchCount(t *testing.T) {
 	}
 }
 
+// draftWithEnglishExtras is a valid draft whose English section also
+// carries the given extra items, first.
+func draftWithEnglishExtras(extras ...string) string {
+	items := make([]string, 5)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"kind":"highlight","text":"Line %d of the brief.","tickers":[],"sourceUrl":null}`, i+1)
+	}
+	list := strings.Join(items, ",")
+	en := strings.Join(append(extras, list), ",")
+	return `{"en":{"greeting":"Good morning,","items":[` + en + `]},"pt-PT":{"greeting":"Bom dia,","items":[` + list + `]}}`
+}
+
+// DroppedItems counts only the items removed for a figure the model was
+// not given; an over-long item is rejected too, but not counted there.
+func TestProvenanceCountsOnlyUngroundedItems(t *testing.T) {
+	overLong := `{"kind":"highlight","text":"` + strings.Repeat("a", 401) + `","tickers":[],"sourceUrl":null}`
+	ungrounded := `{"kind":"highlight","text":"Brent trades near $104.50.","tickers":[],"sourceUrl":null}`
+	for name, tc := range map[string]struct {
+		draft string
+		want  map[string]int
+	}{
+		"over-long and ungrounded": {draftWithEnglishExtras(overLong, ungrounded), map[string]int{"en": 1}},
+		"over-long only":           {draftWithEnglishExtras(overLong), nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			claude := &scriptedClient{replies: []any{tc.draft}}
+			g := newGenerator([]yahoochart.Quote{daxQuote}, &scriptedClient{}, &scriptedClient{})
+			g.ClaudeWebClient, g.ClaudeWebModel = claude, claudeWebLabel
+			brief, err := g.Generate(context.Background(), testDue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := provenanceOf(t, brief).DroppedItems; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("dropped %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // A draft the generator rejects is classed by why, in marketbrief's own
 // terms; anything unrecognized is plain "error".
 func TestProvenanceClassifiesDraftFailures(t *testing.T) {

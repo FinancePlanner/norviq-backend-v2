@@ -2130,7 +2130,7 @@ paths:
       tags: [MarketData]
       summary: Latest market brief (morning pre-market or evening recap)
       description: >-
-        Shared, non-personalised brief generated twice per weekday (08:15 and
+        Shared, non-personalised brief generated twice per weekday (08:25 and
         22:30 Europe/Lisbon). Index rows come from market data; the text is
         model-written and any unsourced number in it was checked against those
         rows. Without `slot` and `date` this returns the newest brief for the
@@ -2296,7 +2296,7 @@ paths:
       tags: [Notifications]
       summary: Turn the market brief push on or off
       description: >-
-        One push per brief (08:15 and 22:30 Europe/Lisbon, weekdays), written
+        One push per brief (08:25 and 22:30 Europe/Lisbon, weekdays), written
         from the brief in `language`.
       security:
         - bearerAuth: []
@@ -15661,6 +15661,18 @@ components:
             missing:
               type: array
               items: { type: string, example: 'series:^DJI' }
+            missingReasons:
+              type: object
+              description: |
+                Why each `missing` entry is missing, keyed exactly like `missing`
+                (absent when nothing is missing). One of `unavailable` (the provider
+                returned no fresh quote), `pre_open` (a European open row stamped
+                before 08:00 Lisbon), `previous_session` (a row from another Lisbon
+                date) or `no_bars` (no intraday bars in the window, or no quote to
+                anchor them).
+              additionalProperties:
+                type: string
+                enum: [unavailable, pre_open, previous_session, no_bars]
           required: [degraded, model, missing]
       required: [schemaVersion, id, kind, revision, status, publishedAt, timezone, instruments, series, quality]
     MarketBriefEditionInstrument:

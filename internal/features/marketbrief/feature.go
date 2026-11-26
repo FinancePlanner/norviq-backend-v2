@@ -1,5 +1,5 @@
 // Package marketbrief ports Vapor's MarketBrief module: the two shared daily
-// briefs (08:15 and 22:30 Lisbon), GET /v1/market/brief, the push opt-in at
+// briefs (08:25 and 22:30 Lisbon), GET /v1/market/brief, the push opt-in at
 // /v1/market/brief/notifications, and MarketBriefJob.
 package marketbrief
 

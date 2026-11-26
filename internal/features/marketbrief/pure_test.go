@@ -131,16 +131,17 @@ func checkDue(t *testing.T, iso string, want *Due) {
 }
 
 func TestSchedule(t *testing.T) {
-	// Winter (WET): morning opens at 08:15 UTC.
-	checkDue(t, "2026-03-27T08:14:00Z", nil)
-	checkDue(t, "2026-03-27T08:15:00Z", &Due{"2026-03-27", SlotMorning})
-	// Summer (WEST): morning opens at 07:15 UTC.
-	checkDue(t, "2026-03-30T07:14:00Z", nil)
-	checkDue(t, "2026-03-30T07:15:00Z", &Due{"2026-03-30", SlotMorning})
+	// Winter (WET): morning opens at 08:25 UTC.
+	checkDue(t, "2026-03-27T08:15:00Z", nil)
+	checkDue(t, "2026-03-27T08:25:00Z", &Due{"2026-03-27", SlotMorning})
+	// Summer (WEST): morning opens at 07:25 UTC.
+	checkDue(t, "2026-07-01T07:15:00Z", nil)
+	checkDue(t, "2026-07-01T07:25:00Z", &Due{"2026-07-01", SlotMorning})
 	// Either side of the October change.
 	checkDue(t, "2026-10-23T21:29:00Z", nil)
 	checkDue(t, "2026-10-23T21:30:00Z", &Due{"2026-10-23", SlotEvening})
-	checkDue(t, "2026-10-26T08:15:00Z", &Due{"2026-10-26", SlotMorning})
+	checkDue(t, "2026-10-26T08:15:00Z", nil)
+	checkDue(t, "2026-10-26T08:25:00Z", &Due{"2026-10-26", SlotMorning})
 	// A late boot still catches the morning; noon closes it.
 	checkDue(t, "2026-10-07T10:59:00Z", &Due{"2026-10-07", SlotMorning})
 	checkDue(t, "2026-10-07T11:00:00Z", nil)
@@ -537,7 +538,8 @@ func TestCurrentQuotesOnly(t *testing.T) {
 		{Symbol: "^N225", Price: 1, PreviousClose: 1, MarketTime: at(t, "2026-04-02T06:30:00Z")},
 	}
 	var kept []string
-	for _, q := range currentQuotes(quotes, goodFriday) {
+	keptQuotes, _ := currentQuotes(quotes, goodFriday)
+	for _, q := range keptQuotes {
 		kept = append(kept, q.Symbol)
 	}
 	if !reflect.DeepEqual(kept, []string{"^STOXX50E", "NQ=F", "^N225"}) {

@@ -152,7 +152,7 @@ func catalogTitle(groupID, tone, language string) string {
 // is a window, not an instant, so a pod that boots late (or a tick that
 // fails) still produces the brief on a later tick.
 const (
-	morningStart = 8*60 + 15
+	morningStart = 8*60 + 25
 	morningEnd   = 12 * 60
 	eveningStart = 22*60 + 30
 	eveningEnd   = 24 * 60

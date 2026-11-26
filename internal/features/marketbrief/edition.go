@@ -95,6 +95,14 @@ type EditionSeries struct {
 	Source   string       `json:"source"`
 }
 
+// Reasons a requested quote or series is in EditionQuality.Missing.
+const (
+	ReasonUnavailable     = "unavailable"
+	ReasonPreOpen         = "pre_open"
+	ReasonPreviousSession = "previous_session"
+	ReasonNoBars          = "no_bars"
+)
+
 // EditionQuality says how complete the edition is, so readers can be told.
 type EditionQuality struct {
 	Degraded bool `json:"degraded"`
@@ -103,28 +111,93 @@ type EditionQuality struct {
 	// Missing lists the requested instruments and series that did not
 	// arrive, as "quote:^NDX" or "series:^NDX".
 	Missing []string `json:"missing"`
+	// MissingReasons says why, keyed exactly like Missing: "unavailable",
+	// "pre_open", "previous_session" or "no_bars".
+	MissingReasons map[string]string `json:"missingReasons,omitempty"`
 }
 
 // instrumentMeta classifies each catalog symbol.
 type instrumentMeta struct {
 	assetClass, region, unit string
 	precision                int
+	// exchangeTZ is the IANA zone of the instrument's session, set only for
+	// the charted symbols.
+	exchangeTZ string
+	// closeHour and closeMinute are the regular close in exchangeTZ, set only
+	// for the charted cash indices: their series end there when Yahoo does
+	// not report the session's end.
+	closeHour, closeMinute int
 }
 
 var instrumentMetas = map[string]instrumentMeta{
-	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2},
-	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2},
-	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2},
-	"NQ=F":      {AssetFuture, "US", UnitPoints, 2},
-	"ES=F":      {AssetFuture, "US", UnitPoints, 2},
-	"^NDX":      {AssetIndex, "US", UnitPoints, 2},
-	"^GSPC":     {AssetIndex, "US", UnitPoints, 2},
-	"^DJI":      {AssetIndex, "US", UnitPoints, 2},
-	"^N225":     {AssetIndex, "JP", UnitPoints, 2},
-	"^HSI":      {AssetIndex, "HK", UnitPoints, 2},
-	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2},
+	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30},
+	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0},
+	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0},
+	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
+	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
+	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0},
+	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0},
+	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0},
 	// ^TNX's price is the yield in percent (4.91 means 4.91%).
-	"^TNX": {AssetRate, "US", UnitPercent, 3},
+	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0},
+}
+
+// futuresReopen is the hour (New York) CME equity futures reopen each day.
+const futuresReopen = 18
+
+// maxSeriesGap is how far the last intraday bar may trail the series' end
+// (the quote, or a cash index's session close) before the series is
+// dropped: a chart that stops hours short of the scorecard would end
+// somewhere the scorecard does not.
+const maxSeriesGap = 30 * time.Minute
+
+// seriesWindowStart is where a symbol's chart begins for a brief made at
+// `at`: a future's session opens at the latest 18:00 New York strictly
+// before `at`, a cash index's at midnight of `at`'s date in its own zone.
+// False for a symbol that is not charted.
+func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
+	meta := instrumentMetas[symbol]
+	if meta.exchangeTZ == "" {
+		return time.Time{}, false
+	}
+	loc, err := time.LoadLocation(meta.exchangeTZ)
+	if err != nil {
+		return time.Time{}, false
+	}
+	local := at.In(loc)
+	y, m, d := local.Date()
+	if meta.assetClass != AssetFuture {
+		return time.Date(y, m, d, 0, 0, 0, 0, loc), true
+	}
+	start := time.Date(y, m, d, futuresReopen, 0, 0, 0, loc)
+	if !start.Before(at) {
+		start = time.Date(y, m, d-1, futuresReopen, 0, 0, 0, loc)
+	}
+	return start, true
+}
+
+// seriesSessionEnd is where a cash index's chart ends at the latest: Yahoo's
+// reported end of the regular session when it is set, after the first bar
+// and not after `at` (it knows half days), otherwise the static close on the
+// first bar's exchange-local date. False for a future, whose chart ends at
+// its quote, and for a symbol that is not charted.
+func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Time, bool) {
+	meta := instrumentMetas[symbol]
+	if meta.assetClass != AssetIndex || meta.exchangeTZ == "" {
+		return time.Time{}, false
+	}
+	if !reported.IsZero() && reported.After(firstBar) && !reported.After(at) {
+		return reported, true
+	}
+	loc, err := time.LoadLocation(meta.exchangeTZ)
+	if err != nil {
+		return time.Time{}, false
+	}
+	y, m, d := firstBar.In(loc).Date()
+	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true
 }
 
 // seriesSymbols are the instruments charted intraday, lead index first.
@@ -165,8 +238,8 @@ func isYield(symbol string) bool { return instrumentMetas[symbol].assetClass == 
 func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousClose)*100, 1) }
 
 // buildEdition assembles the edition from the quotes the brief was written
-// from and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
+// from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -194,7 +267,11 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 	for _, in := range catalogInstruments(due.Slot) {
 		q, ok := bySymbol[in.Symbol]
 		if !ok {
-			e.Quality.Missing = append(e.Quality.Missing, "quote:"+in.Symbol)
+			reason := dropped[in.Symbol]
+			if reason == "" {
+				reason = ReasonUnavailable
+			}
+			e.missing("quote:"+in.Symbol, reason)
 			continue
 		}
 		meta := instrumentMetas[in.Symbol]
@@ -229,7 +306,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 	for _, symbol := range seriesSymbols(due.Slot) {
 		d := series[symbol]
 		if d == nil || len(d.Points) == 0 {
-			e.Quality.Missing = append(e.Quality.Missing, "series:"+symbol)
+			e.missing("series:"+symbol, ReasonNoBars)
 			continue
 		}
 		precision := instrumentMetas[symbol].precision
@@ -243,6 +320,15 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 		})
 	}
 	return e
+}
+
+// missing records one instrument or series that did not arrive, with why.
+func (e *Edition) missing(key, reason string) {
+	e.Quality.Missing = append(e.Quality.Missing, key)
+	if e.Quality.MissingReasons == nil {
+		e.Quality.MissingReasons = map[string]string{}
+	}
+	e.Quality.MissingReasons[key] = reason
 }
 
 // editionJSON is the stored form of an edition; nil stays SQL NULL.

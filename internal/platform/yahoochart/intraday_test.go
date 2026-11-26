@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -60,15 +63,89 @@ func TestIntradayAgainstStub(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL+"/chart/", srv.Client(), slog.New(slog.DiscardHandler))
-	fresh := time.Unix(1795531200, 0).Add(2 * time.Hour)
-	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, fresh); d == nil || len(d.Points) != 2 {
-		t.Fatalf("fresh: %+v", d)
+	from, to := time.Unix(1795530000, 0), time.Unix(1795531200, 0).Add(time.Hour)
+	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, from, to); d == nil || len(d.Points) != 2 {
+		t.Fatalf("window: %+v", d)
 	}
-	if query != "/chart/%5ENDX?range=1d&interval=5m" {
+	if query != "/chart/%5ENDX?period1=1795530000&period2=1795534800&interval=5m" {
 		t.Fatalf("query %q", query)
 	}
-	stale := time.Unix(1795531200, 0).Add(MaxAge + time.Minute)
-	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, stale); d != nil {
-		t.Fatalf("stale series kept: %+v", d)
+	// A bar after `to` is dropped: Yahoo may return bars past period2.
+	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, from, time.Unix(1795530600, 0).Add(time.Minute)); d == nil ||
+		len(d.Points) != 1 || !d.Points[0].Time.Equal(time.Unix(1795530600, 0)) {
+		t.Fatalf("bar after the window kept: %+v", d)
+	}
+	// No bar inside [from, to].
+	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, to, to.Add(time.Hour)); d != nil {
+		t.Fatalf("bars outside the window kept: %+v", d)
+	}
+}
+
+func TestIntradayRequestsTheWindow(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/intraday_1d_5m_NQ_thanksgiving.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2026, 11, 25, 23, 0, 0, 0, time.UTC) // 18:00 ET
+	to := time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
+	var q url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q = r.URL.Query()
+		_, _ = w.Write(fixture)
+	}))
+	defer srv.Close()
+	c := New(srv.URL+"/chart/", srv.Client(), slog.New(slog.DiscardHandler))
+	d := c.Intraday(context.Background(), "NQ=F", IntradayInterval, from, to)
+	if q.Get("period1") != strconv.FormatInt(from.Unix(), 10) || q.Get("period2") != strconv.FormatInt(to.Unix(), 10) ||
+		q.Get("interval") != "5m" || q.Has("range") {
+		t.Fatalf("query %v", q)
+	}
+	if d == nil || len(d.Points) < 60 || len(d.Points) > 80 {
+		t.Fatalf("points %v", d)
+	}
+	for _, p := range d.Points {
+		if p.Time.Before(from) || p.Time.After(to) {
+			t.Fatalf("bar %v outside the window", p.Time)
+		}
+	}
+	if !d.Points[0].Time.Equal(from) {
+		t.Fatalf("first bar %v", d.Points[0].Time)
+	}
+}
+
+func TestParseIntradayReadsSessionEnd(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/intraday_1d_5m_NQ_thanksgiving.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseIntraday(fixture, IntradayInterval)
+	if err != nil || d == nil {
+		t.Fatalf("%v %v", d, err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	// meta.currentTradingPeriod.regular.end: 2026-11-25 23:59 ET.
+	if want := time.Date(2026, 11, 25, 23, 59, 0, 0, ny); !d.SessionEnd.Equal(want) {
+		t.Fatalf("session end %v, want %v", d.SessionEnd, want)
+	}
+	// Absent: zero.
+	if d, _ := ParseIntraday([]byte(intradayJSON), IntradayInterval); d == nil || !d.SessionEnd.IsZero() {
+		t.Fatalf("%+v", d)
+	}
+}
+
+// A real ^GSPC range=1d interval=5m response after the 25 Nov close: 79 bars,
+// 09:30..16:00 ET, regularMarketTime 16:32 ET.
+func TestParseIntradayCashSessionEnd(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/intraday_1d_5m_GSPC_close_2026-11-25.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseIntraday(fixture, IntradayInterval)
+	if err != nil || d == nil {
+		t.Fatalf("%v %v", d, err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	if want := time.Date(2026, 11, 25, 16, 0, 0, 0, ny); !d.SessionEnd.Equal(want) {
+		t.Fatalf("session end %v, want %v", d.SessionEnd.In(ny), want)
 	}
 }

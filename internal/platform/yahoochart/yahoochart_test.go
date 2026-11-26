@@ -6,6 +6,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -27,6 +29,87 @@ func TestParseQuoteReadsMeta(t *testing.T) {
 	}
 	if math.Abs(q.ChangePercent()-(-1.1846)) >= 0.001 {
 		t.Fatalf("change %v", q.ChangePercent())
+	}
+}
+
+func TestParseQuoteBaselineFromFulldayChange(t *testing.T) {
+	for _, c := range []struct {
+		file      string
+		prev, pct float64
+	}{
+		{"quote_1d_HSI.json", 21966.01, 1.19},   // chartPreviousClose 22219.7 was 2 sessions back
+		{"quote_1d_TWII.json", 38195.43, 2.50},  // chartPreviousClose 40122.4
+		{"quote_1d_BZ.json", 90.64, 0.72},       // agrees with chartPreviousClose
+		{"quote_1d_GDAXI.json", 24702.13, 1.88}, // agrees with chartPreviousClose
+	} {
+		raw, err := os.ReadFile(filepath.Join("testdata", c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := ParseQuote(raw)
+		if err != nil || q == nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		if math.Abs(q.PreviousClose-c.prev) > 0.01 || math.Abs(q.ChangePercent()-c.pct) > 0.005 {
+			t.Errorf("%s: prev %v pct %v", c.file, q.PreviousClose, q.ChangePercent())
+		}
+	}
+}
+
+func TestParseQuoteFallsBackWithoutFulldayChange(t *testing.T) {
+	// Only fulldayChange (and, in the last case, chartPreviousClose) differs.
+	envelope := func(extra string) []byte {
+		return []byte(`{"chart":{"result":[{"meta":{"symbol":"X","regularMarketPrice":100,"regularMarketTime":1` + extra + `}}]}}`)
+	}
+	for _, c := range []struct {
+		name  string
+		extra string
+		prev  float64 // 0 means a nil quote
+	}{
+		{"absent", `,"chartPreviousClose":98`, 98},
+		{"zero", `,"chartPreviousClose":98,"fulldayChange":0`, 98},
+		{"null", `,"chartPreviousClose":98,"fulldayChange":null`, 98},
+		{"baseline would be non-positive", `,"chartPreviousClose":98,"fulldayChange":100`, 98},
+		{"baseline would be negative", `,"chartPreviousClose":98,"fulldayChange":150`, 98},
+		{"used when present", `,"chartPreviousClose":98,"fulldayChange":4`, 96},
+		{"falling day", `,"chartPreviousClose":98,"fulldayChange":-4`, 104},
+		{"no fulldayChange and no chartPreviousClose", ``, 0},
+		{"zero fulldayChange and no chartPreviousClose", `,"fulldayChange":0`, 0},
+	} {
+		q, err := ParseQuote(envelope(c.extra))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if c.prev == 0 {
+			if q != nil {
+				t.Errorf("%s: want nil quote, got %+v", c.name, q)
+			}
+			continue
+		}
+		if q == nil || q.PreviousClose != c.prev {
+			t.Errorf("%s: got %+v, want prev %v", c.name, q, c.prev)
+		}
+	}
+}
+
+// fulldayChange is relative to fulldayPrice, which can differ from
+// regularMarketPrice; the quote still shows regularMarketPrice.
+func TestParseQuoteBaselineFromFulldayPrice(t *testing.T) {
+	q, err := ParseQuote([]byte(`{"chart":{"result":[{"meta":{"symbol":"X","regularMarketPrice":111,"fulldayPrice":110,` +
+		`"fulldayChange":10,"chartPreviousClose":98,"regularMarketTime":1}}]}}`))
+	if err != nil || q == nil {
+		t.Fatalf("%v %v", q, err)
+	}
+	if q.PreviousClose != 100 || q.Price != 111 {
+		t.Fatalf("prev %v price %v, want 100 and 111", q.PreviousClose, q.Price)
+	}
+	// A fulldayPrice that is not positive is ignored.
+	for _, fp := range []string{`0`, `null`, `-5`} {
+		q, err := ParseQuote([]byte(`{"chart":{"result":[{"meta":{"symbol":"X","regularMarketPrice":111,"fulldayPrice":` + fp +
+			`,"fulldayChange":10,"chartPreviousClose":98,"regularMarketTime":1}}]}}`))
+		if err != nil || q == nil || q.PreviousClose != 101 {
+			t.Errorf("fulldayPrice %s: %+v %v", fp, q, err)
+		}
 	}
 }
 

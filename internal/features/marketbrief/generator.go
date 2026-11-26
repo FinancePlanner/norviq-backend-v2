@@ -74,14 +74,14 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	for _, in := range catalogInstruments(due.Slot) {
 		symbols = append(symbols, in.Symbol)
 	}
-	quotes := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
+	quotes, dropped := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
-	series := g.series(ctx, due, at)
+	series := g.series(ctx, due, at, quotes)
 	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
 		if err != nil {
 			return b, err
 		}
-		e := buildEdition(due, quotes, series, b.Model, b.Responses[0].Degraded, at)
+		e := buildEdition(due, quotes, dropped, series, b.Model, b.Responses[0].Degraded, at)
 		b.Edition = &e
 		return b, nil
 	}
@@ -108,20 +108,77 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	return withEdition(g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at))
 }
 
-// series fetches the intraday bars charted for the slot. Bars from another
-// Lisbon day than the brief's are dropped: a holiday's stale session must
-// not be charted as today's.
-func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time) map[string]*yahoochart.Intraday {
+// series fetches the intraday bars charted for the slot: the symbol's own
+// session, up to now, ended on the scorecard's quote so the last point is
+// the number the scorecard shows. A future's series ends at the quote's
+// time. A cash index's ends at the earlier of the quote and the session
+// close: US closes are stamped after 16:00 ET, and after the close the
+// quote's price is the closing level. A symbol without a quote has no
+// baseline to chart against; one whose bars stop more than maxSeriesGap
+// short of that end (a holiday session, a stalled feed) is not charted.
+// Each skipped symbol is logged with why.
+func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time, quotes []yahoochart.Quote) map[string]*yahoochart.Intraday {
 	out := map[string]*yahoochart.Intraday{}
 	if g.Intraday == nil {
 		return out
 	}
+	logger := g.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	drop := func(symbol, reason string, args ...any) {
+		logger.Info("market_brief_series_dropped", append([]any{"symbol", symbol, "reason", reason}, args...)...)
+	}
+	bySymbol := map[string]yahoochart.Quote{}
+	for _, q := range quotes {
+		bySymbol[q.Symbol] = q
+	}
 	for _, symbol := range seriesSymbols(due.Slot) {
-		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, at)
-		if d == nil || LocalDate(d.Last().Time) != due.TradingDate {
+		q, ok := bySymbol[symbol]
+		if !ok {
+			drop(symbol, "no_quote")
 			continue
 		}
-		out[symbol] = d
+		start, hasWindow := seriesWindowStart(symbol, at)
+		if !hasWindow {
+			drop(symbol, "no_window")
+			continue
+		}
+		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, start, at)
+		var inWindow []yahoochart.Point
+		if d != nil {
+			for _, p := range d.Points {
+				if !p.Time.Before(start) {
+					inWindow = append(inWindow, p)
+				}
+			}
+		}
+		if len(inWindow) == 0 {
+			drop(symbol, "no_bars")
+			continue
+		}
+		anchor := q.MarketTime
+		if end, ok := seriesSessionEnd(symbol, d.SessionEnd, inWindow[0].Time, at); ok && end.Before(anchor) {
+			anchor = end
+		}
+		var kept []yahoochart.Point
+		for _, p := range inWindow {
+			if p.Time.Before(anchor) {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) == 0 {
+			drop(symbol, "no_bars")
+			continue
+		}
+		if gap := anchor.Sub(kept[len(kept)-1].Time); gap > maxSeriesGap {
+			drop(symbol, "gap", "gap", gap)
+			continue
+		}
+		kept = append(kept, yahoochart.Point{Time: anchor, Value: q.Price})
+		cut := *d
+		cut.Points = kept
+		out[symbol] = &cut
 	}
 	return out
 }
@@ -130,7 +187,7 @@ func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time) map[st
 // must be from the trading day, and European rows from after the open (on
 // Good Friday the DAX's last print is Thursday's close, inside the 18 h
 // window). Context symbols keep the provider's 18 h rule.
-func currentQuotes(quotes []yahoochart.Quote, due Due) []yahoochart.Quote {
+func currentQuotes(quotes []yahoochart.Quote, due Due) (kept []yahoochart.Quote, dropped map[string]string) {
 	rowSymbols, openSymbols := map[string]bool{}, map[string]bool{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -140,19 +197,21 @@ func currentQuotes(quotes []yahoochart.Quote, due Due) []yahoochart.Quote {
 			}
 		}
 	}
-	out := []yahoochart.Quote{}
+	kept, dropped = []yahoochart.Quote{}, map[string]string{}
 	for _, q := range quotes {
 		if rowSymbols[q.Symbol] {
 			if LocalDate(q.MarketTime) != due.TradingDate {
+				dropped[q.Symbol] = ReasonPreviousSession
 				continue
 			}
 			if openSymbols[q.Symbol] && LocalMinutes(q.MarketTime) < europeanOpen {
+				dropped[q.Symbol] = ReasonPreOpen
 				continue
 			}
 		}
-		out = append(out, q)
+		kept = append(kept, q)
 	}
-	return out
+	return kept, dropped
 }
 
 func (g *LLMGenerator) attempt(

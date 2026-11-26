@@ -387,7 +387,7 @@ func nonEmpty(parts ...string) []string {
 }
 
 // docChart is every series as percent from the previous close. The Open
-// charts only the futures: at 08:15 Lisbon Europe has traded for minutes, a
+// charts only the futures: at 08:25 Lisbon Europe has traded for minutes, a
 // sliver beside a night of futures.
 func docChart(e *Edition, open bool, lang string, str docStrings) *export.ChartData {
 	bySymbol := map[string]EditionInstrument{}

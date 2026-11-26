@@ -83,7 +83,7 @@ func TestBuildEdition(t *testing.T) {
 			{Time: eveningAt.Add(-90 * time.Minute), Value: 25029.334},
 		}},
 	}
-	e := buildEdition(due, quotes, series, "claude+web_search", false, eveningAt)
+	e := buildEdition(due, quotes, nil, series, "claude+web_search", false, eveningAt)
 	if e.ID != "MI-2026-11-20-C" || e.Kind != EditionKindClose || e.SchemaVersion != 2 || e.Status != "published" || e.Timezone != "Europe/Lisbon" {
 		t.Fatalf("%+v", e)
 	}
@@ -127,7 +127,7 @@ func TestBuildEdition(t *testing.T) {
 }
 
 func TestEditionRoundTripAndLegacy(t *testing.T) {
-	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{eveningQuote("^NDX", 2, 1)}, nil, "m", true, eveningAt)
+	e := buildEdition(Due{TradingDate: "2026-11-20", Slot: SlotEvening}, []yahoochart.Quote{eveningQuote("^NDX", 2, 1)}, nil, nil, "m", true, eveningAt)
 	e.Revision = 3
 	raw, err := editionJSON(&e)
 	if err != nil {
@@ -299,5 +299,46 @@ func TestIncludes(t *testing.T) {
 	}
 	if includes(nil, "edition") {
 		t.Fatal("nil")
+	}
+}
+
+func TestMissingReasons(t *testing.T) {
+	// The Open at 08:25Z (Lisbon is on WET in November).
+	at := time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
+	due := Due{TradingDate: "2026-11-26", Slot: SlotMorning}
+	usd := "USD"
+	q := func(symbol string, stamped time.Time) yahoochart.Quote {
+		return yahoochart.Quote{Symbol: symbol, Price: 2, PreviousClose: 1, MarketTime: stamped, Currency: &usd}
+	}
+	provided := []yahoochart.Quote{
+		q("^GDAXI", time.Date(2026, 11, 26, 7, 59, 0, 0, time.UTC)),
+		q("NQ=F", at.Add(-time.Minute)),
+		q("^STOXX50E", time.Date(2026, 11, 25, 16, 30, 0, 0, time.UTC)),
+	}
+	kept, dropped := currentQuotes(provided, due)
+	e := buildEdition(due, kept, dropped, nil, "m", false, at)
+	want := map[string]string{
+		"quote:^GDAXI":    ReasonPreOpen,
+		"quote:^FCHI":     ReasonUnavailable,
+		"quote:^STOXX50E": ReasonPreviousSession,
+		"series:NQ=F":     ReasonNoBars,
+	}
+	for key, reason := range want {
+		if e.Quality.MissingReasons[key] != reason {
+			t.Errorf("%s: %q, want %q (%v)", key, e.Quality.MissingReasons[key], reason, e.Quality.MissingReasons)
+		}
+	}
+	if len(e.Quality.MissingReasons) != len(e.Quality.Missing) {
+		t.Fatalf("%v vs %v", e.Quality.Missing, e.Quality.MissingReasons)
+	}
+	for _, key := range e.Quality.Missing {
+		if e.Quality.MissingReasons[key] == "" {
+			t.Errorf("%s has no reason", key)
+		}
+	}
+	// Nothing missing serializes as before.
+	raw, _ := json.Marshal(EditionQuality{Missing: []string{}})
+	if strings.Contains(string(raw), "missingReasons") {
+		t.Fatal(string(raw))
 	}
 }

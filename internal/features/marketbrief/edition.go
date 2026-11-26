@@ -95,6 +95,14 @@ type EditionSeries struct {
 	Source   string       `json:"source"`
 }
 
+// Reasons a requested quote or series is in EditionQuality.Missing.
+const (
+	ReasonUnavailable     = "unavailable"
+	ReasonPreOpen         = "pre_open"
+	ReasonPreviousSession = "previous_session"
+	ReasonNoBars          = "no_bars"
+)
+
 // EditionQuality says how complete the edition is, so readers can be told.
 type EditionQuality struct {
 	Degraded bool `json:"degraded"`
@@ -103,6 +111,9 @@ type EditionQuality struct {
 	// Missing lists the requested instruments and series that did not
 	// arrive, as "quote:^NDX" or "series:^NDX".
 	Missing []string `json:"missing"`
+	// MissingReasons says why, keyed exactly like Missing: "unavailable",
+	// "pre_open", "previous_session" or "no_bars".
+	MissingReasons map[string]string `json:"missingReasons,omitempty"`
 }
 
 // instrumentMeta classifies each catalog symbol.
@@ -201,8 +212,8 @@ func isYield(symbol string) bool { return instrumentMetas[symbol].assetClass == 
 func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousClose)*100, 1) }
 
 // buildEdition assembles the edition from the quotes the brief was written
-// from and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
+// from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -230,7 +241,11 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 	for _, in := range catalogInstruments(due.Slot) {
 		q, ok := bySymbol[in.Symbol]
 		if !ok {
-			e.Quality.Missing = append(e.Quality.Missing, "quote:"+in.Symbol)
+			reason := dropped[in.Symbol]
+			if reason == "" {
+				reason = ReasonUnavailable
+			}
+			e.missing("quote:"+in.Symbol, reason)
 			continue
 		}
 		meta := instrumentMetas[in.Symbol]
@@ -265,7 +280,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 	for _, symbol := range seriesSymbols(due.Slot) {
 		d := series[symbol]
 		if d == nil || len(d.Points) == 0 {
-			e.Quality.Missing = append(e.Quality.Missing, "series:"+symbol)
+			e.missing("series:"+symbol, ReasonNoBars)
 			continue
 		}
 		precision := instrumentMetas[symbol].precision
@@ -279,6 +294,15 @@ func buildEdition(due Due, quotes []yahoochart.Quote, series map[string]*yahooch
 		})
 	}
 	return e
+}
+
+// missing records one instrument or series that did not arrive, with why.
+func (e *Edition) missing(key, reason string) {
+	e.Quality.Missing = append(e.Quality.Missing, key)
+	if e.Quality.MissingReasons == nil {
+		e.Quality.MissingReasons = map[string]string{}
+	}
+	e.Quality.MissingReasons[key] = reason
 }
 
 // editionJSON is the stored form of an edition; nil stays SQL NULL.

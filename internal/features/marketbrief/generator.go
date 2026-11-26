@@ -74,14 +74,14 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 	for _, in := range catalogInstruments(due.Slot) {
 		symbols = append(symbols, in.Symbol)
 	}
-	quotes := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
+	quotes, dropped := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
 	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
 	series := g.series(ctx, due, at, quotes)
 	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
 		if err != nil {
 			return b, err
 		}
-		e := buildEdition(due, quotes, series, b.Model, b.Responses[0].Degraded, at)
+		e := buildEdition(due, quotes, dropped, series, b.Model, b.Responses[0].Degraded, at)
 		b.Edition = &e
 		return b, nil
 	}
@@ -153,7 +153,7 @@ func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time, quotes
 // must be from the trading day, and European rows from after the open (on
 // Good Friday the DAX's last print is Thursday's close, inside the 18 h
 // window). Context symbols keep the provider's 18 h rule.
-func currentQuotes(quotes []yahoochart.Quote, due Due) []yahoochart.Quote {
+func currentQuotes(quotes []yahoochart.Quote, due Due) (kept []yahoochart.Quote, dropped map[string]string) {
 	rowSymbols, openSymbols := map[string]bool{}, map[string]bool{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
@@ -163,19 +163,21 @@ func currentQuotes(quotes []yahoochart.Quote, due Due) []yahoochart.Quote {
 			}
 		}
 	}
-	out := []yahoochart.Quote{}
+	kept, dropped = []yahoochart.Quote{}, map[string]string{}
 	for _, q := range quotes {
 		if rowSymbols[q.Symbol] {
 			if LocalDate(q.MarketTime) != due.TradingDate {
+				dropped[q.Symbol] = ReasonPreviousSession
 				continue
 			}
 			if openSymbols[q.Symbol] && LocalMinutes(q.MarketTime) < europeanOpen {
+				dropped[q.Symbol] = ReasonPreOpen
 				continue
 			}
 		}
-		out = append(out, q)
+		kept = append(kept, q)
 	}
-	return out
+	return kept, dropped
 }
 
 func (g *LLMGenerator) attempt(

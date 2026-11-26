@@ -98,7 +98,17 @@ func RunECBTick(ctx context.Context, db fxdb.DBTX, client *http.Client, baseURL 
 		if err != nil {
 			var se *fx.StatusError
 			if errors.As(err, &se) && se.Status == http.StatusNotFound {
-				logger.Info("fx_ecb_daily unsupported currency", "currency", c)
+				// A 404 for a currency we already hold rows for means ECB
+				// dropped it: warn. One never published (e.g. TWD) is unsupported.
+				latest, known, kerr := knownCurrency(ctx, q, c, now)
+				if kerr != nil {
+					return inserted, kerr
+				}
+				if known {
+					logger.Warn("fx_ecb_daily no new fixings", "currency", c, "latest", latest, "status", se.Status)
+				} else {
+					logger.Info("fx_ecb_daily unsupported currency", "currency", c)
+				}
 			} else {
 				logger.Warn("fx_ecb_daily fetch failed", "currency", c, "error", err)
 			}
@@ -108,14 +118,12 @@ func RunECBTick(ctx context.Context, db fxdb.DBTX, client *http.Client, baseURL 
 			// A currency we already hold rows for that suddenly returns none
 			// means the fixings stopped (or the format changed): say so loudly.
 			// One never published at all (e.g. TWD) is just unsupported.
-			known, err := q.RatesOnOrBefore(ctx, fxdb.RatesOnOrBeforeParams{
-				Quotes: []string{c}, Day: now, FromDay: time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC),
-			})
+			latest, known, err := knownCurrency(ctx, q, c, now)
 			if err != nil {
 				return inserted, err
 			}
-			if len(known) > 0 {
-				logger.Warn("fx_ecb_daily no new fixings", "currency", c, "latest", known[0].Date)
+			if known {
+				logger.Warn("fx_ecb_daily no new fixings", "currency", c, "latest", latest)
 			} else {
 				logger.Info("fx_ecb_daily unsupported currency", "currency", c)
 			}
@@ -131,4 +139,19 @@ func RunECBTick(ctx context.Context, db fxdb.DBTX, client *http.Client, baseURL 
 	}
 	logger.Info("fx_ecb_daily tick", "currencies", len(currencies), "inserted", inserted)
 	return inserted, nil
+}
+
+// knownCurrency reports whether we already hold any ECB rate for c on or
+// before now, and the date of the latest one.
+func knownCurrency(ctx context.Context, q *fxdb.Queries, c string, now time.Time) (time.Time, bool, error) {
+	rows, err := q.RatesOnOrBefore(ctx, fxdb.RatesOnOrBeforeParams{
+		Quotes: []string{c}, Day: now, FromDay: time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if len(rows) == 0 {
+		return time.Time{}, false, nil
+	}
+	return rows[0].Date, true, nil
 }

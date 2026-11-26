@@ -3,6 +3,7 @@ package fxrates_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -176,6 +177,47 @@ func TestRunECBTickWarnsWhenKnownCurrencyStops(t *testing.T) {
 	}
 	if strings.Contains(out, "unsupported currency\" currency=TWD") {
 		t.Errorf("known currency logged as unsupported:\n%s", out)
+	}
+}
+
+func TestRunECBTickWarnsWhenKnownCurrencyGets404(t *testing.T) {
+	app := testutil.NewApp(t, nil)
+	seed(t, app, "DKK", "TWD")
+	if _, err := app.Deps.DB.Exec(context.Background(),
+		`INSERT INTO fx_daily_rates (id, date, base, quote, rate) VALUES ($1,'2026-11-20','EUR','DKK',7.46)`, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	stub := newECBStub(t)
+	// ECB answers 404 for both DKK (held) and TWD (never published).
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "D.DKK.") || strings.Contains(r.URL.Path, "D.TWD.") {
+			return &http.Response{StatusCode: 404, Body: http.NoBody, Header: http.Header{}}, nil
+		}
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	if _, err := fxrates.RunECBTick(context.Background(), app.Deps.DB, client, stub.srv.URL, now, logger); err != nil {
+		t.Fatal(err)
+	}
+	var warnDKK, infoTWD, infoDKK int
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("bad log line %q: %v", line, err)
+		}
+		switch {
+		case rec["level"] == "WARN" && rec["msg"] == "fx_ecb_daily no new fixings" && rec["currency"] == "DKK":
+			warnDKK++
+		case rec["level"] == "INFO" && rec["msg"] == "fx_ecb_daily unsupported currency" && rec["currency"] == "TWD":
+			infoTWD++
+		case rec["level"] == "INFO" && rec["msg"] == "fx_ecb_daily unsupported currency" && rec["currency"] == "DKK":
+			infoDKK++
+		}
+	}
+	if warnDKK != 1 || infoTWD != 1 || infoDKK != 0 {
+		t.Errorf("warnDKK=%d infoTWD=%d infoDKK=%d in:\n%s", warnDKK, infoTWD, infoDKK, buf.String())
 	}
 }
 

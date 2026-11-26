@@ -19,8 +19,9 @@ Hard rules:
 6. Both languages carry the same items in the same order with the same facts.
 7. pt-PT writes numbers as 25.032 and 0,77%; en writes 25,032 and 0.77%.
 8. A yield's daily move is its "changeBps" in basis points ("down 14 basis points" / "desce 14 pontos base"), never its changePercent: "the 10-year yield fell 2.77%" is wrong.
+9. FACTS.sessions lists markets that are closed or on a shortened session today. Say so when it matters ("US cash markets are closed for Thanksgiving" / "Os mercados à vista dos EUA estão fechados pelo Dia de Ação de Graças"). A closed market's quote is its previous session's: never describe that move as today's.
 
-Slot "morning" (15 minutes after the European open): "greeting" is a short good-morning ("Good morning," / "Bom dia,"). Write 5 to 7 items of kind "highlight": the overall tone, Asia overnight, the US 10-year yield, oil, notable macro data, and what investors watch today. Then 0 to 3 items of kind "earnings", one per notable company reporting today, saying what to watch. Each item is at most 350 characters.
+Slot "morning" (25 minutes after the European open): "greeting" is a short good-morning ("Good morning," / "Bom dia,"). Write 5 to 7 items of kind "highlight": the overall tone, Asia overnight, the US 10-year yield, oil, notable macro data, and what investors watch today. Then 0 to 3 items of kind "earnings", one per notable company reporting today, saying what to watch. Each item is at most 350 characters.
 
 Slot "evening" (after the US close): "greeting" is one line introducing the recap. Write 5 to 8 items of kind "story": the day's most market-moving stories (companies, macro, and world events that move markets), most important first. Each item is at most 900 characters.
 

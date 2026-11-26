@@ -188,6 +188,7 @@ type quoteMeta struct {
 	Symbol             *string  `json:"symbol"`
 	RegularMarketPrice *float64 `json:"regularMarketPrice"`
 	ChartPreviousClose *float64 `json:"chartPreviousClose"`
+	FulldayChange      *float64 `json:"fulldayChange"`
 	RegularMarketTime  *float64 `json:"regularMarketTime"`
 	Currency           *string  `json:"currency"`
 }
@@ -217,7 +218,16 @@ func decodeResults[T any](data []byte, symbolOf func(*T) *string) ([]T, error) {
 }
 
 // ParseQuote is YahooChartQuoteProvider.parse: nil (no error) for Yahoo's
-// error envelope or a meta without a positive price and previous close.
+// error envelope or a meta without a positive price, a usable baseline and a
+// time.
+//
+// The baseline is price - fulldayChange, Yahoo's own day change, when that is
+// present, non-zero and leaves a positive number. meta.chartPreviousClose is
+// not trusted on its own: on a range=1d chart it can be the close from two
+// sessions back (on 2026-11-26 Hang Seng reported 22219.7 against a true
+// previous close of 21966.01, so the brief showed +0.14% for a +1.19% day).
+// Yahoo zero-fills fields it lacks, so a zero fulldayChange means unknown,
+// not flat; it falls back to chartPreviousClose like an absent one.
 func ParseQuote(data []byte) (*Quote, error) {
 	type result struct {
 		Meta *quoteMeta `json:"meta"`
@@ -232,15 +242,22 @@ func ParseQuote(data []byte) (*Quote, error) {
 		return nil, err
 	}
 	m := results[0].Meta
-	if m.RegularMarketPrice == nil || !finitePositive(*m.RegularMarketPrice) ||
-		m.ChartPreviousClose == nil || !finitePositive(*m.ChartPreviousClose) ||
-		m.RegularMarketTime == nil {
+	if m.RegularMarketPrice == nil || !finitePositive(*m.RegularMarketPrice) || m.RegularMarketTime == nil {
+		return nil, nil
+	}
+	var prev float64
+	switch {
+	case m.FulldayChange != nil && *m.FulldayChange != 0 && finitePositive(*m.RegularMarketPrice-*m.FulldayChange):
+		prev = *m.RegularMarketPrice - *m.FulldayChange
+	case m.ChartPreviousClose != nil && finitePositive(*m.ChartPreviousClose):
+		prev = *m.ChartPreviousClose
+	default:
 		return nil, nil
 	}
 	return &Quote{
 		Symbol:        *m.Symbol,
 		Price:         *m.RegularMarketPrice,
-		PreviousClose: *m.ChartPreviousClose,
+		PreviousClose: prev,
 		MarketTime:    unixSeconds(*m.RegularMarketTime),
 		Currency:      nonEmpty(m.Currency),
 	}, nil

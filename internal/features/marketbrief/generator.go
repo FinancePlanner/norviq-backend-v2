@@ -75,13 +75,17 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 		symbols = append(symbols, in.Symbol)
 	}
 	quotes, dropped := currentQuotes(g.Quotes.Quotes(ctx, symbols, at), due)
-	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), at)
+	sessions := sessionsFor(due.Slot, due.TradingDate)
+	for _, market := range calendarExpiring(due.TradingDate) {
+		g.log().Warn("market_brief_calendar_expiring", "market", market, "date", due.TradingDate)
+	}
+	facts := buildFacts(due.Slot, due.TradingDate, quotes, g.headlines(ctx), g.calendar(ctx, due.TradingDate), sessions, at)
 	series := g.series(ctx, due, at, quotes)
 	withEdition := func(b GeneratedBrief, err error) (GeneratedBrief, error) {
 		if err != nil {
 			return b, err
 		}
-		e := buildEdition(due, quotes, dropped, series, b.Model, b.Responses[0].Degraded, at)
+		e := buildEdition(due, quotes, dropped, series, sessions, b.Model, b.Responses[0].Degraded, at)
 		b.Edition = &e
 		return b, nil
 	}
@@ -106,6 +110,14 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 		}
 	}
 	return withEdition(g.attempt(ctx, g.Fallback(), false, fallbackModelLabel, true, allowed, due, facts, quotes, at))
+}
+
+// log is the logger, discarding when none is set.
+func (g *LLMGenerator) log() *slog.Logger {
+	if g.Logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return g.Logger
 }
 
 // series fetches the intraday bars charted for the slot: the symbol's own

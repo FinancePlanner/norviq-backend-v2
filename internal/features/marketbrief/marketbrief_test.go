@@ -718,6 +718,69 @@ func TestLiveGeneratorAgainstStubs(t *testing.T) {
 	}
 }
 
+// On a holiday due date the writer is told which markets are closed.
+func TestLiveGeneratorTellsTheWriterAboutHolidays(t *testing.T) {
+	draft := `{"en":{"greeting":"Good morning,","items":[` +
+		`{"kind":"highlight","text":"Line one.","tickers":[],"sourceUrl":null},` +
+		`{"kind":"highlight","text":"Line two.","tickers":[],"sourceUrl":null},` +
+		`{"kind":"highlight","text":"Line three.","tickers":[],"sourceUrl":null}]},` +
+		`"pt-PT":{"greeting":"Bom dia,","items":[` +
+		`{"kind":"highlight","text":"Linha um.","tickers":[],"sourceUrl":null},` +
+		`{"kind":"highlight","text":"Linha dois.","tickers":[],"sourceUrl":null},` +
+		`{"kind":"highlight","text":"Linha três.","tickers":[],"sourceUrl":null}]}}`
+	var mu sync.Mutex
+	var anthropicRaw string
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"no credit"}}`))
+		case "/v1/messages":
+			anthropicRaw = string(raw)
+			text, _ := json.Marshal(draft)
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":` +
+				string(text) + `}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":10}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer llm.Close()
+	yahoo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer yahoo.Close()
+	for k, v := range map[string]string{
+		"AI_PROVIDER": "openrouter", "AI_API_KEY": "fake-key", "AI_BASE_URL": llm.URL + "/v1",
+		"AI_FALLBACK_PROVIDERS": "", "AI_PLAN_ROUTING_ENABLED": "false",
+		"ANTHROPIC_API_KEY": "fake-anthropic", "ANTHROPIC_FIRST": "true", "ANTHROPIC_BASE_URL": llm.URL,
+		"FINNHUB_API_KEY": "", "NEWS_PROVIDERS": "", "FEEDS_BASE_URL": "",
+	} {
+		t.Setenv(k, v)
+	}
+	h := newHarness(t, false)
+	g, err := marketbrief.NewLiveGenerator(h.Deps, marketbrief.Settings{YahooBaseURL: yahoo.URL + "/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.Now = func() time.Time { return time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC) }
+	brief, err := g.Generate(context.Background(), marketbrief.Due{TradingDate: "2026-11-26", Slot: marketbrief.SlotMorning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := brief.Edition; e == nil || len(e.MarketSessions) != 2 {
+		t.Fatalf("edition %+v", brief.Edition)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// The facts JSON sits inside the request's user message, so its quotes are escaped.
+	if !strings.Contains(anthropicRaw, `\"sessions\"`) || !strings.Contains(anthropicRaw, "Thanksgiving Day") {
+		t.Fatalf("request lacks the sessions: %s", anthropicRaw)
+	}
+}
+
 func TestLatestReaderHonoursTheEnabledFlag(t *testing.T) {
 	h := newHarness(t, false)
 	read, err := marketbrief.Feature{Settings: &marketbrief.Settings{}}.LatestReader(h.Deps)

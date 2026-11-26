@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +55,9 @@ type Edition struct {
 	Instruments    []EditionInstrument `json:"instruments"`
 	Series         []EditionSeries     `json:"series"`
 	Quality        EditionQuality      `json:"quality"`
+	// MarketSessions lists the markets closed or on a shortened session on
+	// the trading date; absent on a regular day.
+	MarketSessions []MarketSession `json:"marketSessions,omitempty"`
 }
 
 // EditionInstrument is one quote with its raw numbers and provenance.
@@ -101,6 +105,9 @@ const (
 	ReasonPreOpen         = "pre_open"
 	ReasonPreviousSession = "previous_session"
 	ReasonNoBars          = "no_bars"
+	// ReasonHoliday: the instrument's own market is closed on the trading
+	// date. It takes precedence over every other reason.
+	ReasonHoliday = "holiday"
 )
 
 // EditionQuality says how complete the edition is, so readers can be told.
@@ -112,7 +119,7 @@ type EditionQuality struct {
 	// arrive, as "quote:^NDX" or "series:^NDX".
 	Missing []string `json:"missing"`
 	// MissingReasons says why, keyed exactly like Missing: "unavailable",
-	// "pre_open", "previous_session" or "no_bars".
+	// "pre_open", "previous_session", "no_bars" or "holiday".
 	MissingReasons map[string]string `json:"missingReasons,omitempty"`
 }
 
@@ -189,7 +196,8 @@ func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
 // seriesSessionEnd is where a cash index's chart ends at the latest: Yahoo's
 // reported end of the regular session when it is set, after the first bar
 // and not after `at` (it knows half days), otherwise the static close on the
-// first bar's exchange-local date. False for a future, whose chart ends at
+// first bar's exchange-local date (the verified early-close time for that
+// date, when the calendar has one). False for a future, whose chart ends at
 // its quote, and for a symbol that is not charted.
 func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Time, bool) {
 	meta := instrumentMetas[symbol]
@@ -204,7 +212,34 @@ func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Tim
 		return time.Time{}, false
 	}
 	y, m, d := firstBar.In(loc).Date()
+	if ms, ok, _ := sessionOn(meta.market, firstBar.In(loc).Format(time.DateOnly)); ok && ms.CloseAt != nil {
+		if at, err := time.Parse(time.RFC3339, *ms.CloseAt); err == nil {
+			return at, true
+		}
+	}
 	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true
+}
+
+// sessionsFor lists, sorted by market, the non-regular sessions on day of the
+// markets the slot's instruments belong to: their own market and their
+// contextMarket. nil on a regular day.
+func sessionsFor(slot, day string) []MarketSession {
+	seen := map[string]bool{}
+	var out []MarketSession
+	for _, in := range catalogInstruments(slot) {
+		meta := instrumentMetas[in.Symbol]
+		for _, market := range []string{meta.market, meta.contextMarket} {
+			if market == "" || seen[market] {
+				continue
+			}
+			seen[market] = true
+			if s, ok, _ := sessionOn(market, day); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Market < out[j].Market })
+	return out
 }
 
 // seriesSymbols are the instruments charted intraday, lead index first.
@@ -246,12 +281,26 @@ func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousC
 
 // buildEdition assembles the edition from the quotes the brief was written
 // from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
 			groupOf[in.Symbol] = g.id
 		}
+	}
+	closed := map[string]bool{}
+	for _, s := range sessions {
+		if s.Status == SessionClosed {
+			closed[s.Market] = true
+		}
+	}
+	// reasonFor says why symbol's row is missing: its own market being shut
+	// beats every other cause.
+	reasonFor := func(symbol, otherwise string) string {
+		if closed[instrumentMetas[symbol].market] {
+			return ReasonHoliday
+		}
+		return otherwise
 	}
 	bySymbol := map[string]yahoochart.Quote{}
 	for _, q := range quotes {
@@ -270,6 +319,9 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		Series:        []EditionSeries{},
 		Quality:       EditionQuality{Degraded: degraded, Model: model, Missing: []string{}},
 	}
+	if len(sessions) > 0 {
+		e.MarketSessions = sessions
+	}
 	var asOf time.Time
 	for _, in := range catalogInstruments(due.Slot) {
 		q, ok := bySymbol[in.Symbol]
@@ -278,7 +330,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 			if reason == "" {
 				reason = ReasonUnavailable
 			}
-			e.missing("quote:"+in.Symbol, reason)
+			e.missing("quote:"+in.Symbol, reasonFor(in.Symbol, reason))
 			continue
 		}
 		meta := instrumentMetas[in.Symbol]
@@ -313,7 +365,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 	for _, symbol := range seriesSymbols(due.Slot) {
 		d := series[symbol]
 		if d == nil || len(d.Points) == 0 {
-			e.missing("series:"+symbol, ReasonNoBars)
+			e.missing("series:"+symbol, reasonFor(symbol, ReasonNoBars))
 			continue
 		}
 		precision := instrumentMetas[symbol].precision

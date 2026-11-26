@@ -18,8 +18,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"norviq-api/internal/httpx"
+	"norviq-api/internal/platform/crypto"
 	"norviq-api/internal/server"
 	"norviq-api/internal/testutil"
 
@@ -126,31 +128,42 @@ func TestNormalizeProvider(t *testing.T) {
 	}
 }
 
-func TestConnectCredentialsAndModeConflict(t *testing.T) {
-	h := newHarness(t, map[string]string{"OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
-	userID, tok := h.user(t)
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": " ", "queryId": "q"}),
-		http.StatusBadRequest, "IBKR Web Service token is required.")
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": "t", "queryId": ""}),
-		http.StatusBadRequest, "IBKR Web Service query ID is required.")
-
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": " tok ", "queryId": "qid"})
-	var conn ConnectionResponse
-	r.JSON(t, &conn)
-	if r.Status != http.StatusOK || conn.Status != "connected" || conn.DisplayName == nil || *conn.DisplayName != "IBKR Web Service" || conn.PortfolioListID == nil {
-		t.Fatalf("credentials = %d %s", r.Status, r.Body)
-	}
-	var access, external string
-	if err := h.app.Deps.DB.QueryRow(bg, `SELECT access_token, external_id FROM broker_connections WHERE user_id = $1`, userID).Scan(&access, &external); err != nil {
+// insertSODConnection seeds a retired Web Service connection the way the old
+// credentials route stored it: sealed token and query ID.
+func (h *harness) insertSODConnection(t *testing.T, userID uuid.UUID, token, queryID, status string) {
+	t.Helper()
+	access, err := h.svc.vault.Encrypt(token, crypto.ContextBroker)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(access, "nvq-enc:") || external != sodWebServiceMarker {
-		t.Fatalf("stored access=%q external=%q", access, external)
+	refresh, err := h.svc.vault.Encrypt(queryID, crypto.ContextBroker)
+	if err != nil {
+		t.Fatal(err)
 	}
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, external_id, display_name, status, access_token, refresh_token, created_at, updated_at)
+		VALUES ($1, $2, 'ibkr', $3, 'IBKR Web Service', $4, $5, $6, now(), now())`,
+		uuid.New(), userID, sodWebServiceMarker, status, access, refresh)
+}
 
-	// A gateway callback now conflicts with the Web Service connection.
+func TestSODCredentialsRetired(t *testing.T) {
+	h := newHarness(t, nil)
+	_, tok := h.user(t)
+	for _, body := range []map[string]string{{"token": " tok ", "queryId": "qid"}, {"token": " ", "queryId": ""}} {
+		expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, body), http.StatusGone, sodRetired)
+	}
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections`); n != 0 {
+		t.Fatalf("broker_connections = %d, want none", n)
+	}
+}
+
+func TestConnectModeConflictWithExistingSODConnection(t *testing.T) {
+	h := newHarness(t, map[string]string{"OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	userID, tok := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+
+	// A gateway callback conflicts with a Web Service connection.
 	start := h.startConnect(t, tok)
-	r = h.raw(t, http.MethodGet, start, "", "", nil, nil)
+	r := h.raw(t, http.MethodGet, start, "", "", nil, nil)
 	loc := r.Header.Get("Location")
 	if r.Status != http.StatusSeeOther || !strings.HasPrefix(loc, "norviq://brokers?broker=ibkr&status=error&error=Disconnect%20the%20existing%20IBKR%20Web%20Service%20connection") {
 		t.Fatalf("conflict redirect = %d %q", r.Status, loc)
@@ -287,6 +300,7 @@ func TestOAuthCallbackUsesTokenResponse(t *testing.T) {
 	defer token.Close()
 	h := newHarness(t, map[string]string{
 		"OAUTH_ALLOWED_REDIRECT_URIS":  "norviq://brokers",
+		"IBKR_CONNECT_MODE":            "", // auto + OAuth config -> oauth2
 		"IBKR_OAUTH_CLIENT_ID":         "client-1",
 		"IBKR_OAUTH_AUTHORIZATION_URL": "https://ibkr.test/authorize?old=1",
 		"IBKR_OAUTH_TOKEN_URL":         token.URL + "/token",
@@ -327,6 +341,30 @@ func TestOAuthCallbackUsesTokenResponse(t *testing.T) {
 	}
 }
 
+func TestSODSyncRetired(t *testing.T) {
+	var requests int
+	sod := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer sod.Close()
+	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
+	userID, tok := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusGone, sodRetired)
+	var status string
+	var detail *string
+	if err := h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "connected" || detail != nil {
+		t.Fatalf("row changed: %s %v", status, detail)
+	}
+	if requests != 0 {
+		t.Fatalf("SOD stub got %d requests", requests)
+	}
+}
+
+// The SOD client and parser stay for the statement import; the sync itself is
+// no longer reachable from a route, so it is driven directly.
 func TestSODSync(t *testing.T) {
 	var reply string
 	var gotQuery url.Values
@@ -336,15 +374,17 @@ func TestSODSync(t *testing.T) {
 	}))
 	defer sod.Close()
 	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
-	userID, tok := h.user(t)
-	h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": "tok", "queryId": "qid"})
+	userID, _ := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+	c, err := h.svc.find(bg, h.svc.db, "ibkr", userID)
+	if err != nil || c == nil {
+		t.Fatalf("find = %v, %v", c, err)
+	}
 
 	reply = readFixture(t, "flex-style-sample.csv")
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil)
-	var sync SyncResponse
-	r.JSON(t, &sync)
-	if r.Status != http.StatusOK || sync.Status != "completed" || gotQuery.Get("t") != "tok" || gotQuery.Get("s") != "norviq -ws" {
-		t.Fatalf("sync = %d %s (query %v)", r.Status, r.Body, gotQuery)
+	sync, err := h.svc.sodSync(bg, c)
+	if err != nil || sync.Status != "completed" || gotQuery.Get("t") != "tok" || gotQuery.Get("s") != "norviq -ws" {
+		t.Fatalf("sync = %+v, %v (query %v)", sync, err, gotQuery)
 	}
 	rd := gotQuery.Get("rd")
 	var detail string
@@ -355,7 +395,9 @@ func TestSODSync(t *testing.T) {
 	}
 
 	reply = "1052"
-	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusUnauthorized, "IBKR token or query ID is invalid.")
+	if _, err := h.svc.sodSync(bg, c); err == nil {
+		t.Fatal("sodSync accepted error code 1052")
+	}
 	var status string
 	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail)
 	if status != "error" || detail != "IBKR token or query ID is invalid." {
@@ -555,21 +597,193 @@ func TestSODTransportErrorRedactsCredentials(t *testing.T) {
 	h := newHarness(t, map[string]string{"IBKR_SOD_BASE_URL": sod.URL + "/Reporting/IBRITService"})
 	userID, tok := h.user(t)
 	const secretToken, secretQuery = "LEAKCHECKTOKEN123", "LEAKCHECKQID9"
-	h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/credentials", tok, map[string]string{"token": secretToken, "queryId": secretQuery})
-
-	r := h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil)
-	if r.Status < 500 {
-		t.Fatalf("sync = %d %s, want a 5xx transport failure", r.Status, r.Body)
+	h.insertSODConnection(t, userID, secretToken, secretQuery, "connected")
+	c, err := h.svc.find(bg, h.svc.db, "ibkr", userID)
+	if err != nil || c == nil {
+		t.Fatalf("find = %v, %v", c, err)
 	}
-	var status, detail string
-	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail)
+
+	_, syncErr := h.svc.sodSync(bg, c)
+	if syncErr == nil {
+		t.Fatal("sodSync succeeded, want a transport failure")
+	}
+	var detail *string
+	_ = h.app.Deps.DB.QueryRow(bg, `SELECT status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&detail)
 	list := h.app.Do(http.MethodGet, "/v1/brokers", tok, nil)
-	for where, s := range map[string]string{"status_detail": detail, "sync response": string(r.Body), "GET /v1/brokers": string(list.Body)} {
+	for where, s := range map[string]string{"status_detail": derefString(detail), "sync error": syncErr.Error(), "GET /v1/brokers": string(list.Body)} {
 		if strings.Contains(s, secretToken) || strings.Contains(s, secretQuery) {
 			t.Errorf("%s leaks SOD credentials: %q", where, s)
 		}
 	}
-	if status != "error" || !strings.Contains(detail, "/Reporting/IBRITService") {
-		t.Fatalf("connection = %s %q, want an error naming the endpoint", status, detail)
+	if !strings.Contains(syncErr.Error(), "/Reporting/IBRITService") {
+		t.Fatalf("error %q does not name the endpoint", syncErr)
 	}
+}
+
+// Without IBKR_CONNECT_MODE=gateway (and without OAuth) the shared gateway
+// account must never be bound to a caller.
+func TestLiveConnectStartRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "", "OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	_, tok := h.user(t)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/connect/start", tok, map[string]string{"redirectURI": "norviq://brokers"}),
+		http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_oauth_flows`); n != 0 {
+		t.Fatalf("flows = %d", n)
+	}
+}
+
+func TestLiveConnectCallbackRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "", "OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	userID, _ := h.user(t)
+	flowID := uuid.New()
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_oauth_flows (id, user_id, provider, state, redirect_uri, expires_at, created_at) VALUES ($1, $2, 'ibkr', $3, 'norviq://brokers', now() + interval '10 minutes', now())`,
+		flowID, userID, strings.Repeat("s", 32))
+	r := h.raw(t, http.MethodGet, "/v1/auth/brokers/ibkr/callback?flowId="+strings.ToUpper(flowID.String())+"&state="+strings.Repeat("s", 32), "", "", nil, nil)
+	loc := r.Header.Get("Location")
+	if r.Status != http.StatusSeeOther || !strings.HasPrefix(loc, "norviq://brokers?broker=ibkr&status=error&error=") || !strings.Contains(loc, "IBKR%20live%20connection%20is%20not%20available") {
+		t.Fatalf("callback = %d %q %s", r.Status, loc, r.Body)
+	}
+	// A refused callback must not write any connection row.
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections`); n != 0 {
+		t.Fatalf("connection rows = %d", n)
+	}
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+// A refused callback must leave a retired SOD row alone.
+func TestLiveConnectCallbackRefusedKeepsRetiredSODRow(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "", "OAUTH_ALLOWED_REDIRECT_URIS": "norviq://brokers"})
+	userID, _ := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "disconnected")
+	flowID := uuid.New()
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_oauth_flows (id, user_id, provider, state, redirect_uri, expires_at, created_at) VALUES ($1, $2, 'ibkr', $3, 'norviq://brokers', now() + interval '10 minutes', now())`,
+		flowID, userID, strings.Repeat("s", 32))
+	r := h.raw(t, http.MethodGet, "/v1/auth/brokers/ibkr/callback?flowId="+flowID.String()+"&state="+strings.Repeat("s", 32), "", "", nil, nil)
+	if r.Status != http.StatusSeeOther {
+		t.Fatalf("callback = %d %s", r.Status, r.Body)
+	}
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections WHERE status = 'disconnected' AND external_id = $1`, sodWebServiceMarker); n != 1 {
+		t.Fatalf("retired SOD rows still disconnected = %d", n)
+	}
+}
+
+// A connected SOD row (written by an old pod after the migration) is neither
+// picked up nor touched by the daily job.
+func TestScheduledSyncIgnoresConnectedSODRow(t *testing.T) {
+	h := newHarness(t, nil)
+	userID, _ := h.user(t)
+	h.insertSODConnection(t, userID, "tok", "qid", "connected")
+	h.svc.runScheduledSync(bg)
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM broker_connections WHERE status = 'connected' AND status_detail IS NULL AND external_id = $1`, sodWebServiceMarker); n != 1 {
+		t.Fatalf("SOD row was touched (unchanged rows = %d)", n)
+	}
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+// The daily job must retire legacy token-less gateway rows once, without
+// reaching the gateway, in disabled mode.
+func TestScheduledSyncLegacyTokenlessRowDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": ""})
+	userID, _ := h.user(t)
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', now(), now())`,
+		uuid.New(), userID)
+	check := func(label string) {
+		t.Helper()
+		var status string
+		var detail *string
+		if err := h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if status != "error" || derefString(detail) != liveConnectUnavailable {
+			t.Fatalf("%s: status=%q detail=%q", label, status, derefString(detail))
+		}
+		if n := h.gateway.requests(); n != 0 {
+			t.Fatalf("%s: gateway requests = %d", label, n)
+		}
+	}
+	h.svc.runScheduledSync(bg)
+	check("first run")
+	var updated1 time.Time
+	_ = h.app.Deps.DB.QueryRow(bg, `SELECT updated_at FROM broker_connections WHERE user_id = $1`, userID).Scan(&updated1)
+	h.svc.runScheduledSync(bg)
+	check("second run")
+	var updated2 time.Time
+	_ = h.app.Deps.DB.QueryRow(bg, `SELECT updated_at FROM broker_connections WHERE user_id = $1`, userID).Scan(&updated2)
+	if !updated1.Equal(updated2) {
+		t.Fatal("second run saved the row again")
+	}
+}
+
+// An unset connect mode must fail closed, not open.
+func TestEmptyConnectModeRefusesEverything(t *testing.T) {
+	s := &service{}
+	for name, err := range map[string]error{"requireLiveConnect": s.requireLiveConnect(), "requireSharedGateway": s.requireSharedGateway()} {
+		if err == nil || !strings.Contains(err.Error(), liveConnectUnavailable) {
+			t.Errorf("%s with empty mode = %v", name, err)
+		}
+	}
+}
+
+func TestTokenlessSyncRefusedWhenDisabled(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": ""})
+	userID, tok := h.user(t)
+	h.gateway.positions = []stubPosition{{ticker: "NOPE", quantity: 1, avgCost: 1}}
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+	if n := count(t, h.app.Deps.DB, `SELECT count(*) FROM stocks`); n != 0 {
+		t.Fatalf("stocks = %d", n)
+	}
+	var status string
+	var detail *string
+	if err := h.app.Deps.DB.QueryRow(bg, `SELECT status, status_detail FROM broker_connections WHERE user_id = $1`, userID).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "error" || derefString(detail) != liveConnectUnavailable {
+		t.Fatalf("status=%q detail=%q", status, derefString(detail))
+	}
+}
+
+// oauth2 mode must not fall back to the shared gateway for a token-less row.
+func TestTokenlessSyncRefusedInOAuthMode(t *testing.T) {
+	h := newHarness(t, map[string]string{
+		"IBKR_CONNECT_MODE":            "oauth2",
+		"IBKR_OAUTH_CLIENT_ID":         "client-1",
+		"IBKR_OAUTH_AUTHORIZATION_URL": "https://ibkr.test/authorize",
+		"IBKR_OAUTH_TOKEN_URL":         "https://ibkr.test/token",
+		"IBKR_OAUTH_API_BASE_URL":      "https://ibkr.test/api",
+	})
+	userID, tok := h.user(t)
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+// Explicit oauth2 without OAuth config must not route a tokened row to the gateway.
+func TestTokenedSyncRefusedInOAuthModeWithoutConfig(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "oauth2"})
+	userID, tok := h.user(t)
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, access_token, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', 'tok', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

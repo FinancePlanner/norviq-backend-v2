@@ -3,7 +3,6 @@ package brokers
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -50,6 +49,7 @@ type service struct {
 	gateway      gatewayClient // the configured gateway client
 	oauth        *oauthClient  // nil when IBKR OAuth2 is not configured
 	oauthOn      bool          // ibkrConnectMode == .oauth2
+	connectMode  string        // connectGateway, connectOAuth2 or connectDisabled
 	http         *http.Client
 	search       symbolSearch
 	env          func(string) string
@@ -241,8 +241,29 @@ func (s *service) resolveListForConnect(ctx context.Context, requested *string, 
 	return id, nil
 }
 
+// requireLiveConnect is the single place that refuses a live IBKR connection
+// when the shared gateway account has not been opted into (C12).
+func (s *service) requireLiveConnect() error {
+	if s.connectMode != connectGateway && s.connectMode != connectOAuth2 {
+		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
+	}
+	return nil
+}
+
+// requireSharedGateway refuses any use of the shared server-wide gateway
+// account unless IBKR_CONNECT_MODE=gateway was set explicitly (C12).
+func (s *service) requireSharedGateway() error {
+	if s.connectMode != connectGateway {
+		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
+	}
+	return nil
+}
+
 // startIBKRConnect is DefaultBrokersService.startIBKRConnect.
 func (s *service) startIBKRConnect(ctx context.Context, r *http.Request, redirectURI string, portfolioListID *string, userID uuid.UUID) (ConnectStartResponse, error) {
+	if err := s.requireLiveConnect(); err != nil {
+		return ConnectStartResponse{}, err
+	}
 	normalized, err := normalizeRedirectURI(redirectURI)
 	if err != nil {
 		return ConnectStartResponse{}, err
@@ -279,41 +300,14 @@ func (s *service) startIBKRConnect(ctx context.Context, r *http.Request, redirec
 	return ConnectStartResponse{FlowID: apijson.FormatUUID(flow.ID), AuthorizationURL: authorization, ExpiresIn: expiresIn}, nil
 }
 
-// connectIBKRCredentials stores IBKR Web Service (SOD) credentials.
-func (s *service) connectIBKRCredentials(ctx context.Context, token, queryID string, portfolioListID *string, userID uuid.UUID) (ConnectionResponse, error) {
-	token, queryID = portfolios.TrimSwift(token), portfolios.TrimSwift(queryID)
-	if token == "" {
-		return ConnectionResponse{}, httpx.BadRequest("IBKR Web Service token is required.")
-	}
-	if queryID == "" {
-		return ConnectionResponse{}, httpx.BadRequest("IBKR Web Service query ID is required.")
-	}
-	reason, err := s.modeConflict(ctx, modeSOD, userID)
-	if err != nil {
-		return ConnectionResponse{}, err
-	}
-	if reason != "" {
-		return ConnectionResponse{}, httpx.Conflict(reason)
-	}
-	listID, err := s.resolveListForConnect(ctx, portfolioListID, userID)
-	if err != nil {
-		return ConnectionResponse{}, err
-	}
-	now := s.now()
-	marker, display := sodWebServiceMarker, "IBKR Web Service"
-	detail := "Credentials saved. Statement sync runs after IBKR publishes the daily SOD files."
-	c, err := s.upsertConnection(ctx, "ibkr", userID, connectionUpdate{
-		externalID: &marker, displayName: &display, status: "connected", statusDetail: &detail,
-		connectedAt: &now, portfolioListID: listID, accessToken: &token, refreshToken: &queryID,
-	})
-	if err != nil {
-		return ConnectionResponse{}, err
-	}
-	c.ExternalID, c.ExpiresAt = &marker, nil
-	if err := s.save(ctx, s.db, c); err != nil {
-		return ConnectionResponse{}, err
-	}
-	return connectionResponse(c.BrokerConnection), nil
+// sodRetired is the reason both Web Service (SOD) entry points answer 410.
+const sodRetired = "The IBKR Web Service feed has been retired. Import a screenshot or statement instead."
+
+// connectIBKRCredentials used to store IBKR Web Service (SOD) credentials. The
+// feed wrote nothing yet still marked the portfolio as broker-synced, so it is
+// retired: nothing is validated or stored.
+func (s *service) connectIBKRCredentials() error {
+	return httpx.Abort(http.StatusGone, sodRetired)
 }
 
 // handleIBKRCallback is DefaultBrokersService.handleIBKRCallback: it
@@ -344,6 +338,10 @@ func (s *service) handleIBKRCallback(ctx context.Context, r *http.Request, flowI
 	if err := s.q().MarkFlowUsed(ctx, brokersdb.MarkFlowUsedParams{ID: flow.ID, Now: &now}); err != nil {
 		return "", err
 	}
+	// A refused callback writes no connection row at all.
+	if err := s.requireLiveConnect(); err != nil {
+		return brokerAppRedirectURL(flow.RedirectUri, "error", errorReason(err)), nil
+	}
 	reason, err := s.modeConflict(ctx, modeGateway, flow.UserID)
 	if err != nil {
 		return "", err
@@ -365,6 +363,9 @@ func (s *service) handleIBKRCallback(ctx context.Context, r *http.Request, flowI
 }
 
 func (s *service) connectFromCallback(ctx context.Context, r *http.Request, flow brokersdb.BrokerOauthFlow, code, providerError *string, now time.Time) error {
+	if err := s.requireLiveConnect(); err != nil {
+		return err
+	}
 	if providerError != nil {
 		if e := portfolios.TrimSwift(*providerError); e != "" {
 			return httpx.BadRequest("IBKR authorization failed: " + e)
@@ -373,6 +374,11 @@ func (s *service) connectFromCallback(ctx context.Context, r *http.Request, flow
 	callback, err := brokerCallbackURL(r)
 	if err != nil {
 		return err
+	}
+	if !s.oauthOn {
+		if err := s.requireSharedGateway(); err != nil {
+			return err
+		}
 	}
 	client := s.gateway
 	var access, refresh *string
@@ -428,20 +434,7 @@ func (s *service) syncIBKR(ctx context.Context, userID uuid.UUID) (SyncResponse,
 		return SyncResponse{}, errBrokerNotFound()
 	}
 	if c.ExternalID != nil && *c.ExternalID == sodWebServiceMarker {
-		resp, err := s.sodSync(ctx, c)
-		if err != nil {
-			// The SOD service stamps statusDetail on its own errors; stamp
-			// anything else here.
-			var sodErr *sodError
-			if c.StatusDetail == nil || !errors.As(err, &sodErr) {
-				c.Status = "error"
-				detail := errorReason(err)
-				c.StatusDetail = &detail
-				_ = s.save(ctx, s.db, c)
-			}
-			return SyncResponse{}, err
-		}
-		return resp, nil
+		return SyncResponse{}, httpx.Abort(http.StatusGone, sodRetired)
 	}
 	resp, err := func() (SyncResponse, error) {
 		client, err := s.syncDataClient(ctx, c)
@@ -464,11 +457,10 @@ func (s *service) syncIBKR(ctx context.Context, userID uuid.UUID) (SyncResponse,
 // the plain gateway, or the OAuth Web API with a refreshed (or re-sealed
 // legacy plaintext) token.
 func (s *service) syncDataClient(ctx context.Context, c *conn) (gatewayClient, error) {
-	if c.ExternalID != nil && *c.ExternalID == sodWebServiceMarker {
-		return gatewayClient{}, httpx.Abort(http.StatusServiceUnavailable,
-			"IBKR statement sync is not available yet. Your Web Service token and query ID are saved.")
-	}
 	if c.AccessToken == nil || portfolios.TrimSwift(*c.AccessToken) == "" || s.oauth == nil {
+		if err := s.requireSharedGateway(); err != nil {
+			return gatewayClient{}, err
+		}
 		return s.gateway, nil
 	}
 	storedAccess := portfolios.TrimSwift(*c.AccessToken)

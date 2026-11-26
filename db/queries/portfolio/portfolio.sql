@@ -175,6 +175,7 @@ SELECT id FROM broker_connections
 WHERE user_id = sqlc.arg(user_id)
   AND provider = 'ibkr'
   AND status IN ('connected', 'error')
+  AND external_id IS DISTINCT FROM 'sod-web-service'
   AND (
     portfolio_list_id = sqlc.arg(list_id)::uuid
     OR (portfolio_list_id IS NULL AND sqlc.arg(is_default_target)::boolean)

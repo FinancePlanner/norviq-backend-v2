@@ -12,7 +12,8 @@ ORDER BY updated_at DESC, created_at DESC;
 SELECT * FROM broker_connections WHERE user_id = $1 AND provider = $2 LIMIT 1;
 
 -- name: ConnectedConnections :many
-SELECT * FROM broker_connections WHERE provider = $1 AND status = 'connected';
+SELECT * FROM broker_connections WHERE provider = $1 AND status = 'connected'
+  AND external_id IS DISTINCT FROM 'sod-web-service';
 
 -- name: InsertConnection :one
 INSERT INTO broker_connections (

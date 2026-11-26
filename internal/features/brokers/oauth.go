@@ -23,17 +23,25 @@ import (
 const (
 	connectGateway = "gateway"
 	connectOAuth2  = "oauth2"
+	// connectDisabled is auto without OAuth config: the shared server-wide
+	// gateway account is never bound to a caller unless IBKR_CONNECT_MODE
+	// names the gateway explicitly.
+	connectDisabled = "disabled"
 )
 
-// connectModeFromEnv is IBKRConnectMode.fromEnvironment; Vapor fails startup
-// on an unknown IBKR_CONNECT_MODE, and so does Register.
+// liveConnectUnavailable is the reason a disabled live connection answers 503.
+const liveConnectUnavailable = "IBKR live connection is not available. Import a screenshot or statement instead."
+
+// connectModeFromEnv is IBKRConnectMode.fromEnvironment, except that auto
+// without OAuth config is disabled rather than gateway (C12); Vapor fails
+// startup on an unknown IBKR_CONNECT_MODE, and so does Register.
 func connectModeFromEnv(raw string, hasOAuth bool) (string, error) {
 	switch strings.ToLower(portfolios.TrimSwift(raw)) {
 	case "", "auto":
 		if hasOAuth {
 			return connectOAuth2, nil
 		}
-		return connectGateway, nil
+		return connectDisabled, nil
 	case "gateway", "client_portal", "client-portal":
 		return connectGateway, nil
 	case "oauth2", "oauth", "web_api", "web-api":

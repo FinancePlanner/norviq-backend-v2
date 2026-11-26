@@ -101,18 +101,17 @@ func (f Feature) service(d *server.Deps) (*service, error) {
 		currency = "USD"
 	}
 	s := &service{
-		db:      d.DB,
-		logger:  d.Logger,
-		vault:   vault,
-		gateway: gatewayClient{BaseURL: baseURL, DefaultCurrency: currency, HTTP: client, Sleep: sleep},
-		oauthOn: mode == connectOAuth2,
-
-		liveDisabled: mode == connectDisabled,
-		http:         client,
-		search:       f.Market,
-		env:          env,
-		now:          now,
-		sleep:        sleep,
+		db:          d.DB,
+		logger:      d.Logger,
+		vault:       vault,
+		gateway:     gatewayClient{BaseURL: baseURL, DefaultCurrency: currency, HTTP: client, Sleep: sleep},
+		oauthOn:     mode == connectOAuth2,
+		connectMode: mode,
+		http:        client,
+		search:      f.Market,
+		env:         env,
+		now:         now,
+		sleep:       sleep,
 
 		entitlements: f.Entitlements,
 		extractor:    f.Extractor,

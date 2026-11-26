@@ -50,7 +50,7 @@ type service struct {
 	gateway      gatewayClient // the configured gateway client
 	oauth        *oauthClient  // nil when IBKR OAuth2 is not configured
 	oauthOn      bool          // ibkrConnectMode == .oauth2
-	liveDisabled bool          // no OAuth and no explicit IBKR_CONNECT_MODE=gateway
+	connectMode  string        // connectGateway, connectOAuth2 or connectDisabled
 	http         *http.Client
 	search       symbolSearch
 	env          func(string) string
@@ -245,7 +245,16 @@ func (s *service) resolveListForConnect(ctx context.Context, requested *string, 
 // requireLiveConnect is the single place that refuses a live IBKR connection
 // when the shared gateway account has not been opted into (C12).
 func (s *service) requireLiveConnect() error {
-	if s.liveDisabled {
+	if s.connectMode == connectDisabled {
+		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
+	}
+	return nil
+}
+
+// requireSharedGateway refuses any use of the shared server-wide gateway
+// account unless IBKR_CONNECT_MODE=gateway was set explicitly (C12).
+func (s *service) requireSharedGateway() error {
+	if s.connectMode != connectGateway {
 		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
 	}
 	return nil
@@ -485,7 +494,7 @@ func (s *service) syncDataClient(ctx context.Context, c *conn) (gatewayClient, e
 			"IBKR statement sync is not available yet. Your Web Service token and query ID are saved.")
 	}
 	if c.AccessToken == nil || portfolios.TrimSwift(*c.AccessToken) == "" || s.oauth == nil {
-		if err := s.requireLiveConnect(); err != nil {
+		if err := s.requireSharedGateway(); err != nil {
 			return gatewayClient{}, err
 		}
 		return s.gateway, nil

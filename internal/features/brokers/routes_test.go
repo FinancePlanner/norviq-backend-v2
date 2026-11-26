@@ -621,3 +621,33 @@ func TestTokenlessSyncRefusedWhenDisabled(t *testing.T) {
 		t.Fatalf("stocks = %d", n)
 	}
 }
+
+// oauth2 mode must not fall back to the shared gateway for a token-less row.
+func TestTokenlessSyncRefusedInOAuthMode(t *testing.T) {
+	h := newHarness(t, map[string]string{
+		"IBKR_CONNECT_MODE":            "oauth2",
+		"IBKR_OAUTH_CLIENT_ID":         "client-1",
+		"IBKR_OAUTH_AUTHORIZATION_URL": "https://ibkr.test/authorize",
+		"IBKR_OAUTH_TOKEN_URL":         "https://ibkr.test/token",
+		"IBKR_OAUTH_API_BASE_URL":      "https://ibkr.test/api",
+	})
+	userID, tok := h.user(t)
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}
+
+// Explicit oauth2 without OAuth config must not route a tokened row to the gateway.
+func TestTokenedSyncRefusedInOAuthModeWithoutConfig(t *testing.T) {
+	h := newHarness(t, map[string]string{"IBKR_CONNECT_MODE": "oauth2"})
+	userID, tok := h.user(t)
+	mustExec(t, h.app.Deps.DB, `INSERT INTO broker_connections (id, user_id, provider, status, external_id, access_token, created_at, updated_at) VALUES ($1, $2, 'ibkr', 'connected', 'U123', 'tok', now(), now())`,
+		uuid.New(), userID)
+	expectError(t, h.app.Do(http.MethodPost, "/v1/brokers/ibkr/sync", tok, nil), http.StatusServiceUnavailable, liveConnectUnavailable)
+	if n := h.gateway.requests(); n != 0 {
+		t.Fatalf("gateway requests = %d", n)
+	}
+}

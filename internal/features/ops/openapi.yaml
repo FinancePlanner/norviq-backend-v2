@@ -15707,6 +15707,12 @@ components:
         changeBps: { type: number, nullable: true, description: 'Yields only: the move in basis points, one decimal' }
         asOf: { type: string, format: date-time }
         source: { type: string, example: yahoo }
+        dayLow: { type: number, description: 'Session low, rounded to precision. Present only with dayHigh, and only when last lies inside the range.' }
+        dayHigh: { type: number, description: 'Session high; see dayLow.' }
+        yearLow: { type: number, description: '52-week low, rounded to precision. Present only with yearHigh, and only when last lies inside the range.' }
+        yearHigh: { type: number, description: '52-week high; see yearLow.' }
+        volume: { type: integer, format: int64, description: 'Session volume; absent when the provider reports none (indices).' }
+        session: { type: string, enum: [closed, early_close], description: 'The row''s own market status on the trading date (see marketSessions); absent on a regular day.' }
       required: [symbol, name, assetClass, region, unit, precision, last, previousClose, change, changePct, asOf, source]
     MarketBriefEditionSeries:
       type: object

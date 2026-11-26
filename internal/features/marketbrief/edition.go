@@ -86,6 +86,19 @@ type EditionInstrument struct {
 	ChangeBps *float64 `json:"changeBps,omitempty"`
 	AsOf      string   `json:"asOf"`
 	Source    string   `json:"source"`
+	// DayLow and DayHigh are the session's range, YearLow and YearHigh the
+	// 52-week range, rounded to Precision. Each pair is kept only when both
+	// ends are present, low <= high and Last lies inside, so a range from
+	// another session (a holiday) is never shown against this row.
+	DayLow   *float64 `json:"dayLow,omitempty"`
+	DayHigh  *float64 `json:"dayHigh,omitempty"`
+	YearLow  *float64 `json:"yearLow,omitempty"`
+	YearHigh *float64 `json:"yearHigh,omitempty"`
+	// Volume is set only when the provider reported more than zero.
+	Volume *int64 `json:"volume,omitempty"`
+	// Session is the row's own market status on the trading date, "closed"
+	// or "early_close"; nil on a regular day or when no calendar is sourced.
+	Session *string `json:"session,omitempty"`
 }
 
 // EditionSeries is one instrument's intraday bars, oldest first. Points are
@@ -296,7 +309,9 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		}
 	}
 	closed := map[string]bool{}
+	sessionStatus := map[string]string{}
 	for _, s := range sessions {
+		sessionStatus[s.Market] = s.Status
 		if s.Status == SessionClosed {
 			closed[s.Market] = true
 		}
@@ -363,6 +378,12 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 			bps := changeBps(q)
 			row.ChangeBps = &bps
 		}
+		row.DayLow, row.DayHigh = consistentRange(q.DayLow, q.DayHigh, q.Price, meta.precision)
+		row.YearLow, row.YearHigh = consistentRange(q.YearLow, q.YearHigh, q.Price, meta.precision)
+		row.Volume = q.Volume
+		if status, ok := sessionStatus[marketOf(in.Symbol)]; ok {
+			row.Session = &status
+		}
 		e.Instruments = append(e.Instruments, row)
 	}
 	if !asOf.IsZero() {
@@ -387,6 +408,18 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 	}
 	return e
 }
+
+// consistentRange rounds a low/high pair to precision, or returns nils unless
+// both ends are present, positive, low <= high and last lies inside.
+func consistentRange(low, high *float64, last float64, precision int) (*float64, *float64) {
+	if low == nil || high == nil || !finitePositiveF(*low) || !finitePositiveF(*high) || *low > *high || last < *low || last > *high {
+		return nil, nil
+	}
+	l, h := roundTo(*low, precision), roundTo(*high, precision)
+	return &l, &h
+}
+
+func finitePositiveF(v float64) bool { return !math.IsInf(v, 0) && !math.IsNaN(v) && v > 0 }
 
 // missing records one instrument or series that did not arrive, with why.
 func (e *Edition) missing(key, reason string) {

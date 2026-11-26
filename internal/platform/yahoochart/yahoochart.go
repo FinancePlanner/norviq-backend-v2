@@ -61,6 +61,11 @@ type Quote struct {
 	// Currency is the quote currency Yahoo reports ("USD", "EUR"), nil when
 	// absent. Index levels are points, but the field still names the market.
 	Currency *string
+	// DayHigh, DayLow, YearHigh and YearLow are Yahoo's regular-session and
+	// 52-week range, nil when absent, non-finite or not positive. Volume is
+	// nil when absent or not positive: Yahoo zero-fills it for indices.
+	DayHigh, DayLow, YearHigh, YearLow *float64
+	Volume                             *int64
 }
 
 // ChangePercent is IndexQuote.changePercent.
@@ -192,6 +197,11 @@ type quoteMeta struct {
 	FulldayPrice       *float64 `json:"fulldayPrice"`
 	RegularMarketTime  *float64 `json:"regularMarketTime"`
 	Currency           *string  `json:"currency"`
+	DayHigh            *float64 `json:"regularMarketDayHigh"`
+	DayLow             *float64 `json:"regularMarketDayLow"`
+	YearHigh           *float64 `json:"fiftyTwoWeekHigh"`
+	YearLow            *float64 `json:"fiftyTwoWeekLow"`
+	Volume             *float64 `json:"regularMarketVolume"`
 }
 
 // decodeResults decodes the chart envelope into one T per result, failing
@@ -268,7 +278,32 @@ func ParseQuote(data []byte) (*Quote, error) {
 		PreviousClose: prev,
 		MarketTime:    unixSeconds(*m.RegularMarketTime),
 		Currency:      nonEmpty(m.Currency),
+		DayHigh:       positive(m.DayHigh),
+		DayLow:        positive(m.DayLow),
+		YearHigh:      positive(m.YearHigh),
+		YearLow:       positive(m.YearLow),
+		Volume:        positiveInt(m.Volume),
 	}, nil
+}
+
+// positive is v when present, finite and > 0, else nil.
+func positive(v *float64) *float64 {
+	if v == nil || !finitePositive(*v) {
+		return nil
+	}
+	return v
+}
+
+// positiveInt is a whole-number volume when v is present, finite and > 0.
+func positiveInt(v *float64) *int64 {
+	if v == nil || !finitePositive(*v) || *v >= math.MaxInt64 {
+		return nil
+	}
+	n := int64(math.Round(*v))
+	if n <= 0 {
+		return nil
+	}
+	return &n
 }
 
 func nonEmpty(s *string) *string {

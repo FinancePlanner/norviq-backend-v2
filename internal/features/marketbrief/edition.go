@@ -123,30 +123,35 @@ type instrumentMeta struct {
 	// exchangeTZ is the IANA zone of the instrument's session, set only for
 	// the charted symbols.
 	exchangeTZ string
+	// closeHour and closeMinute are the regular close in exchangeTZ, set only
+	// for the charted cash indices: their series end there when Yahoo does
+	// not report the session's end.
+	closeHour, closeMinute int
 }
 
 var instrumentMetas = map[string]instrumentMeta{
-	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin"},
-	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, ""},
-	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, ""},
-	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York"},
-	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York"},
-	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
-	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
-	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York"},
-	"^N225":     {AssetIndex, "JP", UnitPoints, 2, ""},
-	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, ""},
-	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, ""},
+	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30},
+	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0},
+	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0},
+	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
+	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
+	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
+	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0},
+	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0},
+	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0},
 	// ^TNX's price is the yield in percent (4.91 means 4.91%).
-	"^TNX": {AssetRate, "US", UnitPercent, 3, ""},
+	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0},
 }
 
 // futuresReopen is the hour (New York) CME equity futures reopen each day.
 const futuresReopen = 18
 
-// maxSeriesGap is how far the last intraday bar may trail the quote before
-// the series is dropped: a chart that stops hours short of the scorecard
-// would end somewhere the scorecard does not.
+// maxSeriesGap is how far the last intraday bar may trail the series' end
+// (the quote, or a cash index's session close) before the series is
+// dropped: a chart that stops hours short of the scorecard would end
+// somewhere the scorecard does not.
 const maxSeriesGap = 30 * time.Minute
 
 // seriesWindowStart is where a symbol's chart begins for a brief made at
@@ -172,6 +177,27 @@ func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
 		start = time.Date(y, m, d-1, futuresReopen, 0, 0, 0, loc)
 	}
 	return start, true
+}
+
+// seriesSessionEnd is where a cash index's chart ends at the latest: Yahoo's
+// reported end of the regular session when it is set, after the first bar
+// and not after `at` (it knows half days), otherwise the static close on the
+// first bar's exchange-local date. False for a future, whose chart ends at
+// its quote, and for a symbol that is not charted.
+func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Time, bool) {
+	meta := instrumentMetas[symbol]
+	if meta.assetClass != AssetIndex || meta.exchangeTZ == "" {
+		return time.Time{}, false
+	}
+	if !reported.IsZero() && reported.After(firstBar) && !reported.After(at) {
+		return reported, true
+	}
+	loc, err := time.LoadLocation(meta.exchangeTZ)
+	if err != nil {
+		return time.Time{}, false
+	}
+	y, m, d := firstBar.In(loc).Date()
+	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true
 }
 
 // seriesSymbols are the instruments charted intraday, lead index first.

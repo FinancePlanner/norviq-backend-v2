@@ -70,6 +70,11 @@ func TestIntradayAgainstStub(t *testing.T) {
 	if query != "/chart/%5ENDX?period1=1795530000&period2=1795534800&interval=5m" {
 		t.Fatalf("query %q", query)
 	}
+	// A bar after `to` is dropped: Yahoo may return bars past period2.
+	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, from, time.Unix(1795530600, 0).Add(time.Minute)); d == nil ||
+		len(d.Points) != 1 || !d.Points[0].Time.Equal(time.Unix(1795530600, 0)) {
+		t.Fatalf("bar after the window kept: %+v", d)
+	}
 	// No bar inside [from, to].
 	if d := c.Intraday(context.Background(), "^NDX", IntradayInterval, to, to.Add(time.Hour)); d != nil {
 		t.Fatalf("bars outside the window kept: %+v", d)
@@ -105,5 +110,25 @@ func TestIntradayRequestsTheWindow(t *testing.T) {
 	}
 	if !d.Points[0].Time.Equal(from) {
 		t.Fatalf("first bar %v", d.Points[0].Time)
+	}
+}
+
+func TestParseIntradayReadsSessionEnd(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/intraday_1d_5m_NQ_thanksgiving.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseIntraday(fixture, IntradayInterval)
+	if err != nil || d == nil {
+		t.Fatalf("%v %v", d, err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	// meta.currentTradingPeriod.regular.end: 2026-11-25 23:59 ET.
+	if want := time.Date(2026, 11, 25, 23, 59, 0, 0, ny); !d.SessionEnd.Equal(want) {
+		t.Fatalf("session end %v, want %v", d.SessionEnd, want)
+	}
+	// Absent: zero.
+	if d, _ := ParseIntraday([]byte(intradayJSON), IntradayInterval); d == nil || !d.SessionEnd.IsZero() {
+		t.Fatalf("%+v", d)
 	}
 }

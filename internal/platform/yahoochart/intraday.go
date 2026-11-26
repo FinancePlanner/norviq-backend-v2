@@ -20,7 +20,10 @@ type Intraday struct {
 	// Timezone is the exchange's IANA zone ("America/New_York"), "" when
 	// Yahoo does not say.
 	Timezone string
-	Points   []Point
+	// SessionEnd is the end of the regular session Yahoo reports
+	// (meta.currentTradingPeriod.regular.end); zero when absent.
+	SessionEnd time.Time
+	Points     []Point
 }
 
 // Last is the latest point, or nil.
@@ -82,13 +85,18 @@ func clipIntraday(d *Intraday, from, to time.Time) *Intraday {
 	return &out
 }
 
-// ParseIntraday reads a chart response's timestamps and closes. Null and
-// non-positive closes (Yahoo pads gaps with null) are dropped; nil, no
-// error, when nothing usable is left.
+// ParseIntraday reads a chart response's timestamps and closes, and the end
+// of the regular session. Null and non-positive closes (Yahoo pads gaps with
+// null) are dropped; nil, no error, when nothing usable is left.
 func ParseIntraday(data []byte, interval string) (*Intraday, error) {
 	type meta struct {
 		Symbol               *string `json:"symbol"`
 		ExchangeTimezoneName *string `json:"exchangeTimezoneName"`
+		CurrentTradingPeriod *struct {
+			Regular *struct {
+				End *float64 `json:"end"`
+			} `json:"regular"`
+		} `json:"currentTradingPeriod"`
 	}
 	type result struct {
 		Meta       *meta     `json:"meta"`
@@ -118,6 +126,9 @@ func ParseIntraday(data []byte, interval string) (*Intraday, error) {
 		if _, ok := loadZone(*r.Meta.ExchangeTimezoneName); ok {
 			out.Timezone = *r.Meta.ExchangeTimezoneName
 		}
+	}
+	if p := r.Meta.CurrentTradingPeriod; p != nil && p.Regular != nil && p.Regular.End != nil && finitePositive(*p.Regular.End) {
+		out.SessionEnd = unixSeconds(*p.Regular.End)
 	}
 	for i := 0; i < len(r.Timestamp) && i < len(closes); i++ {
 		v := closes[i]

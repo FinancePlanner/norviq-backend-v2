@@ -109,14 +109,25 @@ func (g *LLMGenerator) Generate(ctx context.Context, due Due) (GeneratedBrief, e
 }
 
 // series fetches the intraday bars charted for the slot: the symbol's own
-// session, up to now, cut at the scorecard's quote and ended on it, so the
-// last point is the number the scorecard shows. A symbol without a quote has
-// no baseline to chart against; one whose bars stop more than maxSeriesGap
-// short of the quote (a holiday session, a stalled feed) is not charted.
+// session, up to now, ended on the scorecard's quote so the last point is
+// the number the scorecard shows. A future's series ends at the quote's
+// time. A cash index's ends at the earlier of the quote and the session
+// close: US closes are stamped after 16:00 ET, and after the close the
+// quote's price is the closing level. A symbol without a quote has no
+// baseline to chart against; one whose bars stop more than maxSeriesGap
+// short of that end (a holiday session, a stalled feed) is not charted.
+// Each skipped symbol is logged with why.
 func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time, quotes []yahoochart.Quote) map[string]*yahoochart.Intraday {
 	out := map[string]*yahoochart.Intraday{}
 	if g.Intraday == nil {
 		return out
+	}
+	logger := g.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	drop := func(symbol, reason string, args ...any) {
+		logger.Info("market_brief_series_dropped", append([]any{"symbol", symbol, "reason", reason}, args...)...)
 	}
 	bySymbol := map[string]yahoochart.Quote{}
 	for _, q := range quotes {
@@ -124,25 +135,48 @@ func (g *LLMGenerator) series(ctx context.Context, due Due, at time.Time, quotes
 	}
 	for _, symbol := range seriesSymbols(due.Slot) {
 		q, ok := bySymbol[symbol]
+		if !ok {
+			drop(symbol, "no_quote")
+			continue
+		}
 		start, hasWindow := seriesWindowStart(symbol, at)
-		if !ok || !hasWindow {
+		if !hasWindow {
+			drop(symbol, "no_window")
 			continue
 		}
 		d := g.Intraday.Intraday(ctx, symbol, yahoochart.IntradayInterval, start, at)
-		if d == nil {
+		var inWindow []yahoochart.Point
+		if d != nil {
+			for _, p := range d.Points {
+				if !p.Time.Before(start) {
+					inWindow = append(inWindow, p)
+				}
+			}
+		}
+		if len(inWindow) == 0 {
+			drop(symbol, "no_bars")
 			continue
 		}
+		anchor := q.MarketTime
+		if end, ok := seriesSessionEnd(symbol, d.SessionEnd, inWindow[0].Time, at); ok && end.Before(anchor) {
+			anchor = end
+		}
 		var kept []yahoochart.Point
-		for _, p := range d.Points {
-			if p.Time.Before(q.MarketTime) {
+		for _, p := range inWindow {
+			if p.Time.Before(anchor) {
 				kept = append(kept, p)
 			}
 		}
-		if len(kept) == 0 || q.MarketTime.Sub(kept[len(kept)-1].Time) > maxSeriesGap {
+		if len(kept) == 0 {
+			drop(symbol, "no_bars")
 			continue
 		}
+		if gap := anchor.Sub(kept[len(kept)-1].Time); gap > maxSeriesGap {
+			drop(symbol, "gap", "gap", gap)
+			continue
+		}
+		kept = append(kept, yahoochart.Point{Time: anchor, Value: q.Price})
 		cut := *d
-		kept = append(kept, yahoochart.Point{Time: q.MarketTime, Value: q.Price})
 		cut.Points = kept
 		out[symbol] = &cut
 	}

@@ -1,8 +1,10 @@
 package marketbrief
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -178,7 +180,8 @@ func bars(symbol string, times ...time.Time) *yahoochart.Intraday {
 func TestGeneratorSeriesKeepsTheTradingDayOnly(t *testing.T) {
 	due := Due{TradingDate: "2026-11-20", Slot: SlotEvening}
 	quote := eveningQuote("^NDX", 105, 100) // 21:10 Lisbon, 16:10 New York
-	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^NDX": bars("^NDX", quote.MarketTime.Add(-10*time.Minute))}}
+	// The session's last bar is 15:55 New York; the series ends at the close.
+	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^NDX": bars("^NDX", quote.MarketTime.Add(-15*time.Minute))}}
 	g := &LLMGenerator{Intraday: f}
 	got := g.series(context.Background(), due, eveningAt, []yahoochart.Quote{quote})
 	if len(got) != 1 || got["^NDX"] == nil {
@@ -288,6 +291,171 @@ func TestSeriesEndsAtQuote(t *testing.T) {
 			t.Fatalf("%+v", got)
 		}
 	})
+	t.Run("bars before the window", func(t *testing.T) {
+		q := nq(at.Add(-3 * time.Minute))
+		got, _ := run([]yahoochart.Quote{q}, bars("NQ=F", start.Add(-5*time.Minute), at.Add(-10*time.Minute), at.Add(-5*time.Minute)))
+		s := got["NQ=F"]
+		if s == nil || len(s.Points) != 3 {
+			t.Fatalf("%+v", s)
+		}
+		for _, p := range s.Points {
+			if p.Time.Before(start) {
+				t.Fatalf("bar %v before the window %v", p.Time, start)
+			}
+		}
+	})
+}
+
+// session is 5-minute bars from first to last inclusive, valued 100, 101…
+func session(symbol string, first, last time.Time) *yahoochart.Intraday {
+	var times []time.Time
+	for ts := first; !ts.After(last); ts = ts.Add(5 * time.Minute) {
+		times = append(times, ts)
+	}
+	return bars(symbol, times...)
+}
+
+// Real 2026-11-25 Close stamps (norviq.org/brief/2026-11-25/evening): S&P 500
+// and Dow 21:32 Lisbon (16:32 ET), Nasdaq 100 22:15 (17:15 ET). The bars stop
+// at the 16:00 ET close, so a gap measured from the quote dropped all three.
+func TestEveningSeriesEndsAtSessionClose(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	at := time.Date(2026, 11, 25, 22, 31, 0, 0, time.UTC)
+	closeAt := time.Date(2026, 11, 25, 16, 0, 0, 0, ny)
+	quotes := []yahoochart.Quote{
+		{Symbol: "^NDX", Price: 25200.5, PreviousClose: 25000, MarketTime: time.Date(2026, 11, 25, 22, 15, 0, 0, time.UTC)},
+		{Symbol: "^GSPC", Price: 6990.25, PreviousClose: 7000, MarketTime: time.Date(2026, 11, 25, 21, 32, 6, 0, time.UTC)},
+		{Symbol: "^DJI", Price: 47100, PreviousClose: 47000, MarketTime: time.Date(2026, 11, 25, 21, 32, 17, 0, time.UTC)},
+	}
+	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{}}
+	for _, q := range quotes {
+		d := session(q.Symbol, time.Date(2026, 11, 25, 9, 30, 0, 0, ny), time.Date(2026, 11, 25, 15, 55, 0, 0, ny))
+		d.SessionEnd = closeAt
+		f.bars[q.Symbol] = d
+	}
+	got := (&LLMGenerator{Intraday: f}).series(context.Background(), Due{TradingDate: "2026-11-25", Slot: SlotEvening}, at, quotes)
+	for _, q := range quotes {
+		s := got[q.Symbol]
+		if s == nil {
+			t.Errorf("%s dropped", q.Symbol)
+			continue
+		}
+		last := s.Last()
+		if !last.Time.Equal(closeAt) || last.Value != q.Price {
+			t.Errorf("%s last %v %v, want %v %v", q.Symbol, last.Time.In(ny), last.Value, closeAt, q.Price)
+		}
+		for _, p := range s.Points {
+			if p.Time.After(closeAt) {
+				t.Errorf("%s point %v after the close", q.Symbol, p.Time.In(ny))
+			}
+		}
+		if pct := (last.Value/q.PreviousClose - 1) * 100; pct != q.ChangePercent() {
+			t.Errorf("%s legend %v scorecard %v", q.Symbol, pct, q.ChangePercent())
+		}
+	}
+}
+
+func TestCashSeriesSessionEnd(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	evening := func(t *testing.T, at time.Time, q yahoochart.Quote, d *yahoochart.Intraday) *yahoochart.Intraday {
+		t.Helper()
+		due := Due{TradingDate: LocalDate(at), Slot: SlotEvening}
+		f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{q.Symbol: d}}
+		return (&LLMGenerator{Intraday: f}).series(context.Background(), due, at, []yahoochart.Quote{q})[q.Symbol]
+	}
+	ndx := func(stamped time.Time) yahoochart.Quote {
+		return yahoochart.Quote{Symbol: "^NDX", Price: 25100, PreviousClose: 25000, MarketTime: stamped}
+	}
+
+	t.Run("half day ends at Yahoo's session end", func(t *testing.T) {
+		at := time.Date(2026, 11, 27, 22, 31, 0, 0, time.UTC)
+		halfClose := time.Date(2026, 11, 27, 13, 0, 0, 0, ny)
+		d := session("^NDX", time.Date(2026, 11, 27, 9, 30, 0, 0, ny), time.Date(2026, 11, 27, 12, 55, 0, 0, ny))
+		d.SessionEnd = halfClose
+		s := evening(t, at, ndx(time.Date(2026, 11, 27, 13, 20, 0, 0, ny)), d)
+		if s == nil {
+			t.Fatal("dropped")
+		}
+		if last := s.Last(); !last.Time.Equal(halfClose) || last.Value != 25100 {
+			t.Fatalf("last %v %v", last.Time.In(ny), last.Value)
+		}
+	})
+	t.Run("static close without a session end", func(t *testing.T) {
+		at := time.Date(2026, 11, 25, 22, 31, 0, 0, time.UTC)
+		closeAt := time.Date(2026, 11, 25, 16, 0, 0, 0, ny)
+		for name, sessionEnd := range map[string]time.Time{
+			"absent":                 {},
+			"before the first bar":   time.Date(2026, 11, 24, 16, 0, 0, 0, ny),
+			"after the brief's time": at.Add(time.Hour),
+		} {
+			d := session("^NDX", time.Date(2026, 11, 25, 9, 30, 0, 0, ny), time.Date(2026, 11, 25, 15, 55, 0, 0, ny))
+			d.SessionEnd = sessionEnd
+			s := evening(t, at, ndx(time.Date(2026, 11, 25, 17, 15, 0, 0, ny)), d)
+			if s == nil {
+				t.Errorf("%s: dropped", name)
+				continue
+			}
+			if last := s.Last(); !last.Time.Equal(closeAt) {
+				t.Errorf("%s: last %v", name, last.Time.In(ny))
+			}
+		}
+	})
+	t.Run("cash quote before the close ends at the quote", func(t *testing.T) {
+		berlin, _ := time.LoadLocation("Europe/Berlin")
+		at := time.Date(2026, 11, 26, 8, 25, 0, 0, time.UTC)
+		q := yahoochart.Quote{Symbol: "^GDAXI", Price: 25200, PreviousClose: 25000, MarketTime: time.Date(2026, 11, 26, 9, 25, 0, 0, berlin)}
+		d := session("^GDAXI", time.Date(2026, 11, 26, 9, 0, 0, 0, berlin), time.Date(2026, 11, 26, 9, 20, 0, 0, berlin))
+		d.SessionEnd = time.Date(2026, 11, 26, 17, 30, 0, 0, berlin)
+		f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^GDAXI": d}}
+		s := (&LLMGenerator{Intraday: f}).series(context.Background(), Due{TradingDate: "2026-11-26", Slot: SlotMorning}, at, []yahoochart.Quote{q})["^GDAXI"]
+		if s == nil || len(s.Points) != 6 {
+			t.Fatalf("%+v", s)
+		}
+		if last := s.Last(); !last.Time.Equal(q.MarketTime) || last.Value != q.Price {
+			t.Fatalf("last %v %v", last.Time.In(berlin), last.Value)
+		}
+	})
+}
+
+// Every skipped symbol is logged with why.
+func TestSeriesDropsAreLogged(t *testing.T) {
+	at := time.Date(2026, 11, 25, 22, 31, 0, 0, time.UTC)
+	ny, _ := time.LoadLocation("America/New_York")
+	stamped := time.Date(2026, 11, 25, 16, 32, 0, 0, ny)
+	quotes := []yahoochart.Quote{
+		{Symbol: "^GSPC", Price: 2, PreviousClose: 1, MarketTime: stamped},
+		{Symbol: "^DJI", Price: 2, PreviousClose: 1, MarketTime: stamped},
+	}
+	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{
+		"^NDX":  bars("^NDX", time.Date(2026, 11, 25, 15, 0, 0, 0, ny)),
+		"^GSPC": bars("^GSPC", time.Date(2026, 11, 25, 14, 0, 0, 0, ny)), // two hours short of the close
+	}}
+	var buf bytes.Buffer
+	g := &LLMGenerator{Intraday: f, Logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+	if got := g.series(context.Background(), Due{TradingDate: "2026-11-25", Slot: SlotEvening}, at, quotes); len(got) != 0 {
+		t.Fatalf("%+v", got)
+	}
+	reasons := map[string]map[string]any{}
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
+		if rec["msg"] == "market_brief_series_dropped" {
+			reasons[rec["symbol"].(string)] = rec
+		}
+	}
+	for symbol, want := range map[string]string{"^NDX": "no_quote", "^GSPC": "gap", "^DJI": "no_bars"} {
+		if rec := reasons[symbol]; rec == nil || rec["reason"] != want {
+			t.Errorf("%s: %v, want reason %s (log %s)", symbol, rec, want, buf.String())
+		}
+	}
+	if gap := reasons["^GSPC"]["gap"]; gap != float64(2*time.Hour) {
+		t.Errorf("gap %v", gap)
+	}
 }
 
 func TestIncludes(t *testing.T) {
@@ -335,6 +503,11 @@ func TestMissingReasons(t *testing.T) {
 		if e.Quality.MissingReasons[key] == "" {
 			t.Errorf("%s has no reason", key)
 		}
+	}
+	// A series that arrived without points has no bars either.
+	empty := buildEdition(due, kept, dropped, map[string]*yahoochart.Intraday{"ES=F": {Symbol: "ES=F", Interval: "5m"}}, "m", false, at)
+	if r := empty.Quality.MissingReasons["series:ES=F"]; r != ReasonNoBars {
+		t.Errorf("empty series: %q", r)
 	}
 	// Nothing missing serializes as before.
 	raw, _ := json.Marshal(EditionQuality{Missing: []string{}})

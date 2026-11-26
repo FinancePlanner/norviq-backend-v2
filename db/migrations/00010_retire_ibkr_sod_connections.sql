@@ -14,7 +14,7 @@
 -- BrokerConnectionsForList, so no query changes.
 --
 -- Goose-only (no Fluent counterpart): not listed in fluent_migrations.txt.
--- Idempotent: re-running matches the same rows and sets the same values.
+-- Idempotent: re-running matches the same rows; only updated_at changes.
 
 -- +goose Up
 -- +goose StatementBegin

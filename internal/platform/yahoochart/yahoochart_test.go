@@ -72,6 +72,7 @@ func TestParseQuoteFallsBackWithoutFulldayChange(t *testing.T) {
 		{"baseline would be non-positive", `,"chartPreviousClose":98,"fulldayChange":100`, 98},
 		{"baseline would be negative", `,"chartPreviousClose":98,"fulldayChange":150`, 98},
 		{"used when present", `,"chartPreviousClose":98,"fulldayChange":4`, 96},
+		{"falling day", `,"chartPreviousClose":98,"fulldayChange":-4`, 104},
 		{"no fulldayChange and no chartPreviousClose", ``, 0},
 		{"zero fulldayChange and no chartPreviousClose", `,"fulldayChange":0`, 0},
 	} {
@@ -87,6 +88,27 @@ func TestParseQuoteFallsBackWithoutFulldayChange(t *testing.T) {
 		}
 		if q == nil || q.PreviousClose != c.prev {
 			t.Errorf("%s: got %+v, want prev %v", c.name, q, c.prev)
+		}
+	}
+}
+
+// fulldayChange is relative to fulldayPrice, which can differ from
+// regularMarketPrice; the quote still shows regularMarketPrice.
+func TestParseQuoteBaselineFromFulldayPrice(t *testing.T) {
+	q, err := ParseQuote([]byte(`{"chart":{"result":[{"meta":{"symbol":"X","regularMarketPrice":111,"fulldayPrice":110,` +
+		`"fulldayChange":10,"chartPreviousClose":98,"regularMarketTime":1}}]}}`))
+	if err != nil || q == nil {
+		t.Fatalf("%v %v", q, err)
+	}
+	if q.PreviousClose != 100 || q.Price != 111 {
+		t.Fatalf("prev %v price %v, want 100 and 111", q.PreviousClose, q.Price)
+	}
+	// A fulldayPrice that is not positive is ignored.
+	for _, fp := range []string{`0`, `null`, `-5`} {
+		q, err := ParseQuote([]byte(`{"chart":{"result":[{"meta":{"symbol":"X","regularMarketPrice":111,"fulldayPrice":` + fp +
+			`,"fulldayChange":10,"chartPreviousClose":98,"regularMarketTime":1}}]}}`))
+		if err != nil || q == nil || q.PreviousClose != 101 {
+			t.Errorf("fulldayPrice %s: %+v %v", fp, q, err)
 		}
 	}
 }

@@ -189,6 +189,7 @@ type quoteMeta struct {
 	RegularMarketPrice *float64 `json:"regularMarketPrice"`
 	ChartPreviousClose *float64 `json:"chartPreviousClose"`
 	FulldayChange      *float64 `json:"fulldayChange"`
+	FulldayPrice       *float64 `json:"fulldayPrice"`
 	RegularMarketTime  *float64 `json:"regularMarketTime"`
 	Currency           *string  `json:"currency"`
 }
@@ -221,8 +222,11 @@ func decodeResults[T any](data []byte, symbolOf func(*T) *string) ([]T, error) {
 // error envelope or a meta without a positive price, a usable baseline and a
 // time.
 //
-// The baseline is price - fulldayChange, Yahoo's own day change, when that is
-// present, non-zero and leaves a positive number. meta.chartPreviousClose is
+// The baseline is fulldayPrice - fulldayChange, Yahoo's own day change, when
+// that is present, non-zero and leaves a positive number. fulldayChange is
+// relative to fulldayPrice, which can differ from regularMarketPrice; without
+// a positive fulldayPrice, regularMarketPrice stands in. Quote.Price stays
+// regularMarketPrice. meta.chartPreviousClose is
 // not trusted on its own: on a range=1d chart it can be the close from two
 // sessions back (on 2026-11-26 Hang Seng reported 22219.7 against a true
 // previous close of 21966.01, so the brief showed +0.14% for a +1.19% day).
@@ -245,10 +249,14 @@ func ParseQuote(data []byte) (*Quote, error) {
 	if m.RegularMarketPrice == nil || !finitePositive(*m.RegularMarketPrice) || m.RegularMarketTime == nil {
 		return nil, nil
 	}
+	fullday := *m.RegularMarketPrice
+	if m.FulldayPrice != nil && finitePositive(*m.FulldayPrice) {
+		fullday = *m.FulldayPrice
+	}
 	var prev float64
 	switch {
-	case m.FulldayChange != nil && *m.FulldayChange != 0 && finitePositive(*m.RegularMarketPrice-*m.FulldayChange):
-		prev = *m.RegularMarketPrice - *m.FulldayChange
+	case m.FulldayChange != nil && *m.FulldayChange != 0 && finitePositive(fullday-*m.FulldayChange):
+		prev = fullday - *m.FulldayChange
 	case m.ChartPreviousClose != nil && finitePositive(*m.ChartPreviousClose):
 		prev = *m.ChartPreviousClose
 	default:

@@ -39,8 +39,9 @@ type Message struct {
 }
 
 // Usage is a reply's token count and, from an adapter that ran a search
-// tool, its billed searches. WebSearches stays nil when no search tool was
-// in the request or the provider reports no count.
+// tool, the web searches the model ran (billed, or returned with results,
+// whichever is higher). WebSearches stays nil when no search tool was in
+// the request or the provider reports no count.
 type Usage struct {
 	InputTokens  int
 	OutputTokens int

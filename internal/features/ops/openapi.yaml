@@ -15719,7 +15719,7 @@ components:
                       attempt succeeded.
                   durationMs: { type: integer, format: int64, minimum: 0 }
                 required: [model, outcome, durationMs]
-            webSearches: { type: integer, minimum: 0, description: 'Billed web searches of the winning attempt; absent when its provider reports no count' }
+            webSearches: { type: integer, minimum: 0, description: 'Web searches the winning attempt''s model ran (billed, or returned with results, whichever is higher); absent when its provider reports no count' }
             droppedItems:
               type: object
               description: Drafted items removed because a figure was not in the data the model was given, per language; only languages with at least one are listed.

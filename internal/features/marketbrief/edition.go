@@ -75,7 +75,8 @@ type EditionProvenance struct {
 	// Attempts lists every writer tried, in order; the last is the one
 	// that wrote the brief.
 	Attempts []ProvenanceAttempt `json:"attempts"`
-	// WebSearches is the winning attempt's billed searches, when its
+	// WebSearches is the web searches the winning attempt's model ran
+	// (billed, or returned with results, whichever is higher), when its
 	// provider reports a count.
 	WebSearches *int `json:"webSearches,omitempty"`
 	// DroppedItems counts, per language, the drafted items removed because

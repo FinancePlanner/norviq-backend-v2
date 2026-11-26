@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -615,5 +616,76 @@ func TestReportLongStoryStaysAboveFooter(t *testing.T) {
 	}
 	if cut < 3 {
 		t.Fatalf("%d paragraphs end in an ellipsis; want the dek and both stories cut", cut)
+	}
+}
+
+// methodologyHeading is where a methodology item's tracked label starts:
+// labels are drawn uppercased a glyph at a time, without the spaces, and may
+// wrap, so the label's first line is a prefix of the squashed heading.
+func methodologyHeading(rec *RecordingSurface, heading string) (Op, bool) {
+	want := strings.ReplaceAll(strings.ToUpper(heading), " ", "")
+	for _, op := range textRuns(rec) {
+		if op.Font == SansSemiBold && op.Size == labelSize && len(op.Text) >= 6 && strings.HasPrefix(want, op.Text) {
+			return op, true
+		}
+	}
+	return Op{}, false
+}
+
+// Market sessions are their own methodology item, before "Not available",
+// and only when there are some: a regular day draws exactly what it drew.
+func TestReportMarketSessions(t *testing.T) {
+	for _, lang := range []string{"en", "pt-PT"} {
+		t.Run(lang, func(t *testing.T) {
+			str := reportStringsFor(lang)
+			line, missing := "US stocks — shortened session (closes 13:00 ET)", "Euro Stoxx 50 — quote"
+			if lang == "pt-PT" {
+				line, missing = "Ações dos EUA — sessão reduzida (fecha às 13:00 ET)", "Euro Stoxx 50 — cotação"
+			}
+
+			regular := fixtureDoc(lang)
+			regular.Missing = []string{missing}
+			rec, _ := recordReport(regular)
+			if _, ok := methodologyHeading(rec, str.marketSessions); ok {
+				t.Fatalf("%q drawn without sessions", str.marketSessions)
+			}
+			empty := regular
+			empty.Sessions = []string{}
+			if recEmpty, _ := recordReport(empty); !reflect.DeepEqual(recEmpty.Ops, rec.Ops) {
+				t.Fatal("an empty Sessions changed the drawing")
+			}
+
+			d := regular
+			d.Sessions = []string{line}
+			rec, _ = recordReport(d)
+			sessions, ok := methodologyHeading(rec, str.marketSessions)
+			if !ok {
+				t.Fatalf("no %q heading", str.marketSessions)
+			}
+			notAvailable, ok := methodologyHeading(rec, str.notAvailable)
+			if !ok {
+				t.Fatalf("no %q heading", str.notAvailable)
+			}
+			if sessions.Page > notAvailable.Page || (sessions.Page == notAvailable.Page && sessions.Y >= notAvailable.Y) {
+				t.Errorf("sessions at p%d y%.1f, not before %q at p%d y%.1f", sessions.Page, sessions.Y, str.notAvailable, notAvailable.Page, notAvailable.Y)
+			}
+			var drawn bool
+			for _, op := range textRuns(rec) {
+				drawn = drawn || (op.Text == line && op.Page == sessions.Page && op.Y == sessions.Y)
+			}
+			if !drawn {
+				t.Errorf("%q is not drawn beside its heading", line)
+			}
+
+			only := d
+			only.Missing = nil
+			rec, _ = recordReport(only)
+			if _, ok := methodologyHeading(rec, str.marketSessions); !ok {
+				t.Errorf("no %q heading without missing items", str.marketSessions)
+			}
+			if _, ok := methodologyHeading(rec, str.notAvailable); ok {
+				t.Errorf("%q drawn with nothing missing", str.notAvailable)
+			}
+		})
 	}
 }

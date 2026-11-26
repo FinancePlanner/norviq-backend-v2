@@ -69,6 +69,9 @@ type Facts struct {
 	Quotes      []FactQuote    `json:"quotes"`
 	Headlines   []FactHeadline `json:"headlines"`
 	Earnings    []FactEarnings `json:"earnings"`
+	// Sessions lists markets closed or on a shortened session today; absent
+	// on a regular day.
+	Sessions []MarketSession `json:"sessions,omitempty"`
 }
 
 const (
@@ -78,8 +81,11 @@ const (
 )
 
 // buildFacts is MarketBriefFacts.build.
-func buildFacts(slot, tradingDate string, quotes []yahoochart.Quote, news []newsprovider.Item, cal []earnings.ItemResponse, now time.Time) Facts {
+func buildFacts(slot, tradingDate string, quotes []yahoochart.Quote, news []newsprovider.Item, cal []earnings.ItemResponse, sessions []MarketSession, now time.Time) Facts {
 	f := Facts{Slot: slot, TradingDate: tradingDate, Quotes: []FactQuote{}, Headlines: []FactHeadline{}, Earnings: []FactEarnings{}}
+	if len(sessions) > 0 {
+		f.Sessions = sessions
+	}
 	for _, q := range quotes {
 		name := q.Symbol
 		if in, ok := catalogInstrument(q.Symbol); ok {

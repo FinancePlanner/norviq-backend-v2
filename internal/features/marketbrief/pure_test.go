@@ -283,7 +283,7 @@ func testFacts() Facts {
 		[]yahoochart.Quote{{Symbol: "^GDAXI", Price: 25032.36, PreviousClose: 25226.6, MarketTime: testNow}},
 		[]newsprovider.Item{news("German exports fell 0.8% in August", 2), news("Old story", 30)},
 		[]earnings.ItemResponse{{Date: ptr("2026-10-08"), EpsEstimate: ptr(2.26), Hour: ptr("bmo"), Symbol: ptr("PEP")}},
-		testNow)
+		nil, testNow)
 }
 
 func TestBuildsFacts(t *testing.T) {
@@ -308,7 +308,7 @@ func TestGroundedNumbers(t *testing.T) {
 			t.Errorf("missing %v in %v", want, grounded)
 		}
 	}
-	rev := buildFacts(SlotMorning, "2026-10-08", nil, nil, []earnings.ItemResponse{{RevenueEstimate: ptr(40_500_000_000.0), Symbol: ptr("PEP")}}, testNow).GroundedNumbers()
+	rev := buildFacts(SlotMorning, "2026-10-08", nil, nil, []earnings.ItemResponse{{RevenueEstimate: ptr(40_500_000_000.0), Symbol: ptr("PEP")}}, nil, testNow).GroundedNumbers()
 	if !reflect.DeepEqual(rev, []float64{40_500_000_000, 40.5, 40500}) {
 		t.Fatal(rev)
 	}
@@ -646,5 +646,22 @@ func TestGeneratorClaudeWebFirstThenOnline(t *testing.T) {
 	g.ClaudeWebClient, g.ClaudeWebModel = claude, "claude-haiku-5-5+web_search"
 	if brief, err := g.Generate(context.Background(), testDue); err != nil || brief.Model != "claude-haiku-5-5+web_search" || len(web.calls) != 0 {
 		t.Fatalf("%+v %v", brief, err)
+	}
+}
+
+func TestSystemPromptSessionsRule(t *testing.T) {
+	for _, want := range []string{
+		"9. FACTS.sessions lists markets that are closed or on a shortened session today:",
+		"NQ=F and ES=F are futures",
+		"Never state trading hours",
+		"today's closed or shortened markets (sessions)",
+		"25 minutes after the European open",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(systemPrompt, "15 minutes after the European open") {
+		t.Error("stale slot wording")
 	}
 }

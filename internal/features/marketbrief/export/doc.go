@@ -26,7 +26,13 @@ type Doc struct {
 	// URL is canonical, query-free except ?lang=pt-PT.
 	URL      string
 	Degraded bool
-	Missing  []string
+	// Sessions are today's closed or shortened markets, one line each, e.g.
+	// "US stocks — shortened session (closes 13:00 ET)". Empty on a regular
+	// day, when the report prints nothing for them.
+	Sessions []string
+	// Missing names what did not arrive. Rows missing because their market
+	// is closed are folded into that market's Sessions line instead.
+	Missing []string
 }
 
 // Card is one instrument's scorecard.

@@ -669,12 +669,18 @@ func (r *report) methodBlocks() []reportBlock {
 		how = append(how, body(str.degradedBody))
 	}
 	item(str.howWritten, how...)
-	if len(d.Missing) > 0 {
-		var miss []textRun
-		for _, m := range d.Missing {
-			miss = append(miss, textRun{SerifRegular, bodySize, bodyLead, Light.Text, Wrap(r.s, SerifRegular, bodySize, textW, m, paraLines)})
+	lines := func(ls []string) []textRun {
+		var out []textRun
+		for _, l := range ls {
+			out = append(out, textRun{SerifRegular, bodySize, bodyLead, Light.Text, Wrap(r.s, SerifRegular, bodySize, textW, l, paraLines)})
 		}
-		item(str.notAvailable, miss...)
+		return out
+	}
+	if len(d.Sessions) > 0 {
+		item(str.marketSessions, lines(d.Sessions)...)
+	}
+	if len(d.Missing) > 0 {
+		item(str.notAvailable, lines(d.Missing)...)
 	}
 	ed := d.EditionID
 	if d.Revision > 0 {

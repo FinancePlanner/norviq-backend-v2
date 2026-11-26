@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +55,9 @@ type Edition struct {
 	Instruments    []EditionInstrument `json:"instruments"`
 	Series         []EditionSeries     `json:"series"`
 	Quality        EditionQuality      `json:"quality"`
+	// MarketSessions lists the markets closed or on a shortened session on
+	// the trading date; absent on a regular day.
+	MarketSessions []MarketSession `json:"marketSessions,omitempty"`
 }
 
 // EditionInstrument is one quote with its raw numbers and provenance.
@@ -101,6 +105,9 @@ const (
 	ReasonPreOpen         = "pre_open"
 	ReasonPreviousSession = "previous_session"
 	ReasonNoBars          = "no_bars"
+	// ReasonHoliday: the instrument's own market is closed on the trading
+	// date. It takes precedence over every other reason.
+	ReasonHoliday = "holiday"
 )
 
 // EditionQuality says how complete the edition is, so readers can be told.
@@ -112,7 +119,7 @@ type EditionQuality struct {
 	// arrive, as "quote:^NDX" or "series:^NDX".
 	Missing []string `json:"missing"`
 	// MissingReasons says why, keyed exactly like Missing: "unavailable",
-	// "pre_open", "previous_session" or "no_bars".
+	// "pre_open", "previous_session", "no_bars" or "holiday".
 	MissingReasons map[string]string `json:"missingReasons,omitempty"`
 }
 
@@ -127,22 +134,29 @@ type instrumentMeta struct {
 	// for the charted cash indices: their series end there when Yahoo does
 	// not report the session's end.
 	closeHour, closeMinute int
+	// market is the key of the instrument's own session calendar in
+	// sessions.go ("" when none is sourced).
+	market string
+	// contextMarket is the calendar that explains a futures contract's
+	// underlying cash session (nyse for NQ=F and ES=F). Futures trade
+	// through most cash holidays, so it is context, not their own session.
+	contextMarket string
 }
 
 var instrumentMetas = map[string]instrumentMeta{
-	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30},
-	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0},
-	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0},
-	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
-	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
-	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0},
-	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0},
-	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0},
+	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30, "xetra", ""},
+	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0, "euronext_paris", ""},
+	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0, "", ""},
+	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0, "", "nyse"},
+	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0, "", "nyse"},
+	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0, "jpx", ""},
+	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0, "hkex", ""},
+	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0, "", ""},
 	// ^TNX's price is the yield in percent (4.91 means 4.91%).
-	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0},
+	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0, "sifma", ""},
 }
 
 // futuresReopen is the hour (New York) CME equity futures reopen each day.
@@ -179,25 +193,60 @@ func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
 	return start, true
 }
 
-// seriesSessionEnd is where a cash index's chart ends at the latest: Yahoo's
-// reported end of the regular session when it is set, after the first bar
-// and not after `at` (it knows half days), otherwise the static close on the
-// first bar's exchange-local date. False for a future, whose chart ends at
-// its quote, and for a symbol that is not charted.
+// seriesSessionEnd is where a cash index's chart ends at the latest. On a day
+// the calendar has a verified early-close time for (the first bar's
+// exchange-local date), it is that time, or Yahoo's reported end of the
+// regular session when that is earlier: a reported end can never outlast the
+// exchange's own published close. Otherwise it is the reported end, and
+// failing that the static close on that date. A reported end counts when it
+// is set, after the first bar and not after `at`. False for a future, whose
+// chart ends at its quote, and for a symbol that is not charted.
 func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Time, bool) {
 	meta := instrumentMetas[symbol]
 	if meta.assetClass != AssetIndex || meta.exchangeTZ == "" {
 		return time.Time{}, false
 	}
-	if !reported.IsZero() && reported.After(firstBar) && !reported.After(at) {
-		return reported, true
-	}
 	loc, err := time.LoadLocation(meta.exchangeTZ)
 	if err != nil {
 		return time.Time{}, false
 	}
-	y, m, d := firstBar.In(loc).Date()
+	validReported := !reported.IsZero() && reported.After(firstBar) && !reported.After(at)
+	local := firstBar.In(loc)
+	if ms, ok, _ := sessionOn(marketOf(symbol), local.Format(time.DateOnly)); ok && ms.CloseAt != nil {
+		if closeAt, err := time.Parse(time.RFC3339, *ms.CloseAt); err == nil {
+			if validReported && reported.Before(closeAt) {
+				return reported, true
+			}
+			return closeAt, true
+		}
+	}
+	if validReported {
+		return reported, true
+	}
+	y, m, d := local.Date()
 	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true
+}
+
+// sessionsFor lists, sorted by market, the non-regular sessions on day of the
+// markets the slot's instruments belong to: their own market and their
+// contextMarket. nil on a regular day.
+func sessionsFor(slot, day string) []MarketSession {
+	seen := map[string]bool{}
+	var out []MarketSession
+	for _, in := range catalogInstruments(slot) {
+		meta := instrumentMetas[in.Symbol]
+		for _, market := range []string{meta.market, meta.contextMarket} {
+			if market == "" || seen[market] {
+				continue
+			}
+			seen[market] = true
+			if s, ok, _ := sessionOn(market, day); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Market < out[j].Market })
+	return out
 }
 
 // seriesSymbols are the instruments charted intraday, lead index first.
@@ -239,12 +288,26 @@ func changeBps(q yahoochart.Quote) float64 { return roundTo((q.Price-q.PreviousC
 
 // buildEdition assembles the edition from the quotes the brief was written
 // from (dropped says why a quote was left out) and the intraday series that arrived. Revision is set when saving.
-func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, model string, degraded bool, at time.Time) Edition {
+func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string, series map[string]*yahoochart.Intraday, sessions []MarketSession, model string, degraded bool, at time.Time) Edition {
 	groupOf := map[string]string{}
 	for _, g := range catalogGroups(due.Slot) {
 		for _, in := range g.instruments {
 			groupOf[in.Symbol] = g.id
 		}
+	}
+	closed := map[string]bool{}
+	for _, s := range sessions {
+		if s.Status == SessionClosed {
+			closed[s.Market] = true
+		}
+	}
+	// reasonFor says why symbol's row is missing: its own market being shut
+	// beats every other cause.
+	reasonFor := func(symbol, otherwise string) string {
+		if closed[marketOf(symbol)] {
+			return ReasonHoliday
+		}
+		return otherwise
 	}
 	bySymbol := map[string]yahoochart.Quote{}
 	for _, q := range quotes {
@@ -263,6 +326,9 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 		Series:        []EditionSeries{},
 		Quality:       EditionQuality{Degraded: degraded, Model: model, Missing: []string{}},
 	}
+	if len(sessions) > 0 {
+		e.MarketSessions = sessions
+	}
 	var asOf time.Time
 	for _, in := range catalogInstruments(due.Slot) {
 		q, ok := bySymbol[in.Symbol]
@@ -271,7 +337,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 			if reason == "" {
 				reason = ReasonUnavailable
 			}
-			e.missing("quote:"+in.Symbol, reason)
+			e.missing("quote:"+in.Symbol, reasonFor(in.Symbol, reason))
 			continue
 		}
 		meta := instrumentMetas[in.Symbol]
@@ -306,7 +372,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 	for _, symbol := range seriesSymbols(due.Slot) {
 		d := series[symbol]
 		if d == nil || len(d.Points) == 0 {
-			e.missing("series:"+symbol, ReasonNoBars)
+			e.missing("series:"+symbol, reasonFor(symbol, ReasonNoBars))
 			continue
 		}
 		precision := instrumentMetas[symbol].precision

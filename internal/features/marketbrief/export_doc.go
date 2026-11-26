@@ -1,6 +1,7 @@
 package marketbrief
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"regexp"
@@ -91,6 +92,7 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 	if e != nil {
 		doc.Chart = docChart(e, open, lang, str)
 		doc.CrossAsset = docCrossAsset(e, lang, str)
+		doc.Sessions = docSessions(e, str)
 		doc.Missing = docMissing(e, str)
 	}
 	if len(narrative) > 0 {
@@ -104,7 +106,20 @@ func BuildDoc(r Response, e *Edition, baseURL string) export.Doc {
 type docStrings struct {
 	theOpen, theClose, rates, commodities, asia, intradayChart, quote string
 	marketData, published, lisbon                                     string
+	closed, shortened, closesAt                                       string // closesAt has a %s for the time
+	holidayName                                                       bool   // closed lines name the holiday (English only)
+	markets                                                           map[string]string
 	names                                                             map[string]string
+}
+
+var docMarketsEN = map[string]string{
+	"nyse": "US stocks", "sifma": "US bonds", "xetra": "Xetra",
+	"euronext_paris": "Euronext Paris", "jpx": "Tokyo", "hkex": "Hong Kong",
+}
+
+var docMarketsPT = map[string]string{
+	"nyse": "Ações dos EUA", "sifma": "Obrigações dos EUA", "xetra": "Xetra",
+	"euronext_paris": "Euronext Paris", "jpx": "Tóquio", "hkex": "Hong Kong",
 }
 
 var docNamesEN = map[string]string{
@@ -141,7 +156,8 @@ func docStringsFor(lang string) docStrings {
 			rates: "Taxas de juro", commodities: "Matérias-primas", asia: "Ásia",
 			intradayChart: "gráfico intradiário", quote: "cotação",
 			marketData: "Dados de mercado", published: "Publicado", lisbon: "Lisboa",
-			names: docNamesPT,
+			closed: "encerrado (feriado)", shortened: "sessão reduzida", closesAt: "fecha às %s",
+			markets: docMarketsPT, names: docNamesPT,
 		}
 	}
 	return docStrings{
@@ -149,7 +165,8 @@ func docStringsFor(lang string) docStrings {
 		rates: "Rates", commodities: "Commodities", asia: "Asia",
 		intradayChart: "intraday chart", quote: "quote",
 		marketData: "Market data", published: "Published", lisbon: "Lisbon",
-		names: docNamesEN,
+		closed: "closed", holidayName: true, shortened: "shortened session", closesAt: "closes %s",
+		markets: docMarketsEN, names: docNamesEN,
 	}
 }
 
@@ -481,10 +498,25 @@ func docCrossAsset(e *Edition, lang string, str docStrings) []export.Row {
 	return rows
 }
 
-// docMissing names what did not arrive, instead of inventing it.
+// docSessions gives each market closed or on a shortened session today one
+// line of its own, in the edition's order. nil on a regular day.
+func docSessions(e *Edition, str docStrings) []string {
+	var out []string
+	for _, s := range e.MarketSessions {
+		out = append(out, drawable(sessionLine(s, str)))
+	}
+	return out
+}
+
+// docMissing names what did not arrive, instead of inventing it. The items
+// missing because their market is closed are left out: that market's
+// docSessions line already says why.
 func docMissing(e *Edition, str docStrings) []string {
 	var out []string
 	for _, m := range e.Quality.Missing {
+		if e.Quality.MissingReasons[m] == ReasonHoliday {
+			continue
+		}
 		kind, symbol, _ := strings.Cut(m, ":")
 		name := str.name(symbol, symbol)
 		if kind == "series" {
@@ -494,6 +526,53 @@ func docMissing(e *Edition, str docStrings) []string {
 		}
 	}
 	return out
+}
+
+// sessionLine words one market session. The holiday's English name is
+// printed only in English, after a colon ("US stocks — closed: Thanksgiving
+// Day"), since a name may carry its own parentheses: no translated name
+// exists to print.
+func sessionLine(s MarketSession, str docStrings) string {
+	label, ok := str.markets[s.Market]
+	if !ok {
+		label = s.Market
+	}
+	if s.Status == SessionEarlyClose {
+		line := label + " — " + str.shortened
+		if t := sessionCloseClock(s); t != "" {
+			line += " (" + fmt.Sprintf(str.closesAt, t) + ")"
+		}
+		return line
+	}
+	if str.holidayName && s.Name != "" {
+		return label + " — " + str.closed + ": " + s.Name
+	}
+	return label + " — " + str.closed
+}
+
+// sessionCloseClock is the verified close as "15:04 ET" in the market's own
+// zone ("" when there is none). New York is written ET, whatever the season;
+// any other zone keeps its own abbreviation.
+func sessionCloseClock(s MarketSession) string {
+	if s.CloseAt == nil {
+		return ""
+	}
+	at, err := time.Parse(time.RFC3339, *s.CloseAt)
+	if err != nil {
+		return ""
+	}
+	cal, ok := sessionCalendars[s.Market]
+	if !ok {
+		return ""
+	}
+	loc, err := time.LoadLocation(cal.zone)
+	if err != nil {
+		return ""
+	}
+	if cal.zone == "America/New_York" {
+		return at.In(loc).Format("15:04") + " ET"
+	}
+	return at.In(loc).Format("15:04 MST")
 }
 
 // narrativeStories are the evening's stories or the morning's highlights,

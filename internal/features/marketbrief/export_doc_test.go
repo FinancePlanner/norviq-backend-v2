@@ -333,3 +333,99 @@ func TestDrawableMapsHyphenVariants(t *testing.T) {
 		}
 	}
 }
+
+// docLines is BuildDoc's session and missing lines for e.
+func docLines(e *Edition, lang string) (sessions, missing []string) {
+	e.ID = "MI-2026-11-26-C"
+	d := BuildDoc(docBrief(lang), e, "https://www.norviq.org")
+	return d.Sessions, d.Missing
+}
+
+func sameLines(got, want []string) bool {
+	return (len(got) == 0 && len(want) == 0) || reflect.DeepEqual(got, want)
+}
+
+func TestDocSessionsAndMissing(t *testing.T) {
+	mixed := func() *Edition {
+		return &Edition{
+			Quality: EditionQuality{
+				Missing: []string{"quote:^NDX", "series:^NDX", "quote:^FCHI"},
+				MissingReasons: map[string]string{
+					"quote:^NDX": ReasonHoliday, "series:^NDX": ReasonHoliday,
+					"quote:^FCHI": ReasonUnavailable,
+				},
+			},
+			MarketSessions: []MarketSession{{Market: "nyse", Status: SessionClosed, Name: "Thanksgiving Day"}},
+		}
+	}
+	cases := []struct {
+		name          string
+		e             *Edition
+		lang          string
+		sessions, mis []string
+	}{
+		{"en folded", mixed(), LanguageEn, []string{"US stocks — closed: Thanksgiving Day"}, []string{"CAC 40 — quote"}},
+		{"pt folded", mixed(), LanguagePtPT, []string{"Ações dos EUA — encerrado (feriado)"}, []string{"CAC 40 — cotação"}},
+		{"morning, nothing missing", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionClosed, Name: "Thanksgiving Day"},
+			{Market: "sifma", Status: SessionClosed, Name: "Thanksgiving Day"},
+		}}, LanguageEn, []string{"US stocks — closed: Thanksgiving Day", "US bonds — closed: Thanksgiving Day"}, nil},
+		{"name with parentheses", &Edition{MarketSessions: []MarketSession{
+			{Market: "xetra", Status: SessionClosed, Name: "Christmas Eve (settlement day)"},
+		}}, LanguageEn, []string{"Xetra — closed: Christmas Eve (settlement day)"}, nil},
+		{"name with parentheses pt", &Edition{MarketSessions: []MarketSession{
+			{Market: "xetra", Status: SessionClosed, Name: "Christmas Eve (settlement day)"},
+		}}, LanguagePtPT, []string{"Xetra — encerrado (feriado)"}, nil},
+		{"early close with time", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionEarlyClose, Name: "Day after Thanksgiving", CloseAt: strPtr("2026-11-27T18:00:00Z")},
+		}}, LanguageEn, []string{"US stocks — shortened session (closes 13:00 ET)"}, nil},
+		{"early close pt with time", &Edition{MarketSessions: []MarketSession{
+			{Market: "nyse", Status: SessionEarlyClose, Name: "x", CloseAt: strPtr("2026-11-27T18:00:00Z")},
+		}}, LanguagePtPT, []string{"Ações dos EUA — sessão reduzida (fecha às 13:00 ET)"}, nil},
+		{"early close without time", &Edition{MarketSessions: []MarketSession{
+			{Market: "hkex", Status: SessionEarlyClose, Name: "Lunar New Year's Eve"},
+		}}, LanguagePtPT, []string{"Hong Kong — sessão reduzida"}, nil},
+		{"regular day", &Edition{Quality: EditionQuality{Missing: []string{"quote:^HSI"}}}, LanguageEn, nil, []string{"Hang Seng — quote"}},
+	}
+	for _, c := range cases {
+		sessions, missing := docLines(c.e, c.lang)
+		if !sameLines(sessions, c.sessions) {
+			t.Errorf("%s: sessions %q, want %q", c.name, sessions, c.sessions)
+		}
+		if !sameLines(missing, c.mis) {
+			t.Errorf("%s: missing %q, want %q", c.name, missing, c.mis)
+		}
+		if c.lang == LanguagePtPT {
+			for _, g := range append(sessions, missing...) {
+				if strings.Contains(g, "Thanksgiving") || strings.Contains(g, "Christmas") {
+					t.Errorf("%s: English holiday name leaked: %q", c.name, g)
+				}
+			}
+		}
+	}
+}
+
+// On the 11-27 Close every US row and the chart are there: the half day is
+// a market session, not something missing from the edition.
+func TestDocHalfDayCloseSessionsAreNotMissing(t *testing.T) {
+	for lang, want := range map[string]struct{ sessions, missing []string }{
+		LanguageEn: {
+			[]string{"US stocks — shortened session (closes 13:00 ET)", "US bonds — shortened session (closes 14:00 ET)"},
+			[]string{"Dow Jones — intraday chart", "Hang Seng — quote"},
+		},
+		LanguagePtPT: {
+			[]string{"Ações dos EUA — sessão reduzida (fecha às 13:00 ET)", "Obrigações dos EUA — sessão reduzida (fecha às 14:00 ET)"},
+			[]string{"Dow Jones — gráfico intradiário", "Hang Seng — cotação"},
+		},
+	} {
+		e := docEdition()
+		e.MarketSessions = sessionsFor(SlotEvening, "2026-11-27")
+		d := BuildDoc(docBrief(lang), e, "https://www.norviq.org")
+		if !reflect.DeepEqual(d.Sessions, want.sessions) {
+			t.Errorf("%s: sessions %q, want %q", lang, d.Sessions, want.sessions)
+		}
+		if !reflect.DeepEqual(d.Missing, want.missing) {
+			t.Errorf("%s: missing %q, want %q", lang, d.Missing, want.missing)
+		}
+	}
+}

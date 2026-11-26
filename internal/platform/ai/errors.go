@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 
 	"norviq-api/internal/httpx"
@@ -96,21 +97,30 @@ func statusLabel(err error) string {
 	return "transport"
 }
 
-// ErrorClass is a short, log-safe class for a failed call, from
-// statusLabel: "200_no_usable_output", "402_out_of_credits", "401_auth" or
-// "403_auth", "429_rate_limited", another status code, or Vapor's label for
-// a canceled context. Anything else is "error". It never carries the
-// error's text.
+// ErrorClass is a short class for a failed call, safe to log and to
+// publish: "429_rate_limited", "provider_unavailable" (a rejected key or an
+// unfunded account, which a public record must not tell apart), another
+// upstream status code, "200_no_usable_output", "timeout", or Vapor's label
+// for a canceled context. Anything else is "error". It never carries the
+// error's text. statusLabel keeps the detail for the logs and alerts.
 func ErrorClass(err error) string {
 	if err == nil {
 		return ""
 	}
-	// statusLabel's catch-all is "transport", which would also name errors
-	// that never reached a provider.
-	if label := statusLabel(err); label != "transport" {
+	switch label := statusLabel(err); label {
+	case "401_auth", "403_auth", "402_out_of_credits":
+		return "provider_unavailable"
+	case "transport":
+		// statusLabel's catch-all, which also names errors that never
+		// reached a provider.
+		var netErr net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+			return "timeout"
+		}
+		return "error"
+	default:
 		return label
 	}
-	return "error"
 }
 
 func errNoResult() error {

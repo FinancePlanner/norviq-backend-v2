@@ -15707,11 +15707,16 @@ components:
                     example: 429_rate_limited
                     description: >-
                       Why a failed attempt failed, as a class and never the
-                      provider's message: `200_no_usable_output`,
-                      `402_out_of_credits`, `401_auth`, `403_auth`,
-                      `429_rate_limited`, another HTTP status code, `cancelled`,
-                      `unparseable_draft`, `too_few_items` or `error`. Absent
-                      when the attempt succeeded.
+                      provider's message. One of `429_rate_limited`,
+                      `provider_unavailable` (the provider rejected the key or
+                      the account is out of credit; which one is not
+                      published), `timeout`, `cancelled`, `200_no_usable_output`
+                      (a 200 with nothing usable, including a web search that
+                      found nothing), `unparseable_draft`, `too_few_items`, or
+                      `error` for anything else. A bare HTTP status code (such
+                      as `500` or `503`) is any other non-2xx answer from the
+                      provider, or `200` when Claude refused. Absent when the
+                      attempt succeeded.
                   durationMs: { type: integer, format: int64, minimum: 0 }
                 required: [model, outcome, durationMs]
             webSearches: { type: integer, minimum: 0, description: 'Billed web searches of the winning attempt; absent when its provider reports no count' }

@@ -810,7 +810,7 @@ func TestProvenanceClassifiesDraftFailures(t *testing.T) {
 		&tooFewItemsError{Language: "en"}:        "too_few_items",
 		fmt.Errorf("x: %w", &tooFewItemsError{}): "too_few_items",
 		errors.New("payment required"):           "error",
-		&ai.UpstreamError{Status: 402}:           "402_out_of_credits",
+		&ai.UpstreamError{Status: 402}:           "provider_unavailable",
 	} {
 		if got := attemptErrorClass(err); got != want {
 			t.Errorf("attemptErrorClass(%v) = %q, want %q", err, got, want)

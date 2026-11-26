@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -352,6 +353,63 @@ func TestEveningSeriesEndsAtSessionClose(t *testing.T) {
 		if pct := (last.Value/q.PreviousClose - 1) * 100; pct != q.ChangePercent() {
 			t.Errorf("%s legend %v scorecard %v", q.Symbol, pct, q.ChangePercent())
 		}
+	}
+}
+
+// The real ^GSPC session of 25 Nov: its last bar is stamped 16:00 ET, the
+// quote 16:32 ET. The series ends once at the close, on the quote's price.
+func TestCloseSeriesAgainstRealGSPCSession(t *testing.T) {
+	raw, err := os.ReadFile("../../platform/yahoochart/testdata/intraday_1d_5m_GSPC_close_2026-11-25.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := yahoochart.ParseIntraday(raw, yahoochart.IntradayInterval)
+	if err != nil || d == nil {
+		t.Fatalf("%v %v", d, err)
+	}
+	var env struct {
+		Chart struct {
+			Result []struct {
+				Meta struct {
+					RegularMarketPrice float64 `json:"regularMarketPrice"`
+					ChartPreviousClose float64 `json:"chartPreviousClose"`
+				} `json:"meta"`
+			} `json:"result"`
+		} `json:"chart"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil || len(env.Chart.Result) != 1 {
+		t.Fatalf("meta: %v", err)
+	}
+	meta := env.Chart.Result[0].Meta
+	q := yahoochart.Quote{
+		Symbol: "^GSPC", Price: meta.RegularMarketPrice, PreviousClose: meta.ChartPreviousClose,
+		MarketTime: time.Date(2026, 11, 25, 21, 32, 6, 0, time.UTC),
+	}
+	if q.Price != 7182.78 || q.PreviousClose != 7201.09 {
+		t.Fatalf("fixture meta %+v", meta)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	closeAt := time.Date(2026, 11, 25, 16, 0, 0, 0, ny)
+	at := time.Date(2026, 11, 25, 22, 31, 0, 0, time.UTC)
+	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^GSPC": d}}
+	s := (&LLMGenerator{Intraday: f}).series(context.Background(), Due{TradingDate: "2026-11-25", Slot: SlotEvening}, at, []yahoochart.Quote{q})["^GSPC"]
+	if s == nil {
+		t.Fatal("dropped")
+	}
+	if last := s.Last(); !last.Time.Equal(closeAt) || last.Value != q.Price {
+		t.Fatalf("last %v %v, want %v %v", last.Time.In(ny), last.Value, closeAt, q.Price)
+	}
+	atClose := 0
+	for _, p := range s.Points {
+		if p.Time.After(closeAt) {
+			t.Errorf("point %v after the close", p.Time.In(ny))
+		}
+		if p.Time.Equal(closeAt) {
+			atClose++
+		}
+	}
+	if atClose != 1 {
+		t.Fatalf("%d points at 16:00 ET, want 1", atClose)
 	}
 }
 

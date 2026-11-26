@@ -132,3 +132,20 @@ func TestParseIntradayReadsSessionEnd(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 }
+
+// A real ^GSPC range=1d interval=5m response after the 25 Nov close: 79 bars,
+// 09:30..16:00 ET, regularMarketTime 16:32 ET.
+func TestParseIntradayCashSessionEnd(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/intraday_1d_5m_GSPC_close_2026-11-25.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseIntraday(fixture, IntradayInterval)
+	if err != nil || d == nil {
+		t.Fatalf("%v %v", d, err)
+	}
+	ny, _ := time.LoadLocation("America/New_York")
+	if want := time.Date(2026, 11, 25, 16, 0, 0, 0, ny); !d.SessionEnd.Equal(want) {
+		t.Fatalf("session end %v, want %v", d.SessionEnd.In(ny), want)
+	}
+}

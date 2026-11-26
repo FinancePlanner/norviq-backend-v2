@@ -26,8 +26,8 @@ type GeneratedBrief struct {
 	// from generators that predate it (test fakes).
 	Edition *Edition
 
-	// dropped counts, per language, the items the validator rejected, and
-	// usage is the writing reply's (nil when its client reports none). Both
+	// dropped counts, per language, the items removed because a figure was
+	// not in the data the model was given, and usage is the writing reply's (nil when its client reports none). Both
 	// feed Edition.Provenance.
 	dropped map[string]int
 	usage   *ai.Usage

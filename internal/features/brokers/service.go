@@ -244,7 +244,7 @@ func (s *service) resolveListForConnect(ctx context.Context, requested *string, 
 // requireLiveConnect is the single place that refuses a live IBKR connection
 // when the shared gateway account has not been opted into (C12).
 func (s *service) requireLiveConnect() error {
-	if s.connectMode == connectDisabled {
+	if s.connectMode != connectGateway && s.connectMode != connectOAuth2 {
 		return httpx.Abort(http.StatusServiceUnavailable, liveConnectUnavailable)
 	}
 	return nil
@@ -338,6 +338,10 @@ func (s *service) handleIBKRCallback(ctx context.Context, r *http.Request, flowI
 	if err := s.q().MarkFlowUsed(ctx, brokersdb.MarkFlowUsedParams{ID: flow.ID, Now: &now}); err != nil {
 		return "", err
 	}
+	// A refused callback writes no connection row at all.
+	if err := s.requireLiveConnect(); err != nil {
+		return brokerAppRedirectURL(flow.RedirectUri, "error", errorReason(err)), nil
+	}
 	reason, err := s.modeConflict(ctx, modeGateway, flow.UserID)
 	if err != nil {
 		return "", err
@@ -370,6 +374,11 @@ func (s *service) connectFromCallback(ctx context.Context, r *http.Request, flow
 	callback, err := brokerCallbackURL(r)
 	if err != nil {
 		return err
+	}
+	if !s.oauthOn {
+		if err := s.requireSharedGateway(); err != nil {
+			return err
+		}
 	}
 	client := s.gateway
 	var access, refresh *string

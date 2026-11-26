@@ -651,7 +651,10 @@ func TestGeneratorClaudeWebFirstThenOnline(t *testing.T) {
 
 func TestSystemPromptSessionsRule(t *testing.T) {
 	for _, want := range []string{
-		"9. FACTS.sessions lists markets that are closed or on a shortened session today.",
+		"9. FACTS.sessions lists markets that are closed or on a shortened session today:",
+		"NQ=F and ES=F are futures",
+		"Never state trading hours",
+		"today's closed or shortened markets (sessions)",
 		"25 minutes after the European open",
 	} {
 		if !strings.Contains(systemPrompt, want) {

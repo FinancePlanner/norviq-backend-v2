@@ -127,22 +127,29 @@ type instrumentMeta struct {
 	// for the charted cash indices: their series end there when Yahoo does
 	// not report the session's end.
 	closeHour, closeMinute int
+	// market is the key of the instrument's own session calendar in
+	// sessions.go ("" when none is sourced).
+	market string
+	// contextMarket is the calendar that explains a futures contract's
+	// underlying cash session (nyse for NQ=F and ES=F). Futures trade
+	// through most cash holidays, so it is context, not their own session.
+	contextMarket string
 }
 
 var instrumentMetas = map[string]instrumentMeta{
-	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30},
-	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0},
-	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0},
-	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
-	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0},
-	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0},
-	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0},
-	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0},
-	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0},
+	"^GDAXI":    {AssetIndex, "DE", UnitPoints, 2, "Europe/Berlin", 17, 30, "xetra", ""},
+	"^FCHI":     {AssetIndex, "FR", UnitPoints, 2, "", 0, 0, "euronext_paris", ""},
+	"^STOXX50E": {AssetIndex, "EU", UnitPoints, 2, "", 0, 0, "", ""},
+	"NQ=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0, "", "nyse"},
+	"ES=F":      {AssetFuture, "US", UnitPoints, 2, "America/New_York", 0, 0, "", "nyse"},
+	"^NDX":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^GSPC":     {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^DJI":      {AssetIndex, "US", UnitPoints, 2, "America/New_York", 16, 0, "nyse", ""},
+	"^N225":     {AssetIndex, "JP", UnitPoints, 2, "", 0, 0, "jpx", ""},
+	"^HSI":      {AssetIndex, "HK", UnitPoints, 2, "", 0, 0, "hkex", ""},
+	"BZ=F":      {AssetCommodity, "", UnitUSDBbl, 2, "", 0, 0, "", ""},
 	// ^TNX's price is the yield in percent (4.91 means 4.91%).
-	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0},
+	"^TNX": {AssetRate, "US", UnitPercent, 3, "", 0, 0, "sifma", ""},
 }
 
 // futuresReopen is the hour (New York) CME equity futures reopen each day.

@@ -341,6 +341,20 @@ func (q *Queries) LatestFxRate(ctx context.Context, arg LatestFxRateParams) (Lat
 	return i, err
 }
 
+const latestKnownBarCurrency = `-- name: LatestKnownBarCurrency :one
+SELECT currency FROM market_price_bars
+WHERE instrument_key = $1 AND currency <> ''
+ORDER BY date DESC LIMIT 1
+`
+
+// Currency of the newest stored bar with a non-empty currency; no rows when none.
+func (q *Queries) LatestKnownBarCurrency(ctx context.Context, instrumentKey string) (string, error) {
+	row := q.db.QueryRow(ctx, latestKnownBarCurrency, instrumentKey)
+	var currency string
+	err := row.Scan(&currency)
+	return currency, err
+}
+
 const listPriceHistory = `-- name: ListPriceHistory :many
 SELECT symbol, date, open, high, low, close, volume FROM price_history
 WHERE symbol = $1
@@ -637,7 +651,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)
 ON CONFLICT (instrument_key, date) DO UPDATE SET
     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
     close = EXCLUDED.close, adjusted_close = EXCLUDED.adjusted_close,
-    volume = EXCLUDED.volume, currency = EXCLUDED.currency,
+    volume = EXCLUDED.volume,
+    -- A defaulted currency never replaces a known one; a stored '' is unknown.
+    currency = CASE WHEN $10::bool OR market_price_bars.currency = ''
+                    THEN EXCLUDED.currency ELSE market_price_bars.currency END,
     provider = EXCLUDED.provider, updated_at = NOW()
 `
 
@@ -651,6 +668,7 @@ type UpsertMarketPriceBarParams struct {
 	Volume        *float64
 	Currency      string
 	Provider      string
+	CurrencyKnown bool
 }
 
 func (q *Queries) UpsertMarketPriceBar(ctx context.Context, arg UpsertMarketPriceBarParams) error {
@@ -664,6 +682,7 @@ func (q *Queries) UpsertMarketPriceBar(ctx context.Context, arg UpsertMarketPric
 		arg.Volume,
 		arg.Currency,
 		arg.Provider,
+		arg.CurrencyKnown,
 	)
 	return err
 }
@@ -799,7 +818,10 @@ const upsertQuoteCache = `-- name: UpsertQuoteCache :one
 INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, change, percent_change, high, low, open, previous_close, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 ON CONFLICT (provider, symbol) DO UPDATE SET
-    currency = EXCLUDED.currency, price = EXCLUDED.price, as_of = EXCLUDED.as_of,
+    -- A defaulted currency never replaces a known one; a stored '' is unknown.
+    currency = CASE WHEN $13::bool OR quote_cache.currency = ''
+                    THEN EXCLUDED.currency ELSE quote_cache.currency END,
+    price = EXCLUDED.price, as_of = EXCLUDED.as_of,
     change = EXCLUDED.change, percent_change = EXCLUDED.percent_change,
     high = EXCLUDED.high, low = EXCLUDED.low, open = EXCLUDED.open,
     previous_close = EXCLUDED.previous_close, updated_at = now()
@@ -819,6 +841,7 @@ type UpsertQuoteCacheParams struct {
 	Low           *float64
 	Open          *float64
 	PreviousClose *float64
+	CurrencyKnown bool
 }
 
 type UpsertQuoteCacheRow struct {
@@ -850,6 +873,7 @@ func (q *Queries) UpsertQuoteCache(ctx context.Context, arg UpsertQuoteCachePara
 		arg.Low,
 		arg.Open,
 		arg.PreviousClose,
+		arg.CurrencyKnown,
 	)
 	var i UpsertQuoteCacheRow
 	err := row.Scan(

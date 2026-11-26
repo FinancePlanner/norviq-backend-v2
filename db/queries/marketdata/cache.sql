@@ -11,7 +11,10 @@ FROM quote_cache WHERE provider = $1 AND symbol = $2 LIMIT 1;
 INSERT INTO quote_cache (id, provider, symbol, currency, price, as_of, change, percent_change, high, low, open, previous_close, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 ON CONFLICT (provider, symbol) DO UPDATE SET
-    currency = EXCLUDED.currency, price = EXCLUDED.price, as_of = EXCLUDED.as_of,
+    -- A defaulted currency never replaces a known one; a stored '' is unknown.
+    currency = CASE WHEN sqlc.arg(currency_known)::bool OR quote_cache.currency = ''
+                    THEN EXCLUDED.currency ELSE quote_cache.currency END,
+    price = EXCLUDED.price, as_of = EXCLUDED.as_of,
     change = EXCLUDED.change, percent_change = EXCLUDED.percent_change,
     high = EXCLUDED.high, low = EXCLUDED.low, open = EXCLUDED.open,
     previous_close = EXCLUDED.previous_close, updated_at = now()
@@ -122,8 +125,17 @@ VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)
 ON CONFLICT (instrument_key, date) DO UPDATE SET
     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
     close = EXCLUDED.close, adjusted_close = EXCLUDED.adjusted_close,
-    volume = EXCLUDED.volume, currency = EXCLUDED.currency,
+    volume = EXCLUDED.volume,
+    -- A defaulted currency never replaces a known one; a stored '' is unknown.
+    currency = CASE WHEN sqlc.arg(currency_known)::bool OR market_price_bars.currency = ''
+                    THEN EXCLUDED.currency ELSE market_price_bars.currency END,
     provider = EXCLUDED.provider, updated_at = NOW();
+
+-- name: LatestKnownBarCurrency :one
+-- Currency of the newest stored bar with a non-empty currency; no rows when none.
+SELECT currency FROM market_price_bars
+WHERE instrument_key = $1 AND currency <> ''
+ORDER BY date DESC LIMIT 1;
 
 -- name: MarketPriceBarLastDate :many
 -- Zero rows means no coverage (Swift's coverage.lastDate == nil).

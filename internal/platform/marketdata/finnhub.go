@@ -27,6 +27,20 @@ type Finnhub struct {
 
 func (f *Finnhub) Name() string { return "finnhub" }
 
+// profileCurrency is the symbol's currency from /stock/profile2. Known is
+// false when the profile failed or carried no currency; the returned currency
+// is then the default, which the cache must not write over a stored one.
+func (f *Finnhub) profileCurrency(ctx context.Context, symbol string) (string, bool) {
+	profile, err := f.fetchCompanyProfile(ctx, symbol)
+	if err != nil || profile == nil || profile.Currency == nil {
+		return f.DefaultCurrency, false
+	}
+	if c := strings.TrimSpace(*profile.Currency); c != "" {
+		return c, true
+	}
+	return fallbackValue(profile.Currency, f.DefaultCurrency), false
+}
+
 func (f *Finnhub) Quote(ctx context.Context, rawSymbol string) (Quote, error) {
 	symbol, err := normalizeProviderSymbol(rawSymbol)
 	if err != nil {
@@ -36,10 +50,7 @@ func (f *Finnhub) Quote(ctx context.Context, rawSymbol string) (Quote, error) {
 	if err := f.fetchJSON(ctx, "/quote", [][2]string{{"symbol", symbol}}, &payload); err != nil {
 		return Quote{}, err
 	}
-	currency := f.DefaultCurrency
-	if profile, err := f.fetchCompanyProfile(ctx, symbol); err == nil && profile != nil && profile.Currency != nil {
-		currency = *profile.Currency
-	}
+	currency, currencyKnown := f.profileCurrency(ctx, symbol)
 	price := payload.CurrentPrice
 	if price == nil {
 		price = payload.PreviousClose
@@ -60,7 +71,8 @@ func (f *Finnhub) Quote(ctx context.Context, rawSymbol string) (Quote, error) {
 		Low:           payload.Low,
 		Open:          payload.Open,
 		PreviousClose: payload.PreviousClose,
-		Currency:      fallbackValue(&currency, f.DefaultCurrency),
+		Currency:      currency,
+		CurrencyKnown: currencyKnown,
 		AsOf:          asOf,
 	}, nil
 }
@@ -85,15 +97,12 @@ func (f *Finnhub) History(ctx context.Context, rawSymbol string, from, to *time.
 		{"from", strconv.FormatInt(effectiveFrom.Unix(), 10)},
 		{"to", strconv.FormatInt(effectiveTo.Unix(), 10)},
 	}, &payload)
-	currency := f.DefaultCurrency
-	if profile, err := f.fetchCompanyProfile(ctx, symbol); err == nil && profile != nil && profile.Currency != nil {
-		currency = *profile.Currency
-	}
+	currency, currencyKnown := f.profileCurrency(ctx, symbol)
 	if fetchErr != nil {
 		f.logger().Warn("Finnhub history request failed. Falling back to empty history array.", "symbol", symbol, "error", fetchErr)
-		return History{Symbol: symbol, Currency: currency, Bars: []PriceBar{}}, nil
+		return History{Symbol: symbol, Currency: currency, CurrencyKnown: currencyKnown, Bars: []PriceBar{}}, nil
 	}
-	return f.mapHistory(symbol, &payload, currency), nil
+	return f.mapHistory(symbol, &payload, currency, currencyKnown), nil
 }
 
 func (f *Finnhub) Search(ctx context.Context, rawQuery string) ([]SearchResult, error) {
@@ -202,10 +211,10 @@ func (f *Finnhub) logger() *slog.Logger {
 	return slog.Default()
 }
 
-func (f *Finnhub) mapHistory(symbol string, p *finnhubCandlePayload, currency string) History {
+func (f *Finnhub) mapHistory(symbol string, p *finnhubCandlePayload, currency string, known bool) History {
 	cur := fallbackValue(&currency, f.DefaultCurrency)
 	if p.Status != nil && strings.EqualFold(*p.Status, "no_data") {
-		return History{Symbol: symbol, Currency: cur, Bars: []PriceBar{}}
+		return History{Symbol: symbol, Currency: cur, CurrencyKnown: known, Bars: []PriceBar{}}
 	}
 	count := min(len(p.Open), len(p.High), len(p.Low), len(p.Close), len(p.Timestamps))
 	bars := make([]PriceBar, 0, count)
@@ -220,7 +229,7 @@ func (f *Finnhub) mapHistory(symbol string, p *finnhubCandlePayload, currency st
 		})
 	}
 	sort.SliceStable(bars, func(a, b int) bool { return bars[a].Date.Before(bars[b].Date) })
-	return History{Symbol: symbol, Currency: cur, Bars: bars}
+	return History{Symbol: symbol, Currency: cur, CurrencyKnown: known, Bars: bars}
 }
 
 func (f *Finnhub) fetchCompanyProfile(ctx context.Context, symbol string) (*finnhubCompanyProfilePayload, error) {

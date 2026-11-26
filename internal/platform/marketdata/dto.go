@@ -66,6 +66,9 @@ type HistoryResponse struct {
 	Symbol   string             `json:"symbol"`
 	Currency string             `json:"currency"`
 	Bars     []PriceBarResponse `json:"bars"`
+	// CurrencyKnown carries Quote/History.CurrencyKnown to in-process callers
+	// (the ingestion job); it is not part of the wire shape.
+	CurrencyKnown bool `json:"-"`
 }
 
 // SearchResultResponse is one GET /v1/market/search row.

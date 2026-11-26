@@ -232,7 +232,7 @@ func (s *Service) fetchQuote(ctx context.Context, symbol, providerName string, e
 		return QuoteResponse{}, QuoteUnavailableError(symbol)
 	}
 	saved, err := s.Q.UpsertQuoteCache(ctx, marketdatadb.UpsertQuoteCacheParams{
-		ID: uuid.New(), Provider: providerName, Symbol: fresh.Symbol, Currency: fresh.Currency,
+		ID: uuid.New(), Provider: providerName, Symbol: fresh.Symbol, Currency: fresh.Currency, CurrencyKnown: fresh.CurrencyKnown,
 		Price: fresh.Price, AsOf: fresh.AsOf, Change: fresh.Change, PercentChange: fresh.PercentChange,
 		High: fresh.High, Low: fresh.Low, Open: fresh.Open, PreviousClose: fresh.PreviousClose,
 	})
@@ -273,7 +273,7 @@ func (s *Service) fmpFallbackQuote(ctx context.Context, symbol string) *Quote {
 	mapped := Quote{
 		Symbol: symbol, Price: match.Price, Change: ptr(match.Change), PercentChange: ptr(match.ChangePercentage),
 		High: match.DayHigh, Low: match.DayLow, Open: match.Open, PreviousClose: match.PreviousClose,
-		Currency: s.Config.DefaultCurrency, AsOf: asOf,
+		Currency: s.Config.DefaultCurrency, CurrencyKnown: false, AsOf: asOf,
 	}
 	if IsEmptyQuote(mapped) {
 		return nil
@@ -431,7 +431,7 @@ func (s *Service) fetchAndStoreHistory(ctx context.Context, symbol string, from,
 	if err != nil {
 		return HistoryResponse{}, err
 	}
-	if err := s.upsertHistoryBars(ctx, symbol, fresh.Currency, s.Provider.Name(), fresh.Bars); err != nil {
+	if err := s.upsertHistoryBars(ctx, symbol, fresh.Currency, s.Provider.Name(), fresh.CurrencyKnown, fresh.Bars); err != nil {
 		return HistoryResponse{}, err
 	}
 	merged, err := s.loadCachedHistory(ctx, symbol, from, to)
@@ -500,18 +500,18 @@ func (s *Service) FetchAndStoreProviderHistory(ctx context.Context, rawSymbol st
 	}
 	// The ingestion job anchors on market_price_bars, so unlike the request
 	// path a failed write here must fail the call.
-	if err := s.UpsertMarketPriceBars(ctx, symbol, fresh.Currency, s.Provider.Name(), priceBarsFromProvider(fresh.Bars)); err != nil {
+	if err := s.UpsertMarketPriceBars(ctx, symbol, fresh.Currency, s.Provider.Name(), fresh.CurrencyKnown, priceBarsFromProvider(fresh.Bars)); err != nil {
 		return HistoryResponse{}, err
 	}
-	return HistoryResponse{Symbol: symbol, Currency: fresh.Currency, Bars: priceBarsFromProvider(fresh.Bars)}, nil
+	return HistoryResponse{Symbol: symbol, Currency: fresh.Currency, CurrencyKnown: fresh.CurrencyKnown, Bars: priceBarsFromProvider(fresh.Bars)}, nil
 }
 
-func (s *Service) upsertHistoryBars(ctx context.Context, symbol, currency, provider string, bars []PriceBar) error {
+func (s *Service) upsertHistoryBars(ctx context.Context, symbol, currency, provider string, currencyKnown bool, bars []PriceBar) error {
 	if err := s.upsertPriceHistory(ctx, symbol, bars); err != nil {
 		return err
 	}
 	// Best-effort dual-write into the canonical scenario store.
-	if err := s.UpsertMarketPriceBars(ctx, symbol, currency, provider, priceBarsFromProvider(bars)); err != nil {
+	if err := s.UpsertMarketPriceBars(ctx, symbol, currency, provider, currencyKnown, priceBarsFromProvider(bars)); err != nil {
 		s.logger().Warn("market history canonical dual-write failed", "symbol", symbol, "error", err)
 	}
 	return nil
@@ -533,8 +533,22 @@ func (s *Service) upsertPriceHistory(ctx context.Context, symbol string, bars []
 	return nil
 }
 
-// UpsertMarketPriceBars is MarketPriceBarRepository.upsert.
-func (s *Service) UpsertMarketPriceBars(ctx context.Context, instrumentKey, currency, provider string, bars []PriceBarResponse) error {
+// UpsertMarketPriceBars is MarketPriceBarRepository.upsert. When currencyKnown
+// is false the currency is a default: the instrument's newest known stored
+// currency is used instead when there is one, and an existing bar's currency
+// is never replaced by it.
+func (s *Service) UpsertMarketPriceBars(ctx context.Context, instrumentKey, currency, provider string, currencyKnown bool, bars []PriceBarResponse) error {
+	if !currencyKnown && len(bars) > 0 {
+		// A defaulted currency inherits the instrument's newest known bar
+		// currency, so a new date never lands with a mixed label.
+		stored, err := s.Q.LatestKnownBarCurrency(ctx, strings.ToUpper(instrumentKey))
+		switch {
+		case err == nil:
+			currency = stored
+		case !noRows(err):
+			return err
+		}
+	}
 	for _, b := range bars {
 		day, err := time.Parse("2006-01-02", b.Date)
 		if err != nil {
@@ -547,7 +561,7 @@ func (s *Service) UpsertMarketPriceBars(ctx context.Context, instrumentKey, curr
 		if err := s.Q.UpsertMarketPriceBar(ctx, marketdatadb.UpsertMarketPriceBarParams{
 			InstrumentKey: strings.ToUpper(instrumentKey), Date: day,
 			Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: vol,
-			Currency: strings.ToUpper(currency), Provider: provider,
+			Currency: strings.ToUpper(currency), CurrencyKnown: currencyKnown, Provider: provider,
 		}); err != nil {
 			return err
 		}

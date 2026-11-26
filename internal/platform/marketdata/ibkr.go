@@ -58,11 +58,14 @@ func (p *IBKR) Quote(ctx context.Context, rawSymbol string) (Quote, error) {
 	if ms := row.double("_updated"); ms != nil {
 		asOf = timeFromUnixFloat(*ms / 1000)
 	}
-	currency := inst.Currency
+	// inst.Currency can itself be the search default, so only the snapshot's
+	// own currency field counts as the provider supplying it.
+	currency, known := inst.Currency, false
 	if c := row.str("7059"); c != nil {
 		currency = *c
+		known = strings.TrimSpace(*c) != ""
 	}
-	return Quote{Symbol: symbol, Price: *price, Currency: currency, AsOf: asOf}, nil
+	return Quote{Symbol: symbol, Price: *price, Currency: currency, CurrencyKnown: known, AsOf: asOf}, nil
 }
 
 func (p *IBKR) History(ctx context.Context, rawSymbol string, from, to *time.Time) (History, error) {
@@ -103,11 +106,13 @@ func (p *IBKR) History(ctx context.Context, rawSymbol string, from, to *time.Tim
 		}
 	}
 	sort.SliceStable(bars, func(a, b int) bool { return bars[a].Date.Before(bars[b].Date) })
-	currency := inst.Currency
+	// Same rule as Quote: inst.Currency may be the search default.
+	currency, known := inst.Currency, false
 	if payload.Currency != nil {
 		currency = *payload.Currency
+		known = strings.TrimSpace(*payload.Currency) != ""
 	}
-	return History{Symbol: symbol, Currency: currency, Bars: bars}, nil
+	return History{Symbol: symbol, Currency: currency, CurrencyKnown: known, Bars: bars}, nil
 }
 
 func (p *IBKR) Search(ctx context.Context, rawQuery string) ([]SearchResult, error) {

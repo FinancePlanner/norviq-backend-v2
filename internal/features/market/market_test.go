@@ -424,7 +424,7 @@ func seedBars(t *testing.T, svc *marketdata.Service, closes map[string]float64) 
 	for d, c := range closes {
 		bars = append(bars, marketdata.PriceBarResponse{Date: d, Open: c, High: c, Low: c, Close: c})
 	}
-	if err := svc.UpsertMarketPriceBars(context.Background(), "NVDA", "USD", "market", bars); err != nil {
+	if err := svc.UpsertMarketPriceBars(context.Background(), "NVDA", "USD", "market", true, bars); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 }
@@ -947,5 +947,78 @@ func TestSweepSkipsAutobuyTickersWhenCadenceOff(t *testing.T) {
 	}
 	if got := storedCloses(t, app, "VWCE"); len(got) != 0 {
 		t.Fatalf("VWCE ingested with Cadence off: %v", got)
+	}
+}
+
+// fmpFallbackApp wires a Finnhub stub that has no candles (so ingestion falls
+// back to FMP end of day data) and an FMP stub serving two bars.
+func fmpFallbackApp(t *testing.T, profileStatus int, profileBody string) (*testutil.App, *marketdata.Service) {
+	t.Helper()
+	t.Setenv("CADENCE_ENABLED", "true")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/stock/candle":
+			_, _ = w.Write([]byte(`{"s":"no_data"}`))
+		case "/stock/profile2":
+			w.WriteHeader(profileStatus)
+			_, _ = w.Write([]byte(profileBody))
+		case "/stable/historical-price-eod/light":
+			_, _ = w.Write([]byte(`[{"symbol":"NOVO-B.CO","date":"2024-06-06","price":600},{"symbol":"NOVO-B.CO","date":"2024-06-07","price":610}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(up.Close)
+	app := testutil.NewApp(t, nil)
+	svc := marketdata.NewFromSettings(
+		marketdata.Settings{MarketProvider: "finnhub", FinnhubAPIKey: "test", FinnhubBaseURL: up.URL, FMPAPIKey: "test", FMPBaseURL: up.URL},
+		marketdatadb.New(app.Deps.DB), nil, &http.Client{Timeout: 5 * time.Second}, slog.New(slog.DiscardHandler))
+	svc.Cache = cache.NewMemory()
+	svc.FMP.Cache = svc.Cache
+	return app, svc
+}
+
+func barCurrencies(t *testing.T, app *testutil.App, symbol string) map[string]string {
+	t.Helper()
+	rows, err := app.Deps.DB.Query(context.Background(),
+		`SELECT to_char(date, 'YYYY-MM-DD'), currency FROM market_price_bars WHERE instrument_key = $1`, symbol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var d, c string
+		if err := rows.Scan(&d, &c); err != nil {
+			t.Fatal(err)
+		}
+		out[d] = c
+	}
+	return out
+}
+
+func TestSweepFMPFallbackBarsCarryKnownPrimaryCurrency(t *testing.T) {
+	app, svc := fmpFallbackApp(t, 200, `{"currency":"DKK"}`)
+	addWatchlistSymbol(t, app, "NOVO-B.CO")
+	// A wrong label stored earlier is corrected by the known currency.
+	if err := svc.UpsertMarketPriceBars(context.Background(), "NOVO-B.CO", "USD", "fmp", true,
+		[]marketdata.PriceBarResponse{{Date: "2024-06-06", Open: 1, High: 1, Low: 1, Close: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	market.Sweep(context.Background(), app.Deps, svc)
+	got := barCurrencies(t, app, "NOVO-B.CO")
+	if len(got) != 2 || got["2024-06-06"] != "DKK" || got["2024-06-07"] != "DKK" {
+		t.Fatalf("bar currencies %v, want both DKK", got)
+	}
+}
+
+func TestSweepFMPFallbackFirstDefaultedHistoryStoresDefault(t *testing.T) {
+	app, svc := fmpFallbackApp(t, 429, `rate limited`)
+	addWatchlistSymbol(t, app, "NEWCO")
+	market.Sweep(context.Background(), app.Deps, svc)
+	got := barCurrencies(t, app, "NEWCO")
+	if len(got) != 2 || got["2024-06-06"] != "USD" || got["2024-06-07"] != "USD" {
+		t.Fatalf("bar currencies %v, want both USD", got)
 	}
 }

@@ -210,6 +210,12 @@ func TestRunECBTickWarnsWhenKnownCurrencyGets404(t *testing.T) {
 		switch {
 		case rec["level"] == "WARN" && rec["msg"] == "fx_ecb_daily no new fixings" && rec["currency"] == "DKK":
 			warnDKK++
+			if st, ok := rec["status"].(float64); !ok || st != 404 {
+				t.Errorf("DKK warn status = %v, want 404", rec["status"])
+			}
+			if l, ok := rec["latest"].(string); !ok || l == "" {
+				t.Errorf("DKK warn latest = %v, want non-empty", rec["latest"])
+			}
 		case rec["level"] == "INFO" && rec["msg"] == "fx_ecb_daily unsupported currency" && rec["currency"] == "TWD":
 			infoTWD++
 		case rec["level"] == "INFO" && rec["msg"] == "fx_ecb_daily unsupported currency" && rec["currency"] == "DKK":

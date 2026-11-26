@@ -438,6 +438,22 @@ func TestCashSeriesSessionEnd(t *testing.T) {
 			t.Fatalf("last %v %v", last.Time.In(ny), last.Value)
 		}
 	})
+	t.Run("verified close beats a later reported end", func(t *testing.T) {
+		// Yahoo's regular.end wrongly says 16:00 on the NYSE half day; NYSE
+		// published 13:00. From 16:00 the 14:15 quote trails the 12:55 bar by
+		// 80 minutes and the series would be dropped.
+		at := time.Date(2026, 11, 27, 22, 31, 0, 0, time.UTC)
+		halfClose := time.Date(2026, 11, 27, 13, 0, 0, 0, ny)
+		d := session("^NDX", time.Date(2026, 11, 27, 9, 30, 0, 0, ny), time.Date(2026, 11, 27, 12, 55, 0, 0, ny))
+		d.SessionEnd = time.Date(2026, 11, 27, 16, 0, 0, 0, ny)
+		s := evening(t, at, ndx(time.Date(2026, 11, 27, 14, 15, 0, 0, ny)), d)
+		if s == nil {
+			t.Fatal("dropped")
+		}
+		if last := s.Last(); !last.Time.Equal(halfClose) || last.Value != 25100 {
+			t.Fatalf("last %v %v", last.Time.In(ny), last.Value)
+		}
+	})
 	t.Run("static close without a session end", func(t *testing.T) {
 		at := time.Date(2026, 11, 25, 22, 31, 0, 0, time.UTC)
 		closeAt := time.Date(2026, 11, 25, 16, 0, 0, 0, ny)
@@ -649,20 +665,32 @@ func TestThanksgivingClose(t *testing.T) {
 func TestHalfDaySeriesEndsAtVerifiedClose(t *testing.T) {
 	ny, _ := time.LoadLocation("America/New_York")
 	at := time.Date(2026, 11, 27, 22, 31, 0, 0, time.UTC)
-	q := yahoochart.Quote{Symbol: "^GSPC", Price: 6900, PreviousClose: 6800, MarketTime: time.Date(2026, 11, 27, 13, 20, 0, 0, ny)}
-	d := session("^GSPC", time.Date(2026, 11, 27, 9, 30, 0, 0, ny), time.Date(2026, 11, 27, 12, 55, 0, 0, ny))
-	f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^GSPC": d}}
-	s := (&LLMGenerator{Intraday: f}).series(context.Background(), Due{TradingDate: "2026-11-27", Slot: SlotEvening}, at, []yahoochart.Quote{q})["^GSPC"]
+	// The quote is 14:15 ET, so only the verified 13:00 close keeps the
+	// series: from the static 16:00 close the 12:55 bar trails it by 80
+	// minutes, past maxSeriesGap.
+	series := func(day int) *yahoochart.Intraday {
+		dayAt := time.Date(2026, 11, day, 22, 31, 0, 0, time.UTC)
+		q := yahoochart.Quote{Symbol: "^GSPC", Price: 6900, PreviousClose: 6800, MarketTime: time.Date(2026, 11, day, 14, 15, 0, 0, ny)}
+		d := session("^GSPC", time.Date(2026, 11, day, 9, 30, 0, 0, ny), time.Date(2026, 11, day, 12, 55, 0, 0, ny))
+		f := &fakeIntraday{bars: map[string]*yahoochart.Intraday{"^GSPC": d}}
+		due := Due{TradingDate: dayAt.Format(time.DateOnly), Slot: SlotEvening}
+		return (&LLMGenerator{Intraday: f}).series(context.Background(), due, dayAt, []yahoochart.Quote{q})["^GSPC"]
+	}
+	s := series(27)
 	if s == nil {
 		t.Fatal("dropped")
 	}
 	if last := s.Last(); !last.Time.Equal(time.Date(2026, 11, 27, 13, 0, 0, 0, ny)) || last.Value != 6900 {
 		t.Fatalf("last %v %v", last.Time.In(ny), last.Value)
 	}
-	// Without a verified time the static 16:00 close applies (and the gap rule drops it).
+	// Without a verified time the static 16:00 close applies, and the gap
+	// rule drops the same bars.
 	end, ok := seriesSessionEnd("^GSPC", time.Time{}, time.Date(2026, 11, 25, 9, 30, 0, 0, ny), at)
 	if !ok || !end.Equal(time.Date(2026, 11, 25, 16, 0, 0, 0, ny)) {
 		t.Fatalf("static end %v %v", end, ok)
+	}
+	if s := series(25); s != nil {
+		t.Fatalf("regular day kept a series 80 minutes short: last %v", s.Last().Time.In(ny))
 	}
 }
 

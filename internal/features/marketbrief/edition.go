@@ -193,30 +193,37 @@ func seriesWindowStart(symbol string, at time.Time) (time.Time, bool) {
 	return start, true
 }
 
-// seriesSessionEnd is where a cash index's chart ends at the latest: Yahoo's
-// reported end of the regular session when it is set, after the first bar
-// and not after `at` (it knows half days), otherwise the static close on the
-// first bar's exchange-local date (the verified early-close time for that
-// date, when the calendar has one). False for a future, whose chart ends at
-// its quote, and for a symbol that is not charted.
+// seriesSessionEnd is where a cash index's chart ends at the latest. On a day
+// the calendar has a verified early-close time for (the first bar's
+// exchange-local date), it is that time, or Yahoo's reported end of the
+// regular session when that is earlier: a reported end can never outlast the
+// exchange's own published close. Otherwise it is the reported end, and
+// failing that the static close on that date. A reported end counts when it
+// is set, after the first bar and not after `at`. False for a future, whose
+// chart ends at its quote, and for a symbol that is not charted.
 func seriesSessionEnd(symbol string, reported, firstBar, at time.Time) (time.Time, bool) {
 	meta := instrumentMetas[symbol]
 	if meta.assetClass != AssetIndex || meta.exchangeTZ == "" {
 		return time.Time{}, false
 	}
-	if !reported.IsZero() && reported.After(firstBar) && !reported.After(at) {
-		return reported, true
-	}
 	loc, err := time.LoadLocation(meta.exchangeTZ)
 	if err != nil {
 		return time.Time{}, false
 	}
-	y, m, d := firstBar.In(loc).Date()
-	if ms, ok, _ := sessionOn(meta.market, firstBar.In(loc).Format(time.DateOnly)); ok && ms.CloseAt != nil {
+	validReported := !reported.IsZero() && reported.After(firstBar) && !reported.After(at)
+	local := firstBar.In(loc)
+	if ms, ok, _ := sessionOn(marketOf(symbol), local.Format(time.DateOnly)); ok && ms.CloseAt != nil {
 		if closeAt, err := time.Parse(time.RFC3339, *ms.CloseAt); err == nil {
+			if validReported && reported.Before(closeAt) {
+				return reported, true
+			}
 			return closeAt, true
 		}
 	}
+	if validReported {
+		return reported, true
+	}
+	y, m, d := local.Date()
 	return time.Date(y, m, d, meta.closeHour, meta.closeMinute, 0, 0, loc), true
 }
 
@@ -297,7 +304,7 @@ func buildEdition(due Due, quotes []yahoochart.Quote, dropped map[string]string,
 	// reasonFor says why symbol's row is missing: its own market being shut
 	// beats every other cause.
 	reasonFor := func(symbol, otherwise string) string {
-		if closed[instrumentMetas[symbol].market] {
+		if closed[marketOf(symbol)] {
 			return ReasonHoliday
 		}
 		return otherwise

@@ -154,6 +154,9 @@ func HistoryDiverged(stored, fresh map[string]float64) bool {
 type fetchedBars struct {
 	bars     []marketdata.PriceBarResponse
 	currency string
+	// currencyKnown is the primary provider's flag for currency: the FMP
+	// fallback bars carry that currency, so they carry its certainty too.
+	currencyKnown bool
 	// fallback is set when the bars came from the FMP fallback, which the
 	// service has not stored; primary bars are already in both history tables.
 	fallback string
@@ -168,7 +171,7 @@ func fetchBars(ctx context.Context, svc *marketdata.Service, symbol string, star
 	if err != nil {
 		return fetchedBars{}, err
 	}
-	out := fetchedBars{bars: resp.Bars, currency: resp.Currency}
+	out := fetchedBars{bars: resp.Bars, currency: resp.Currency, currencyKnown: resp.CurrencyKnown}
 	if len(out.bars) == 0 && svc.FMP != nil {
 		points, err := svc.FMP.StockHistoricalEOD(ctx, symbol, &from, &to)
 		if err != nil {
@@ -234,7 +237,7 @@ func ingest(ctx context.Context, d *server.Deps, q *marketdatadb.Queries, svc *m
 		return nil
 	}
 	if got.fallback != "" {
-		if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.fallback, false, got.bars); err != nil {
+		if err := svc.UpsertMarketPriceBars(ctx, symbol, got.currency, got.fallback, got.currencyKnown, got.bars); err != nil {
 			return err
 		}
 	}

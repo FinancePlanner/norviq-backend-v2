@@ -650,3 +650,27 @@ func TestPriceBarsOverwriteEmptyStoredCurrency(t *testing.T) {
 		t.Fatalf("currency %q, want USD", got)
 	}
 }
+
+// The SQL guard itself, without the service-level inheritance lookup that
+// would otherwise rescue the row.
+func TestUpsertMarketPriceBarSQLKeepsKnownCurrencyWhenDefaulted(t *testing.T) {
+	fx := newFixture(t, true, false)
+	ctx := context.Background()
+	day := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	p := marketdatadb.UpsertMarketPriceBarParams{InstrumentKey: "NOVO-B.CO", Date: day, Open: 1, High: 1, Low: 1, Close: 1, Currency: "DKK", CurrencyKnown: true, Provider: "finnhub"}
+	if err := fx.q.UpsertMarketPriceBar(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	p.Currency, p.CurrencyKnown, p.Close = "USD", false, 2
+	if err := fx.q.UpsertMarketPriceBar(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	var cur string
+	var closePx float64
+	if err := fx.pool.QueryRow(ctx, `SELECT currency, close FROM market_price_bars WHERE instrument_key = 'NOVO-B.CO'`).Scan(&cur, &closePx); err != nil {
+		t.Fatal(err)
+	}
+	if cur != "DKK" || closePx != 2 {
+		t.Fatalf("currency %q close %v, want DKK 2", cur, closePx)
+	}
+}

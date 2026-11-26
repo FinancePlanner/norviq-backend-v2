@@ -503,7 +503,7 @@ func (s *Service) FetchAndStoreProviderHistory(ctx context.Context, rawSymbol st
 	if err := s.UpsertMarketPriceBars(ctx, symbol, fresh.Currency, s.Provider.Name(), fresh.CurrencyKnown, priceBarsFromProvider(fresh.Bars)); err != nil {
 		return HistoryResponse{}, err
 	}
-	return HistoryResponse{Symbol: symbol, Currency: fresh.Currency, Bars: priceBarsFromProvider(fresh.Bars)}, nil
+	return HistoryResponse{Symbol: symbol, Currency: fresh.Currency, CurrencyKnown: fresh.CurrencyKnown, Bars: priceBarsFromProvider(fresh.Bars)}, nil
 }
 
 func (s *Service) upsertHistoryBars(ctx context.Context, symbol, currency, provider string, currencyKnown bool, bars []PriceBar) error {

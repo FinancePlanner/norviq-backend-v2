@@ -108,7 +108,8 @@ read-only checks above are recorded.
    as of 2026-11-25). Holdings in such a currency stay in `fxMissing` with the flag on. List
    the currencies from the `unsupported currency` log line of the fxrates job, by code only.
    A currency that already has rows and then returns none logs a Warn
-   (`fx_ecb_daily no new fixings`); treat that as stale rates.
+   (`fx_ecb_daily no new fixings`, status=404 when ECB stops serving a currency already
+   held); treat that as stale rates.
 3. Snapshot step change and cross-screen disagreement (owner decision). Pre-flip snapshot
    rows are raw mixed-currency sums and post-flip rows are converted, so readers of
    snapshots (recaps, achievements, gamification, performance) show a jump for
@@ -119,9 +120,11 @@ read-only checks above are recorded.
 4. Provider quote currency. The quote currency from the provider drives the flag-on rules.
    When Finnhub's profile fetch fails it reports the default currency (`USD`), but a
    defaulted currency no longer overwrites a known one: `quote_cache` and
-   `market_price_bars` keep the stored currency, and only a new row stores the default. The
-   remaining exposure is a symbol whose profile has never succeeded, which is stored as the
-   default currency; check (5) and the listing guard cannot detect that case. Production
+   `market_price_bars` keep the stored currency, and new bar dates written with a defaulted currency inherit the instrument's stored bar
+   currency (the default is used only when none is stored). The remaining exposure is a
+   symbol whose profile has never succeeded, which is stored as the default currency. The
+   listing guard catches a mismatch for holdings with `stocks.currency` set and is blind
+   only for those where it is NULL; check (5) alone cannot detect it. Production
    had 0 London listings on 2026-11-25. Before the flip, for UK users, run check (5) and
    confirm what currency the provider reports for LSE pence quotes (GBp or GBX against GBP).
 5. Deploy with the flag off, confirm `fx_daily_rates` has rows for every currency in use,
